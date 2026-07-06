@@ -11,7 +11,6 @@ Use this environment for the VLA policy learning code and policy server.
 Activate:
 
 ```bash
-cd ~/tianyaoTong/lirongZhuang/robomme_pl_for_zhuang
 source .venv/bin/activate
 ```
 
@@ -51,6 +50,8 @@ python examples/robomme/eval.py ...
 ```
 
 ## Run a eval to observe the response
+
+change line 47-64 of file examples/robimme/eval.py to change the setup
 
 ### Terminal 1 with uv env(openpi)
 

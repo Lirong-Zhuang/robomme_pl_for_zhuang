@@ -45,7 +45,7 @@ class Args:
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
-    only_tasks: str = "PickXtimes" # tasks split by comma
+    only_tasks: str = "SwingXtimes" # tasks split by comma
     exclude_tasks: str = "" # tasks split by comma
 
     # VLM subgoal predictor
@@ -61,6 +61,7 @@ class Args:
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
+    num_episodes: int = 2 # number of episodes to evaluate for each task
 
 
 
@@ -308,7 +309,7 @@ def evaluate(args: Args):
 
             env_runner = EnvRunner(task_name, video_save_dir, max_steps=args.max_steps)
             # num_episodes = env_runner.num_episodes
-            num_episodes = 2
+            num_episodes = args.num_episodes
 
             success_flag = "unknown"
 
