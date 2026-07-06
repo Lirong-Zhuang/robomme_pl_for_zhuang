@@ -36,24 +36,24 @@ class Args:
     obs_horizon: int = 16
     max_steps: int = 1300
     save_dir: str = "runs/evaluation"
-    overwrite: bool = False
+    overwrite: bool = True
 
     use_history: bool = True
-    policy_name: str = "dummy_test"
-    model_seed: int = 42
-    model_ckpt_id: int = 80000
+    policy_name: str = "symbolic-simple-subgoal"
+    model_seed: int = 7
+    model_ckpt_id: int = 79999
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
-    only_tasks: str = "" # tasks split by comma
+    only_tasks: str = "PickXtimes" # tasks split by comma
     exclude_tasks: str = "" # tasks split by comma
 
     # VLM subgoal predictor
     use_oracle: bool = False
-    use_qwenvl: bool = False
+    use_qwenvl: bool = True
     use_memer: bool = False
     use_gemini: bool = False
-    subgoal_type: Optional[str] = None  # [simple_subgoal, grounded_subgoal]
+    subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
     gemini_model_name: str = "gemini-2.5-pro"
     qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal/checkpoint-1400"
     qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
@@ -307,7 +307,8 @@ def evaluate(args: Args):
                 log_dict[task_name] = {}
 
             env_runner = EnvRunner(task_name, video_save_dir, max_steps=args.max_steps)
-            num_episodes = env_runner.num_episodes
+            # num_episodes = env_runner.num_episodes
+            num_episodes = 2
 
             success_flag = "unknown"
 

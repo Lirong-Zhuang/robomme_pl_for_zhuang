@@ -48,13 +48,18 @@ class Args:
     default_prompt: str | None = None
 
     # Port to serve the policy on.
-    port: int = 8000
+    port: int = 8011
     # Record the policy's behavior for debugging.
     record: bool = False
-    seed: int = 42
+    seed: int = 7
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
-    policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
+    policy: Checkpoint = dataclasses.field(
+        default_factory=lambda: Checkpoint(
+            config="mme_vla_suite",
+            dir="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999",
+        )
+    )
 
 
 # Default checkpoints that should be used for each environment.

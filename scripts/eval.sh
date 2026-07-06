@@ -17,11 +17,11 @@
 # set the MODEL_TYPE from the list above according to your needs
 
 #### set your own parameters ####
-MODEL_TYPE="symbolic_groundedSG_oracle"
+MODEL_TYPE="symbolic_simpleSG_qwenvl"
 SEED=7          # model seed for evaluation; change this to use different seeds for multiple runs
 CKPT_ID=79999   # ckpt id for evaluation; change this to use different checkpoints
 GPU_ID_server=0 # gpu id for server; when set, the VLA policy server will run on this GPU
-GPU_ID_client=1 # gpu id for client; when set, the RoboMME environment and/or VLM subgoal predictor will run on this GPU
+GPU_ID_client=0 # gpu id for client; when set, the RoboMME environment and/or VLM subgoal predictor will run on this GPU
 #--------------------------------#
 
 
@@ -100,8 +100,9 @@ if [ $? != 0 ]; then
     
     # Create second window for eval in the same session
     tmux new-window -t $session_name -n "eval"
-    tmux send-keys -t $session_name:eval "micromamba activate robomme" Enter
-    tmux send-keys -t $session_name:eval "CUDA_VISIBLE_DEVICES=$GPU_ID_client python examples/robomme/eval.py --args.model_seed=$SEED --args.port=$PORT --args.policy_name=$MODEL_TYPE --args.model_ckpt_id=$CKPT_ID ${EXTRA_ARGS}; tmux wait-for -S eval-done" Enter
+    # tmux send-keys -t $session_name:eval "micromamba activate robomme" Enter
+    tmux send-keys -t $session_name:eval "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robomme" Enter
+    tmux send-keys -t $session_name:eval "CUDA_VISIBLE_DEVICES=$GPU_ID_client python examples/robomme/eval.py --args.model_seed=$SEED --args.port=$PORT --args.policy_name=$MODEL_TYPE --args.model_ckpt_id=$CKPT_ID ${EXTRA_ARGS} --args.only-tasks=PickXtimes; tmux wait-for -S eval-done" Enter
 
     # Wait for eval to complete, or exit if tmux session is killed
     tmux wait-for eval-done &

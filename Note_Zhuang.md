@@ -50,3 +50,16 @@ python examples/robomme/simple_test.py
 python examples/robomme/eval.py ...
 ```
 
+## Run a eval to observe the response
+
+### Terminal 1 with uv env(openpi)
+
+```bash
+CUDA_VISIBLE_DEVICES=0 uv run scripts/serve_policy.py
+```
+
+### Terminal 2 with conda env(robomme)
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python examples/robomme/eval.py
+```
