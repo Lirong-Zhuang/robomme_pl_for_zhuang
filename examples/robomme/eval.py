@@ -62,6 +62,7 @@ class Args:
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 2 # number of episodes to evaluate for each task
+    episode_ids: str = "" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
 
 
 
@@ -308,12 +309,24 @@ def evaluate(args: Args):
                 log_dict[task_name] = {}
 
             env_runner = EnvRunner(task_name, video_save_dir, max_steps=args.max_steps)
-            # num_episodes = env_runner.num_episodes
-            num_episodes = args.num_episodes
+            if args.episode_ids:
+                episode_ids = [int(value.strip()) for value in args.episode_ids.split(",")]
+                invalid_ids = [
+                    episode_id
+                    for episode_id in episode_ids
+                    if episode_id < 0 or episode_id >= env_runner.num_episodes
+                ]
+                if invalid_ids:
+                    raise ValueError(
+                        f"Invalid episode IDs {invalid_ids} for task {task_name}; "
+                        f"valid range is 0-{env_runner.num_episodes - 1}"
+                    )
+            else:
+                episode_ids = range(args.num_episodes)
 
             success_flag = "unknown"
 
-            for episode_id in range(num_episodes):
+            for episode_id in episode_ids:
                 if str(episode_id) in log_dict[task_name]:
                     print(f"[robomme] episode {episode_id} already evaluated, skipping...")
                     continue
