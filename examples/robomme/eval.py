@@ -39,7 +39,8 @@ class Args:
     overwrite: bool = True
 
     use_history: bool = True
-    policy_name: str = "symbolic-simple-subgoal"
+    # policy_name: str = "symbolic-simple-subgoal"
+    policy_name: str = "symbolic-grounded-subgoal"
     model_seed: int = 7
     model_ckpt_id: int = 79999
 
@@ -62,7 +63,7 @@ class Args:
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 2 # number of episodes to evaluate for each task
-    episode_ids: str = "" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
+    episode_ids: str = "4" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
 
 
 
