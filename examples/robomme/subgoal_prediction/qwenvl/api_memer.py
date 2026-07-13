@@ -27,7 +27,8 @@ class Qwen3VLModelMemER:
         self.engine = PtEngine(
             model_id_or_path='Qwen/Qwen3-VL-4B-Instruct',
             adapters=[adapter_path],
-            attn_impl='flash_attention_2' #'sdpa'
+            # attn_impl='flash_attention_2' #'sdpa'
+            attn_impl='sdpa'
         )
         
         

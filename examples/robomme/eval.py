@@ -46,15 +46,16 @@ class Args:
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
-    only_tasks: str = "SwingXtimes" # tasks split by comma
+    only_tasks: str = "PickXtimes" # tasks split by comma
     exclude_tasks: str = "" # tasks split by comma
 
     # VLM subgoal predictor
-    use_oracle: bool = False
-    use_qwenvl: bool = True
+    use_oracle: bool = True
+    use_qwenvl: bool = False
     use_memer: bool = False
     use_gemini: bool = False
-    subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
+    # subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
+    subgoal_type: Optional[str] = "grounded_subgoal"
     gemini_model_name: str = "gemini-2.5-pro"
     qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal/checkpoint-1400"
     qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
@@ -62,8 +63,8 @@ class Args:
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
-    num_episodes: int = 2 # number of episodes to evaluate for each task
-    episode_ids: str = "4" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
+    num_episodes: int = 10 # number of episodes to evaluate for each task
+    episode_ids: str = "2,3" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
 
 
 
