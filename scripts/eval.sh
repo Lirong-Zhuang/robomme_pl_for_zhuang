@@ -27,14 +27,14 @@ MODEL_TYPE="symbolic_simpleSG_oracle"
 SEED=7
 CKPT_ID=79999
 GPU_ID_SERVER=0
-GPU_ID_CLIENT=1
+GPU_ID_CLIENT=0
 
 # Set PORT=0 to choose a free port automatically.
 HOST="0.0.0.0"
 PORT=0
 
 # Task selection. Comma-separated values are supported.
-ONLY_TASKS="PickXtimes"
+ONLY_TASKS="BinFill"
 EXCLUDE_TASKS=""
 RE_EVAL_TASKS=""
 
@@ -258,6 +258,7 @@ trap cleanup EXIT INT TERM
 echo "Model type:      $REQUESTED_MODEL_TYPE"
 echo "Policy:          $POLICY_NAME"
 echo "Predictor:       $PREDICTOR"
+echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Checkpoint:      $POLICY_DIR"
 echo "Task(s):         ${ONLY_TASKS:-all}"
 echo "Episode ID(s):   ${EPISODE_IDS:-0..$((NUM_EPISODES - 1))}"
@@ -276,7 +277,6 @@ fi
 env "${SERVER_ENV[@]}" uv run scripts/serve_policy.py \
     --seed "$SEED" \
     --port "$PORT" \
-    policy:checkpoint \
     --policy.dir "$POLICY_DIR" \
     --policy.config "$POLICY_CONFIG" \
     >"$SERVER_LOG" 2>&1 &
@@ -305,6 +305,10 @@ echo
 # then runs in the separate RoboMME conda environment in this foreground shell.
 source "$CONDA_INIT"
 conda activate "$CONDA_ENV"
+
+printf 'Evaluation command:\n  CUDA_VISIBLE_DEVICES=%q python examples/robomme/eval.py' "$GPU_ID_CLIENT"
+printf ' %q' "${EVAL_ARGS[@]}"
+printf '\n\n'
 
 CUDA_VISIBLE_DEVICES="$GPU_ID_CLIENT" \
 python examples/robomme/eval.py "${EVAL_ARGS[@]}"

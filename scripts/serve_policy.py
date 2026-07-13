@@ -25,7 +25,7 @@ class Checkpoint:
     # Training config name (e.g., "pi0_aloha_sim").
     config: str
     # Checkpoint directory (e.g., "checkpoints/pi0_aloha_sim/exp/10000").
-    dir: str
+    dir: Path
     
     def __post_init__(self):
         self.dir = Path(self.dir)
