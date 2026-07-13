@@ -46,12 +46,12 @@ class Args:
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
-    only_tasks: str = "PickXtimes" # tasks split by comma
+    only_tasks: str = "BinFill" # tasks split by comma
     exclude_tasks: str = "" # tasks split by comma
 
     # VLM subgoal predictor
-    use_oracle: bool = True
-    use_qwenvl: bool = False
+    use_oracle: bool = False
+    use_qwenvl: bool = True
     use_memer: bool = False
     use_gemini: bool = False
     # subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
@@ -64,7 +64,7 @@ class Args:
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 10 # number of episodes to evaluate for each task
-    episode_ids: str = "2,3" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
+    episode_ids: str = "2" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
 
 
 
