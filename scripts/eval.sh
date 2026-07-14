@@ -22,7 +22,7 @@ set -Eeuo pipefail
 #   perceptual-tokendrop-context, perceptual-tokendrop-modul, perceptual-tokendrop-expert
 #   recurrent-rmt-context, recurrent-rmt-modul, recurrent-rmt-expert
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
-MODEL_TYPE="symbolic_simpleSG_oracle"
+MODEL_TYPE="symbolic_simpleSG_qwenvl"
 
 SEED=7
 CKPT_ID=79999
@@ -61,7 +61,8 @@ MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/chec
 
 # Runtime configuration.
 CONDA_ENV="robomme"
-CONDA_INIT="$HOME/miniconda3/etc/profile.d/conda.sh"
+# CONDA_INIT="$HOME/miniconda3/etc/profile.d/conda.sh"
+CONDA_INIT="/opt/miniconda3/etc/profile.d/conda.sh"
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
 
