@@ -22,7 +22,7 @@ set -Eeuo pipefail
 #   perceptual-tokendrop-context, perceptual-tokendrop-modul, perceptual-tokendrop-expert
 #   recurrent-rmt-context, recurrent-rmt-modul, recurrent-rmt-expert
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
-MODEL_TYPE="symbolic_simpleSG_qwenvl"
+MODEL_TYPE="MemER"
 
 SEED=7
 CKPT_ID=79999
@@ -48,6 +48,11 @@ MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
 OVERWRITE=true
+
+# Keep MemER's per-step images after an episode finishes. MemER keyframes are
+# references to a subset of these images, so retaining keyframes requires
+# retaining the episode image directory. This is a no-op for non-MemER models.
+SAVE_MEMER_KF=true
 
 # "auto" disables history only for pi05_baseline and enables it otherwise.
 # It can also be set explicitly to "true" or "false".
@@ -220,6 +225,7 @@ EVAL_ARGS=(
 
 EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
 EVAL_ARGS+=("$(bool_arg "$USE_HISTORY" --args.use-history --args.no-use-history)")
+EVAL_ARGS+=("$(bool_arg "$SAVE_MEMER_KF" --args.save-memer-kf --args.no-save-memer-kf)")
 
 case "$PREDICTOR" in
     oracle)

@@ -221,7 +221,7 @@ class MemERSubgoalPredictor(SubgoalPredictorBase):
         return response, False
 
     def end_episode(self, epstate: EpisodeState, success_flag: str) -> None:
-        if self.episode_dir:
+        if self.episode_dir and not self.args.save_memer_kf:
             shutil.rmtree(self.episode_dir) # save some space, you can comment this function out to keep all video frames
 
 
@@ -256,6 +256,5 @@ def build_subgoal_predictor(
         return OracleSubgoalPredictor(args, save_dir)
     
     return NullSubgoalPredictor(args, save_dir)
-
 
 
