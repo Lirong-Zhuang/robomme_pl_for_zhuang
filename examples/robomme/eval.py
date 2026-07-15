@@ -95,7 +95,7 @@ def episode_log(save_dir: Path, task_name: str, episode_id: int, enabled: bool):
         yield None
         return
 
-    log_dir = save_dir / "episode_logs"
+    log_dir = save_dir / task_name / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{task_name}_ep{episode_id}.log"
     with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
@@ -314,7 +314,9 @@ def setup_log_dict(save_dir: Path, args: Args) -> dict:
         for task_name in args.re_eval_tasks.split(","):
             if task_name in log_dict:
                 del log_dict[task_name]
-                os.system(f"rm -f {save_dir / 'videos' / f'{task_name}_ep*.mp4'}")
+                task_dir = save_dir / task_name
+                if task_dir.exists():
+                    shutil.rmtree(task_dir)
 
     with open(save_dir / "progress.json", "w") as f:
         json.dump(log_dict, f, indent=2)
@@ -327,7 +329,6 @@ def evaluate(args: Args):
     check_args(args)
 
     save_dir = setup_save_directory(args)
-    video_save_dir = save_dir / "videos"
 
     log_dict = setup_log_dict(save_dir, args)
 
@@ -344,11 +345,19 @@ def evaluate(args: Args):
     subgoal_predictor = build_subgoal_predictor(args, save_dir)
     evaluator = EpisodeEvaluator(args, save_dir)
 
+    # log.json summarizes the latest completed run. Remove only this derived
+    # summary so a new invocation can add tasks/episodes from progress.json.
+    # Existing task videos, frames, logs, and episode results remain untouched.
+    final_log_path = save_dir / "log.json"
+    if final_log_path.exists():
+        final_log_path.unlink()
+
     while not os.path.exists(save_dir / "log.json"):
         for task_name in task_names:
             if task_name not in log_dict:
                 log_dict[task_name] = {}
 
+            video_save_dir = save_dir / task_name / "videos"
             env_runner = EnvRunner(task_name, video_save_dir, max_steps=args.max_steps)
             if args.episode_ids:
                 episode_ids = [int(value.strip()) for value in args.episode_ids.split(",")]

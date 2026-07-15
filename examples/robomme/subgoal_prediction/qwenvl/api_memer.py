@@ -88,15 +88,22 @@ class Qwen3VLModelMemER:
         """Preprocess grounded subgoal by replacing box patterns with <bbox> and extracting bbox coordinates."""
         return self._parse_box_patterns(subgoal, replacement="bbox", return_bbox=True)
     
-    def start_new_episode(self, save_dir: str, video_query: List[np.ndarray]| None, task_goal: str = None, 
-) -> dict:
+    def start_new_episode(
+        self,
+        save_dir: str,
+        video_query: List[np.ndarray] | None,
+        task_goal: str = None,
+        log_dir: str | None = None,
+    ) -> dict:
         self.save_dir = save_dir
         if os.path.exists(save_dir):
             shutil.rmtree(save_dir)
         os.makedirs(save_dir, exist_ok=True)
         
         ep_name = os.path.basename(save_dir)
-        self.save_json_path = os.path.join(os.path.dirname(save_dir), f"{ep_name}_MemER_log.jsonl")
+        log_dir = log_dir or os.path.dirname(save_dir)
+        os.makedirs(log_dir, exist_ok=True)
+        self.save_json_path = os.path.join(log_dir, f"{ep_name}_MemER_log.jsonl")
                 
         if video_query is not None and len(video_query) > 0:
             imageio.mimsave(os.path.join(self.save_dir, f"step_0_video.mp4"), video_query, fps=30)

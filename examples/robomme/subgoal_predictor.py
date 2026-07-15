@@ -87,7 +87,9 @@ class GeminiSubgoalPredictor(SubgoalPredictorBase):
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
         self.api = GeminiModel(
-            save_dir=os.path.join(self.save_dir, self.env_name, f"ep{self.episode_id}"),
+            save_dir=os.path.join(
+                self.save_dir, self.env_name, "frames", f"ep{self.episode_id}"
+            ),
             task_id=self.env_name,
             model_name=self.args.gemini_model_name,
             task_goal=self.task_goal,
@@ -163,8 +165,14 @@ class QwenVLSubgoalPredictor(SubgoalPredictorBase):
         
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
-        self.episode_dir = os.path.join(self.save_dir, self.env_name, f"ep{self.episode_id}")
-        self.api.start_new_episode(self.episode_dir, epstate.image_buffer[:-1], self.task_goal)
+        task_dir = os.path.join(self.save_dir, self.env_name)
+        self.episode_dir = os.path.join(task_dir, "frames", f"ep{self.episode_id}")
+        self.api.start_new_episode(
+            self.episode_dir,
+            epstate.image_buffer[:-1],
+            self.task_goal,
+            log_dir=os.path.join(task_dir, "logs"),
+        )
 
     def step(self, epstate: EpisodeState) -> None:
         self.video_buffer.append(epstate.image_buffer[-1])
@@ -205,8 +213,14 @@ class MemERSubgoalPredictor(SubgoalPredictorBase):
     
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
-        self.episode_dir = os.path.join(self.save_dir, self.env_name, f"ep{self.episode_id}")
-        self.api.start_new_episode(self.episode_dir, epstate.image_buffer[:-1], self.task_goal)
+        task_dir = os.path.join(self.save_dir, self.env_name)
+        self.episode_dir = os.path.join(task_dir, "frames", f"ep{self.episode_id}")
+        self.api.start_new_episode(
+            self.episode_dir,
+            epstate.image_buffer[:-1],
+            self.task_goal,
+            log_dir=os.path.join(task_dir, "logs"),
+        )
 
     def step(self, epstate: EpisodeState) -> None:
         self.api.add_execution_frame(epstate.image_buffer[-1])
@@ -256,5 +270,4 @@ def build_subgoal_predictor(
         return OracleSubgoalPredictor(args, save_dir)
     
     return NullSubgoalPredictor(args, save_dir)
-
 

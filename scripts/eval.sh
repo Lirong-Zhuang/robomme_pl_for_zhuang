@@ -34,23 +34,25 @@ HOST="0.0.0.0"
 PORT=0
 
 # Task selection. Comma-separated values are supported.
-ONLY_TASKS="BinFill"
+# Counting suite: 4 tasks x 50 episodes = 200 episodes.
+ONLY_TASKS="BinFill,StopCube,PickXtimes,SwingXtimes"
 EXCLUDE_TASKS=""
 RE_EVAL_TASKS=""
 
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
-EPISODE_IDS="4"
-NUM_EPISODES=2
+EPISODE_IDS=""
+NUM_EPISODES=50
 
 OBS_HORIZON=16
 MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
-OVERWRITE=true
+# Preserve completed tasks/episodes and continue with anything still missing.
+OVERWRITE=false
 
-# Save stdout/stderr from each episode to a separate file under
-# <SAVE_DIR>/.../episode_logs/, while still displaying it in the terminal.
+# Save stdout/stderr from each episode under
+# <SAVE_DIR>/.../<TASK_NAME>/logs/, while still displaying it in the terminal.
 SAVE_EPISODE_LOGS=true
 
 # Keep MemER's per-step images after an episode finishes. MemER keyframes are
