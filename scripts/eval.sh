@@ -49,6 +49,10 @@ SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
 OVERWRITE=true
 
+# Save stdout/stderr from each episode to a separate file under
+# <SAVE_DIR>/.../episode_logs/, while still displaying it in the terminal.
+SAVE_EPISODE_LOGS=true
+
 # Keep MemER's per-step images after an episode finishes. MemER keyframes are
 # references to a subset of these images, so retaining keyframes requires
 # retaining the episode image directory. This is a no-op for non-MemER models.
@@ -224,6 +228,7 @@ EVAL_ARGS=(
 )
 
 EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
+EVAL_ARGS+=("$(bool_arg "$SAVE_EPISODE_LOGS" --args.save-episode-logs --args.no-save-episode-logs)")
 EVAL_ARGS+=("$(bool_arg "$USE_HISTORY" --args.use-history --args.no-use-history)")
 EVAL_ARGS+=("$(bool_arg "$SAVE_MEMER_KF" --args.save-memer-kf --args.no-save-memer-kf)")
 

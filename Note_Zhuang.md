@@ -1,6 +1,15 @@
 
+## Automat
 
-## Virtual Environments
+change line 25-84 of file scripts/eval.sh to change the setup
+
+```bash
+bash scripts/eval.sh
+```
+
+
+
+## Manuel
 
 This project uses two separate Python environments.
 

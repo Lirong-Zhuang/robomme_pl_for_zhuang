@@ -2,9 +2,11 @@ import dataclasses
 import json
 import os
 import shutil
+import sys
 import time
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, TextIO, Tuple
 
 import numpy as np
 
@@ -37,6 +39,7 @@ class Args:
     max_steps: int = 1300
     save_dir: str = "runs/evaluation"
     overwrite: bool = True
+    save_episode_logs: bool = True
 
     use_history: bool = True
     # policy_name: str = "symbolic-simple-subgoal"
@@ -66,6 +69,41 @@ class Args:
     # In our experiments, we just set this to 1
     num_episodes: int = 10 # number of episodes to evaluate for each task
     episode_ids: str = "2" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
+
+
+class TeeStream:
+    """Write output to both the original terminal stream and a log file."""
+
+    def __init__(self, terminal: TextIO, log_file: TextIO):
+        self.terminal = terminal
+        self.log_file = log_file
+
+    def write(self, text: str) -> int:
+        self.terminal.write(text)
+        self.log_file.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self.terminal.flush()
+        self.log_file.flush()
+
+
+@contextmanager
+def episode_log(save_dir: Path, task_name: str, episode_id: int, enabled: bool):
+    """Capture one episode's stdout/stderr while preserving terminal output."""
+    if not enabled:
+        yield None
+        return
+
+    log_dir = save_dir / "episode_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{task_name}_ep{episode_id}.log"
+    with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
+        stdout_tee = TeeStream(sys.stdout, log_file)
+        stderr_tee = TeeStream(sys.stderr, log_file)
+        with redirect_stdout(stdout_tee), redirect_stderr(stderr_tee):
+            print(f"[robomme] episode log: {log_path}")
+            yield log_path
 
 
 
@@ -334,20 +372,25 @@ def evaluate(args: Args):
                     print(f"[robomme] episode {episode_id} already evaluated, skipping...")
                     continue
 
-                env_runner.make_env(episode_id)
-                print(f"\n[robomme] env for task {task_name} episode {episode_id} setup finished")
-
-                try:
-                    success_flag = evaluator.eval_each_episode(env_runner, subgoal_predictor, video_save_dir)
-                    if success_flag == "unknown":
+                with episode_log(
+                    save_dir, task_name, episode_id, args.save_episode_logs
+                ):
+                    try:
+                        env_runner.make_env(episode_id)
+                        print(f"\n[robomme] env for task {task_name} episode {episode_id} setup finished")
+                        success_flag = evaluator.eval_each_episode(
+                            env_runner, subgoal_predictor, video_save_dir
+                        )
+                        if success_flag == "unknown":
+                            log_dict[task_name][episode_id] = "error"
+                        else:
+                            log_dict[task_name][episode_id] = success_flag == "success"
+                    except Exception as e:
+                        print(f"Error evaluating episode {episode_id} for task {task_name}: {e}")
                         log_dict[task_name][episode_id] = "error"
-                    else:
-                        log_dict[task_name][episode_id] = success_flag == "success"
-                except Exception as e:
-                    print(f"Error evaluating episode {episode_id} for task {task_name}: {e}")
-                    log_dict[task_name][episode_id] = "error"
+                    finally:
+                        env_runner.close_env()
 
-                env_runner.close_env()
                 with open(save_dir / "progress.json", "w") as f:
                     json.dump(log_dict, f, indent=2)
 
