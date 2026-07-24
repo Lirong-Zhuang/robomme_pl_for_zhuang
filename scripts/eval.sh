@@ -22,7 +22,7 @@ set -Eeuo pipefail
 #   perceptual-tokendrop-context, perceptual-tokendrop-modul, perceptual-tokendrop-expert
 #   recurrent-rmt-context, recurrent-rmt-modul, recurrent-rmt-expert
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
-MODEL_TYPE="MemER"
+MODEL_TYPE="symbolic_simpleSG_qwenvl"
 
 SEED=7
 CKPT_ID=79999
@@ -35,21 +35,21 @@ PORT=0
 
 # Task selection. Comma-separated values are supported.
 # Counting suite: 4 tasks x 50 episodes = 200 episodes.
-ONLY_TASKS="BinFill,StopCube,PickXtimes,SwingXtimes"
+ONLY_TASKS="BinFill"
 EXCLUDE_TASKS=""
 RE_EVAL_TASKS=""
 
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
-EPISODE_IDS=""
-NUM_EPISODES=20
+EPISODE_IDS="0"
+NUM_EPISODES=1
 
 OBS_HORIZON=16
 MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
 # Preserve completed tasks/episodes and continue with anything still missing.
-OVERWRITE=false
+OVERWRITE=true
 
 # Save stdout/stderr from each episode under
 # <SAVE_DIR>/.../<TASK_NAME>/logs/, while still displaying it in the terminal.

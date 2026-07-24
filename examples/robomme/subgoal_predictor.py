@@ -202,8 +202,9 @@ class QwenVLSubgoalPredictor(SubgoalPredictorBase):
         return response, False
     
     def end_episode(self, epstate: EpisodeState, success_flag: str) -> None:
-        if self.episode_dir:
-            shutil.rmtree(self.episode_dir) # save some space, you can comment this function out to keep all video frames
+        # Keep QwenVL input images and the optional initial video under
+        # <task>/frames/ep<id>/ so paths recorded in the JSONL logs remain valid.
+        pass
 
 
 class MemERSubgoalPredictor(SubgoalPredictorBase):
@@ -270,4 +271,3 @@ def build_subgoal_predictor(
         return OracleSubgoalPredictor(args, save_dir)
     
     return NullSubgoalPredictor(args, save_dir)
-
