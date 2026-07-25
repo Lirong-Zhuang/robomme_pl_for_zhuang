@@ -21,6 +21,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episode", type=int, default=0, help="Episode index (default: 0)")
     parser.add_argument("--timestep", type=int, default=0, help="Timestep index (default: 0)")
     parser.add_argument(
+        "--all-timesteps",
+        action="store_true",
+        help="Export every timestep in the selected episode; ignores --timestep",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("runs/h5_inspection"),
@@ -94,10 +99,12 @@ def describe_dataset(
     dataset: h5py.Dataset,
     output_dir: Path,
     max_print_elements: int,
+    display_name: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     value = dataset[()]
     array = np.asarray(value)
     name = safe_name(logical_path)
+    label = display_name or logical_path.rsplit("/", 1)[-1]
     details: dict[str, Any] = {
         "path": logical_path,
         "shape": list(array.shape),
@@ -107,12 +114,12 @@ def describe_dataset(
     if array.ndim == 0:
         decoded = decode_scalar(array.item())
         details["value"] = json_safe(decoded)
-        return f"{logical_path}: {decoded!r}", details
+        return f"{label}: {decoded!r}", details
 
     if array.dtype.kind in {"S", "U", "O"}:
         decoded = json_safe(array)
         details["value"] = decoded
-        return f"{logical_path}: {decoded!r}", details
+        return f"{label}: {decoded!r}", details
 
     if looks_like_image(array):
         image_dir = output_dir / "images"
@@ -132,7 +139,7 @@ def describe_dataset(
             }
         )
         return (
-            f"{logical_path}: shape={array.shape}, dtype={array.dtype}, "
+            f"{label}: shape={array.shape}, dtype={array.dtype}, "
             f"min={details['min']}, max={details['max']}\n"
             f"  image: {image_path}\n  raw:   {raw_path}",
             details,
@@ -141,7 +148,7 @@ def describe_dataset(
     if array.size <= max_print_elements:
         values = json_safe(array)
         details["value"] = values
-        return f"{logical_path}: {values}", details
+        return f"{label}: {values}", details
 
     array_dir = output_dir / "arrays"
     array_dir.mkdir(parents=True, exist_ok=True)
@@ -156,7 +163,7 @@ def describe_dataset(
         }
     )
     return (
-        f"{logical_path}: shape={array.shape}, dtype={array.dtype}, "
+        f"{label}: shape={array.shape}, dtype={array.dtype}, "
         f"min={details['min']}, max={details['max']}, mean={details['mean']}\n"
         f"  raw: {raw_path}",
         details,
@@ -177,7 +184,11 @@ def collect_group(
             return
         logical_path = f"{prefix}/{name}" if name else prefix
         line, record = describe_dataset(
-            logical_path, obj, output_dir, max_print_elements
+            logical_path,
+            obj,
+            output_dir,
+            max_print_elements,
+            display_name=name.rsplit("/", 1)[-1],
         )
         lines.append(line)
         records.append(record)
@@ -186,13 +197,55 @@ def collect_group(
     return lines, records
 
 
+def collect_timestep(
+    timestep_group: h5py.Group,
+    episode_key: str,
+    timestep_key: str,
+    output_dir: Path,
+    max_print_elements: int,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    lines: list[str] = []
+    records: list[dict[str, Any]] = []
+    preferred_categories = ["obs", "action", "info"]
+    remaining_categories = sorted(
+        key for key in timestep_group.keys() if key not in preferred_categories
+    )
+
+    for category in preferred_categories + remaining_categories:
+        if category not in timestep_group:
+            continue
+        lines.extend(["", f"--- {category.upper()} ---"])
+        obj = timestep_group[category]
+        if isinstance(obj, h5py.Group):
+            category_lines, category_records = collect_group(
+                obj,
+                f"{episode_key}/{timestep_key}/{category}",
+                output_dir,
+                max_print_elements,
+            )
+        else:
+            line, record = describe_dataset(
+                f"{episode_key}/{timestep_key}/{category}",
+                obj,
+                output_dir,
+                max_print_elements,
+                display_name=category,
+            )
+            category_lines, category_records = [line], [record]
+        lines.extend(category_lines)
+        records.extend(category_records)
+
+    return lines, records
+
+
 def main() -> None:
     args = parse_args()
     h5_path = args.h5_path.expanduser().resolve()
+    selection_dir = "all_timesteps" if args.all_timesteps else f"timestep_{args.timestep}"
     output_dir = (
         args.output_dir.expanduser().resolve()
         / f"episode_{args.episode}"
-        / f"timestep_{args.timestep}"
+        / selection_dir
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,9 +258,18 @@ def main() -> None:
             raise KeyError(f"{episode_key!r} not found. Available: {available[:20]}")
 
         episode = h5_file[episode_key]
-        if timestep_key not in episode:
-            available = sorted(key for key in episode if key.startswith("timestep_"))
-            raise KeyError(f"{timestep_key!r} not found. Available: {available[:20]}")
+        available_timesteps = sorted(
+            (key for key in episode if key.startswith("timestep_")),
+            key=lambda key: int(key.rsplit("_", 1)[-1]),
+        )
+        if args.all_timesteps:
+            selected_timesteps = available_timesteps
+        else:
+            if timestep_key not in episode:
+                raise KeyError(
+                    f"{timestep_key!r} not found. Available: {available_timesteps[:20]}"
+                )
+            selected_timesteps = [timestep_key]
 
         setup_lines: list[str] = []
         setup_records: list[dict[str, Any]] = []
@@ -219,22 +281,35 @@ def main() -> None:
                 args.max_print_elements,
             )
 
-        timestep_lines, timestep_records = collect_group(
-            episode[timestep_key],
-            f"{episode_key}/{timestep_key}",
-            output_dir,
-            args.max_print_elements,
-        )
+        timestep_sections: list[str] = []
+        timestep_records: dict[str, list[dict[str, Any]]] = {}
+        for selected_key in selected_timesteps:
+            timestep_index = int(selected_key.rsplit("_", 1)[-1])
+            lines, records = collect_timestep(
+                episode[selected_key],
+                episode_key,
+                selected_key,
+                output_dir,
+                args.max_print_elements,
+            )
+            timestep_sections.extend(
+                ["", f"=== TIMESTEP {timestep_index} ===", *lines]
+            )
+            timestep_records[selected_key] = records
 
     header = [
         f"HDF5 file: {h5_path}",
         f"Episode: {episode_key}",
-        f"Timestep: {timestep_key}",
+        (
+            f"Timesteps: all ({len(selected_timesteps)})"
+            if args.all_timesteps
+            else f"Timestep: {timestep_key}"
+        ),
         f"Output: {output_dir}",
         "",
         "=== EPISODE SETUP ===",
     ]
-    report_lines = header + setup_lines + ["", "=== TIMESTEP DATA ==="] + timestep_lines
+    report_lines = header + setup_lines + timestep_sections
     report = "\n".join(report_lines)
 
     report_path = output_dir / "report.txt"
@@ -242,7 +317,7 @@ def main() -> None:
     summary_path = output_dir / "summary.json"
     summary_path.write_text(
         json.dumps(
-            {"setup": setup_records, "timestep": timestep_records},
+            {"setup": setup_records, "timesteps": timestep_records},
             ensure_ascii=False,
             indent=2,
         )
