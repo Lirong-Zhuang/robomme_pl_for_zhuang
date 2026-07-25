@@ -35,3 +35,12 @@ uv run python user_code/inspect_h5_timestep.py \
   --all-timesteps \
   --output-dir runs/h5_inspection
 ```
+
+Inspect a preprocessed VLA PKL sample:
+
+```bash
+uv run python user_code/inspect_preprocessed_pkl.py \
+  data/binfill_test_preprocessed \
+  --sample 0 \
+  --output-dir runs/pkl_inspection
+```
