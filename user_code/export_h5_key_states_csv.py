@@ -117,14 +117,11 @@ def export_episode(
         fieldnames = [
             "timestep",
             "simple_subgoal",
-            "grounded_subgoal",
             "is_subgoal_boundary",
-            "is_key_state",
-            "key_state_reason",
-            *(f"joint_{i}" for i in range(7)),
-            "gripper_opening",
             "joint_distance_to_previous_key_state",
             "gripper_distance_to_previous_key_state",
+            *(f"joint_{i}" for i in range(7)),
+            "gripper_opening",
         ]
 
         previous_key_state: np.ndarray | None = None
@@ -150,25 +147,17 @@ def export_episode(
                 )
 
             is_key_state = is_initial_state or is_boundary
-            reasons = []
-            if is_initial_state:
-                reasons.append("initial_state")
-            if is_boundary:
-                reasons.append("subgoal_boundary")
             row: dict[str, Any] = {
                 "timestep": timestep_idx,
                 "simple_subgoal": read_subgoal(info, "simple_subgoal"),
-                "grounded_subgoal": read_subgoal(info, "grounded_subgoal"),
                 "is_subgoal_boundary": is_boundary,
-                "is_key_state": is_key_state,
-                "key_state_reason": "|".join(reasons),
-                "gripper_opening": float(state[7]),
                 "joint_distance_to_previous_key_state": (
                     "" if joint_distance is None else joint_distance
                 ),
                 "gripper_distance_to_previous_key_state": (
                     "" if gripper_distance is None else gripper_distance
                 ),
+                "gripper_opening": float(state[7]),
             }
             row.update({f"joint_{i}": float(state[i]) for i in range(7)})
             rows.append(row)
