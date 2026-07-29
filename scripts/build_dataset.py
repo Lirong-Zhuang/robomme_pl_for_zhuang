@@ -63,7 +63,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--preprocessed_data_path",
         type=str,
-        default="data/robomme_preprocessed_data",
+        default="data/binfill_test_preprocessed",
         help="Output directory",
     )
     parser.add_argument(

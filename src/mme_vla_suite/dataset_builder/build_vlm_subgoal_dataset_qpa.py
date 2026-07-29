@@ -135,8 +135,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         for i, state in enumerate(key_states):
             arm = ", ".join(f"{value:.4f}" for value in state[:7])
             formatted_states.append(
-                f"Key state {i + 1}: arm=[{arm}], "
-                f"gripper_opening={state[7]:.4f}"
+                f"{i + 1}. arm=[{arm}], gripper={state[7]:.4f}"
             )
         return "; ".join(formatted_states)
 
@@ -211,8 +210,8 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n"
-                f"The robot's key states since the previous prediction are: {self._wrap_key_states(key_state_history)}\n"
-                "<image>What's the next grounded language subgoal based on the current observation and the robot's key states?"
+                f"The robot key states are: {self._wrap_key_states(key_state_history)}\n"
+                "<image>What's the next grounded language subgoal based on the current observation?"
             )
 
         result = {
