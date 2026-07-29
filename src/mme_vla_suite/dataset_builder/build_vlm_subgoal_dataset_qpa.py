@@ -34,7 +34,18 @@ GROUNDED_SUBGOAL_SYSTEM_PROMPT = (
 
 ARM_STATE_DISTANCE_THRESHOLD = 0.10
 GRIPPER_OPENING_DISTANCE_THRESHOLD = 0.20
-MAX_KEY_STATES = 8
+
+
+def _format_threshold(value: float) -> str:
+    """Format a threshold compactly for use in an output directory name."""
+    return f"{value:g}"
+
+
+QPA_THRESHOLD_DIR_NAME = (
+    f"ad{_format_threshold(ARM_STATE_DISTANCE_THRESHOLD)}"
+    f"_gd{_format_threshold(GRIPPER_OPENING_DISTANCE_THRESHOLD)}"
+)
+QPA_DIR_NAME = os.path.join("qpa", QPA_THRESHOLD_DIR_NAME)
 
 
 # -----------------------------------------------------------------------------
@@ -43,6 +54,14 @@ MAX_KEY_STATES = 8
 
 
 class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
+    def __init__(
+        self,
+        *args,
+        vlm_dir_name: str = QPA_DIR_NAME,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, vlm_dir_name=vlm_dir_name, **kwargs)
+
     # -------------------------------------------------------------------------
     # Joint-state history
     # -------------------------------------------------------------------------
@@ -72,9 +91,9 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         if len(states) <= 2:
             return states
 
-        key_states: list[tuple[np.ndarray, bool]] = [(states[0], True)]
+        key_states: list[np.ndarray] = [states[0]]
         for state in states[1:-1]:
-            previous_key_state = key_states[-1][0]
+            previous_key_state = key_states[-1]
             arm_distance = float(
                 np.linalg.norm(state[:7] - previous_key_state[:7])
             )
@@ -86,37 +105,13 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
                 arm_distance >= ARM_STATE_DISTANCE_THRESHOLD
                 or gripper_opening_changed
             ):
-                key_states.append((state, gripper_opening_changed))
+                key_states.append(state)
 
         # The final state corresponding to the current image is always a key state.
-        if not np.array_equal(key_states[-1][0], states[-1]):
-            key_states.append((states[-1], True))
-        else:
-            key_states[-1] = (key_states[-1][0], True)
+        if not np.array_equal(key_states[-1], states[-1]):
+            key_states.append(states[-1])
 
-        if len(key_states) <= MAX_KEY_STATES:
-            return [state for state, _ in key_states]
-
-        mandatory_idxs = [
-            i for i, (_, is_mandatory) in enumerate(key_states) if is_mandatory
-        ]
-        remaining_slots = max(MAX_KEY_STATES - len(mandatory_idxs), 0)
-        optional_idxs = [
-            i for i, (_, is_mandatory) in enumerate(key_states) if not is_mandatory
-        ]
-        if remaining_slots and optional_idxs:
-            sampled_positions = np.linspace(
-                0,
-                len(optional_idxs) - 1,
-                min(remaining_slots, len(optional_idxs)),
-                dtype=np.int32,
-            )
-            mandatory_idxs.extend(optional_idxs[i] for i in sampled_positions)
-
-        # Gripper events are never discarded, so the result can exceed the soft
-        # limit in the unusual case of many open/close events in one interval.
-        keep_idxs = sorted(set(mandatory_idxs))
-        return [key_states[i][0] for i in keep_idxs]
+        return key_states
 
     def _build_key_state_history(
         self,

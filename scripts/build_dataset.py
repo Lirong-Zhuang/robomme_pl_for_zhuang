@@ -1,4 +1,4 @@
-"""Single entrypoint to run dataset builders (RoboMME, VLM subgoal QwenVL, VLM subgoal MemER).
+"""Single entrypoint to run RoboMME and VLM subgoal dataset builders.
 
 Build RoboMME preprocessed pickle data from raw HDF5 data.
 ```
@@ -15,6 +15,10 @@ Build VLM subgoal prediction dataset for MemER.
 uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_memer
 ```
 
+Build VLM subgoal prediction dataset for QwenVL plus key states.
+```
+uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qpa
+```
 
 """
 
@@ -24,6 +28,10 @@ import time
 from mme_vla_suite.dataset_builder.build_robomme_dataset import DatasetProcessor
 from mme_vla_suite.dataset_builder.build_vlm_subgoal_dataset_memer import (
     DatasetBuilder as MemerDatasetBuilder,
+)
+from mme_vla_suite.dataset_builder.build_vlm_subgoal_dataset_qpa import (
+    QPA_DIR_NAME,
+    DatasetBuilder as QPADatasetBuilder,
 )
 from mme_vla_suite.dataset_builder.build_vlm_subgoal_dataset_qwenvl import (
     DatasetBuilder as QwenVLDatasetBuilder,
@@ -38,7 +46,12 @@ def _parse_args() -> argparse.Namespace:
         "--dataset_type",
         type=str,
         default="robomme_pkl",
-        choices=["robomme_pkl", "vlm_subgoal_qwenvl", "vlm_subgoal_memer"],
+        choices=[
+            "robomme_pkl",
+            "vlm_subgoal_qwenvl",
+            "vlm_subgoal_qpa",
+            "vlm_subgoal_memer",
+        ],
         help="Dataset type to build",
     )
     parser.add_argument(
@@ -95,6 +108,15 @@ if __name__ == "__main__":
             max_episodes=args.max_episodes,
             visualize=args.visualize,
             vlm_dir_name="memer",
+        )
+        builder.run()
+    elif args.dataset_type == "vlm_subgoal_qpa":
+        builder = QPADatasetBuilder(
+            raw_data_path=args.raw_data_path,
+            preprocessed_data_path=args.preprocessed_data_path,
+            max_episodes=args.max_episodes,
+            visualize=args.visualize,
+            vlm_dir_name=QPA_DIR_NAME,
         )
         builder.run()
     else:
