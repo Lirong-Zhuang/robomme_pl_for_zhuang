@@ -44,3 +44,11 @@ uv run python user_code/inspect_preprocessed_pkl.py \
   --sample 0 \
   --output-dir runs/pkl_inspection
 ```
+
+Key state inspection 
+
+```bash
+uv run python user_code/export_h5_key_states_csv.py \
+  data/robomme_data_h5/record_dataset_BinFill.h5 \
+  --episode 1
+```
