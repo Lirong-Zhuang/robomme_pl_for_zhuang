@@ -7,7 +7,10 @@ uv run python scripts/build_dataset.py --dataset_type robomme_pkl
 
 Build VLM subgoal prediction dataset for QwenVL.
 ```
-uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qwenvl
+uv run python scripts/build_dataset.py \
+  --dataset_type vlm_subgoal_qwenvl \
+  --raw_data_path /data/public/RoboMME \
+  --preprocessed_data_path /data/zhuanglr/robomme_preprocessed_data
 ```
 
 Build VLM subgoal prediction dataset for MemER.

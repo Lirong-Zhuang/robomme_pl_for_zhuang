@@ -7,7 +7,25 @@ change line 25-84 of file scripts/eval.sh to change the setup
 bash scripts/eval.sh
 ```
 
+## tmux
 
+open new window for tmux
+
+```bash
+tmux new -s xxxx
+```
+
+check tmux
+
+```bash
+tmux ls
+```
+
+attach tmux
+
+```bash
+tmux attach -t xxxx
+```
 
 ## Manuel
 
