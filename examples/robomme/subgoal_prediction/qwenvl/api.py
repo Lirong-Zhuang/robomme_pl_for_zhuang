@@ -40,6 +40,9 @@ class Qwen3VLModel:
             # attn_impl='flash_attention_2' #'sdpa'
             attn_impl='sdpa'
         )
+
+        self.engine.default_template.norm_bbox = "none"
+        assert self.engine.default_template.norm_bbox == "none"
         
     def _parse_box_patterns(self, subgoal: str, replacement: str = "scaled_coords", return_bbox: bool = False):
         """
@@ -56,7 +59,6 @@ class Qwen3VLModel:
         """
         matches = re.findall(r'<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>', subgoal)
         
-        qwen3_vl_image_size = (1000, 1000)
         
         if len(matches) == 0:
             if return_bbox:
@@ -64,14 +66,14 @@ class Qwen3VLModel:
             return subgoal
         
         # Extract bbox coordinates (scaled)
-        bbox = [[int(float(match[0])/qwen3_vl_image_size[1]*self.image_size[1]), 
-                 int(float(match[1])/qwen3_vl_image_size[0]*self.image_size[0])] for match in matches]
+        bbox = [[min(max(int(match[0]), 0), 255), 
+                 min(max(int(match[1]), 0), 255)] for match in matches]
         
         # Replace based on replacement type
         if replacement == "scaled_coords":
             response = re.sub(
                 r'<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>',
-                lambda m: f'<{int(int(m.group(1)) * self.image_size[1] / qwen3_vl_image_size[1])}, {int(int(m.group(2)) * self.image_size[0] / qwen3_vl_image_size[0])}>',
+                lambda m: (f"<{min(max(int(m.group(1)), 0), 255)}, "f"{min(max(int(m.group(2)), 0), 255)}>"),
                 subgoal
             )
         elif replacement == "bbox":
@@ -130,21 +132,6 @@ class Qwen3VLModel:
     def _wrap_history_subgoals(self, subgoals) -> str:
         return "; ".join([f"{i+1}. {subgoal}" for i, subgoal in enumerate(subgoals)])
     
-    def _parse_grounded_subgoal(self, subgoal) -> tuple:
-        bbox = []
-        # seatch the pattern "at <y, x>"
-        matches = re.findall(r'<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>', subgoal)
-        if matches:
-            bbox = [[int(float(match[0])/1000*self.image_size[1]), int(float(match[1])/1000*self.image_size[0])] for match in matches]
-        else:
-            bbox = []        
-        response = re.sub(
-            r'<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>',
-            '<bbox>',
-            subgoal
-        )
-        
-        return response, bbox
     
     def update_history_subgoals(self, subgoal: str):
         if self.subgoal_type == "simple_subgoal":
