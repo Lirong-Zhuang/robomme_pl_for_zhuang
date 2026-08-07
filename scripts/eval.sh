@@ -35,14 +35,14 @@ PORT=0
 
 # Task selection. Comma-separated values are supported.
 # Counting suite: 4 tasks x 50 episodes = 200 episodes.
-ONLY_TASKS="BinFill"
+ONLY_TASKS="BinFill,PickXtimes,SwingXtimes,StopCube"
 EXCLUDE_TASKS=""
 RE_EVAL_TASKS=""
 
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
-EPISODE_IDS="0"
-NUM_EPISODES=1
+EPISODE_IDS=""
+NUM_EPISODES=2
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -71,15 +71,22 @@ QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_s
 MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
 # Runtime configuration.
-CONDA_ENV="robomme"
-# CONDA_INIT="$HOME/miniconda3/etc/profile.d/conda.sh"
-CONDA_INIT="/opt/miniconda3/etc/profile.d/conda.sh"
+
+# conda
+# CONDA_ENV="robomme"
+# # CONDA_INIT="$HOME/miniconda3/etc/profile.d/conda.sh"
+# CONDA_INIT="/opt/miniconda3/etc/profile.d/conda.sh"
+
+# micromamba
+MAMBA_ENV="robomme"
+export MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
+
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
 
 # Leave empty to use JAX's default. For a dedicated policy GPU, values such as
 # 0.90 or 0.95 can be useful.
-XLA_MEM_FRACTION=""
+XLA_MEM_FRACTION="0.4"
 
 # Optional overrides. Leave empty to use paths derived from MODEL_TYPE.
 POLICY_DIR=""
@@ -128,11 +135,11 @@ for command_name in uv lsof shuf; do
     fi
 done
 
-if [[ ! -f "$CONDA_INIT" ]]; then
-    echo "ERROR: conda initialization script not found: $CONDA_INIT" >&2
-    echo "Set CONDA_INIT near the top of scripts/eval.sh to the correct path." >&2
-    exit 1
-fi
+# if [[ ! -f "$CONDA_INIT" ]]; then
+#     echo "ERROR: conda initialization script not found: $CONDA_INIT" >&2
+#     echo "Set CONDA_INIT near the top of scripts/eval.sh to the correct path." >&2
+#     exit 1
+# fi
 
 REQUESTED_MODEL_TYPE=$MODEL_TYPE
 CONFIG_TYPE="mme_vla_suite"
@@ -317,8 +324,10 @@ echo
 
 # Launching the server first keeps it in the uv/openpi environment. The client
 # then runs in the separate RoboMME conda environment in this foreground shell.
-source "$CONDA_INIT"
-conda activate "$CONDA_ENV"
+# source "$CONDA_INIT"
+# conda activate "$CONDA_ENV"
+eval "$(micromamba shell hook --shell bash)"
+micromamba activate "$MAMBA_ENV"
 
 printf 'Evaluation command:\n  CUDA_VISIBLE_DEVICES=%q python examples/robomme/eval.py' "$GPU_ID_CLIENT"
 printf ' %q' "${EVAL_ARGS[@]}"
