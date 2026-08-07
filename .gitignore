@@ -8,6 +8,7 @@ __pycache__/
 
 # dataset
 data/
+/data
 
 # Distribution / packaging
 .Python
@@ -213,3 +214,4 @@ __marimo__/
 
 # Running files
 runs/
+/runs
