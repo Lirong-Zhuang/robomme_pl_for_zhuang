@@ -79,14 +79,15 @@ MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/chec
 
 # micromamba
 MAMBA_ENV="robomme"
-export MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
+MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
+MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
 
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
 
 # Leave empty to use JAX's default. For a dedicated policy GPU, values such as
 # 0.90 or 0.95 can be useful.
-XLA_MEM_FRACTION="0.4"
+XLA_MEM_FRACTION="0.5"
 
 # Optional overrides. Leave empty to use paths derived from MODEL_TYPE.
 POLICY_DIR=""
@@ -326,12 +327,12 @@ echo
 # then runs in the separate RoboMME conda environment in this foreground shell.
 # source "$CONDA_INIT"
 # conda activate "$CONDA_ENV"
-eval "$(micromamba shell hook --shell bash)"
-micromamba activate "$MAMBA_ENV"
 
 printf 'Evaluation command:\n  CUDA_VISIBLE_DEVICES=%q python examples/robomme/eval.py' "$GPU_ID_CLIENT"
 printf ' %q' "${EVAL_ARGS[@]}"
 printf '\n\n'
 
 CUDA_VISIBLE_DEVICES="$GPU_ID_CLIENT" \
+MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \
+"$MAMBA_EXE" run -n "$MAMBA_ENV" \
 python examples/robomme/eval.py "${EVAL_ARGS[@]}"
