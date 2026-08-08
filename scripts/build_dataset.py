@@ -5,9 +5,9 @@ Build RoboMME preprocessed pickle data from raw HDF5 data.
 uv run python scripts/build_dataset.py --dataset_type robomme_pkl
 ```
 
-Build VLM subgoal prediction dataset for QwenVL.
+Build VLM subgoal prediction dataset for QwenVL RRP.
 ```
-uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qwenvl
+uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qwenvl_rrp
 ```
 
 Build VLM subgoal prediction dataset for MemER.
@@ -48,7 +48,7 @@ def _parse_args() -> argparse.Namespace:
         default="robomme_pkl",
         choices=[
             "robomme_pkl",
-            "vlm_subgoal_qwenvl",
+            "vlm_subgoal_qwenvl_rrp",
             "vlm_subgoal_qpa",
             "vlm_subgoal_memer",
         ],
@@ -92,13 +92,13 @@ if __name__ == "__main__":
             max_episodes=args.max_episodes,
         )
         processor.run()
-    elif args.dataset_type == "vlm_subgoal_qwenvl":
+    elif args.dataset_type == "vlm_subgoal_qwenvl_rrp":
         builder = QwenVLDatasetBuilder(
             raw_data_path=args.raw_data_path,
             preprocessed_data_path=args.preprocessed_data_path,
             max_episodes=args.max_episodes,
             visualize=args.visualize,
-            vlm_dir_name="qwenvl",
+            vlm_dir_name="qwenvl_rrp",
         )
         builder.run()
     elif args.dataset_type == "vlm_subgoal_memer":

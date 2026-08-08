@@ -19,7 +19,7 @@ class Qwen3VLModel:
         adapter_path: str,
         subgoal_type: str = "simple_subgoal", 
     ):
-        self.model_name = "qwenvl"
+        self.model_name = "qwenvl_rrp"
         self.subgoal_type = subgoal_type
         self.image_size = (256, 256)
         
@@ -110,7 +110,7 @@ class Qwen3VLModel:
         ep_name = os.path.basename(save_dir)
         log_dir = log_dir or os.path.dirname(save_dir)
         os.makedirs(log_dir, exist_ok=True)
-        self.save_json_path = os.path.join(log_dir, f"{ep_name}_QwenVL_log.jsonl")
+        self.save_json_path = os.path.join(log_dir, f"{ep_name}_QwenVL_RRP_log.jsonl")
 
         
         if video_query is not None and len(video_query) > 0:
@@ -126,6 +126,7 @@ class Qwen3VLModel:
         self.history_grounded_subgoals = []
         self.history_grounded_bboxes = []
         self.last_response = None
+        self.previous_image_path = None
      
     def _wrap_history_subgoals(self, subgoals) -> str:
         return "; ".join([f"{i+1}. {subgoal}" for i, subgoal in enumerate(subgoals)])
@@ -173,13 +174,19 @@ class Qwen3VLModel:
             if len(self.history_simple_subgoals) == 0:
                 user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThis is the initial turn for prediction\n<image>What's the next language subgoal based on current observation?"
             else:
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n<image>What's the next language subgoal based on current observation?"
+                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\nThe previous observation is: <image>\nThe current observation is: <image>\nWhat's the next language subgoal based on the previous and current observations? If you think the robot has not yet completed the last subgoal, you should output the same last subgoal again."
                     
         else:        
             if len(self.history_grounded_subgoals) == 0:
                 user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThis is the initial turn for prediction\n<image>What's the next grounded language subgoal based on current observation?"
-            else:            
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n<image>What's the next grounded language subgoal based on current observation?"
+            else:
+                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\nThe previous observation is: <image>\nThe current observation is: <image>\nWhat's the next grounded language subgoal based on the previous and current observations? If you think the robot has not yet completed the last subgoal, you should output the same last subgoal again."
+
+        image_paths = (
+            [image_path]
+            if self.previous_image_path is None
+            else [self.previous_image_path, image_path]
+        )
         
         infer_request_dict = {
             "messages": [
@@ -192,11 +199,13 @@ class Qwen3VLModel:
                     "content": user_prompt
                 }
             ],
-            "images": [image_path]
+            "images": image_paths
         }
         
         if self.video_path is not None:
             infer_request_dict["videos"] = [self.video_path]
+
+        self.previous_image_path = image_path
             
         if self.subgoal_type == "grounded_subgoal":
             infer_request_dict["objects"] = {"ref": [], "bbox": self.history_grounded_bboxes}

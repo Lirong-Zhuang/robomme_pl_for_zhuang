@@ -1,5 +1,5 @@
 """
-Build VLM subgoal prediction dataset for QwenVL.
+Build VLM subgoal prediction dataset for QwenVL RRP.
 
 We duplicate keyframe training samples for balanced training data, which is
 crucial for the VLM to predict correct subgoal changes.
@@ -45,6 +45,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         task_goal: str,
         subgoal: str,
         image_path: str,
+        previous_image_path: str | None = None,
         video_path: str | None = None,
     ) -> dict:
         video_prefix = "<video>" if video_path else ""
@@ -58,8 +59,16 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n"
-                "<image>What's the next language subgoal based on current observation?"
+                "The previous observation is: <image>\n"
+                "The current observation is: <image>\n"
+                "What's the next language subgoal based on the previous and current observations? If you think the robot has not yet completed the last subgoal, you should output the same last subgoal again."
             )
+
+        image_paths = (
+            [image_path]
+            if previous_image_path is None
+            else [previous_image_path, image_path]
+        )
 
         result = {
             "messages": [
@@ -67,7 +76,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
                 {"role": "user", "content": user_prompt},
                 {"role": "assistant", "content": subgoal},
             ],
-            "images": [image_path],
+            "images": image_paths,
         }
         if video_path:
             result["videos"] = [video_path]
@@ -89,6 +98,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         task_goal: str,
         subgoal: str,
         image_path: str,
+        previous_image_path: str | None = None,
         video_path: str | None = None,
     ) -> dict:
         video_prefix = "<video>" if video_path else ""
@@ -104,8 +114,16 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n"
-                "<image>What's the next grounded language subgoal based on current observation?"
+                "The previous observation is: <image>\n"
+                "The current observation is: <image>\n"
+                "What's the next grounded language subgoal based on the previous and current observations? If you think the robot has not yet completed the last subgoal, you should output the same last subgoal again."
             )
+
+        image_paths = (
+            [image_path]
+            if previous_image_path is None
+            else [previous_image_path, image_path]
+        )
 
         result = {
             "messages": [
@@ -117,7 +135,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
                 "ref": [],
                 "bbox": self._add_noise_to_bbox(self.history_grounded_bboxes + bbox),
             },
-            "images": [image_path],
+            "images": image_paths,
         }
         if video_path:
             result["videos"] = [video_path]
@@ -248,6 +266,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
 
         last_simple_subgoal = None
         last_grounded_subgoal = None
+        previous_image_path = None
         if self.visualize:
             save_images = []
             visualization_video_path = os.path.join(
@@ -271,10 +290,10 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             imageio.imwrite(image_path, image)
 
             simple_subgoal_data = self.make_simple_subgoal_data(
-                task_goal, simple_subgoal, image_path, video_path
+                task_goal, simple_subgoal, image_path, previous_image_path, video_path
             )
             grounded_subgoal_data = self.make_grounded_subgoal_data(
-                task_goal, grounded_subgoal, image_path, video_path
+                task_goal, grounded_subgoal, image_path, previous_image_path, video_path
             )
 
             self._append_training_rows(simple_subgoal_data, grounded_subgoal_data)
@@ -303,6 +322,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
 
             last_simple_subgoal = simple_subgoal
             last_grounded_subgoal = grounded_subgoal
+            previous_image_path = image_path
 
         if self.visualize:
             out_path = os.path.join(
@@ -315,7 +335,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
 # def _parse_args() -> argparse.Namespace:
 #     parser = argparse.ArgumentParser(description="Preprocess raw HDF5 dataset for training")
 #     parser.add_argument("--raw_data_path", type=str, default="data/robomme_h5_data", help="Raw HDF5 directory")
-#     parser.add_argument("--preprocessed_data_path", type=str, default="data/vlm_subgoal_prediction_data/qwenvl", help="Output directory")
+#     parser.add_argument("--preprocessed_data_path", type=str, default="data/vlm_subgoal_prediction_data/qwenvl_rrp", help="Output directory")
 #     parser.add_argument("--max_episodes", type=int, default=None, help="Cap episodes per file (default: all)")
 #     parser.add_argument("--visualize", action="store_true", help="Write visualization MP4s")
 #     return parser.parse_args()

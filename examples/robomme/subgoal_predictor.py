@@ -161,7 +161,7 @@ class QwenVLSubgoalPredictor(SubgoalPredictorBase):
             adapter_path=self.args.qwenvl_simpleSG_adapter_path if self.args.subgoal_type == "simple_subgoal" else self.args.qwenvl_groundSG_adapter_path,
             subgoal_type=self.args.subgoal_type,
         )
-        print(f"[robomme] QwenVL {self.args.subgoal_type} agent setup finished")
+        print(f"[robomme] QwenVL RRP {self.args.subgoal_type} agent setup finished")
         
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
