@@ -7,7 +7,8 @@
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
 DATASET_PATH='data/robomme_preprocessed_data/qwenvl_ppr/simple_subgoal_train.jsonl'
-OUTPUT_DIR='runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/simple_subgoal'
+RUN_NAME='qwenvl_ppr_simple_subgoal_v1.1'
+OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/${RUN_NAME#qwenvl_ppr_}"
 
 PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
 IMAGE_MAX_TOKEN_NUM=256 \
@@ -41,6 +42,7 @@ swift sft \
     --logging_steps 100 \
     --max_length 3200 \
     --output_dir $OUTPUT_DIR \
+    --run_name $RUN_NAME \
     --warmup_ratio 0.05 \
     --dataset_num_proc 4 \
     --dataloader_num_workers 4
