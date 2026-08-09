@@ -2,12 +2,12 @@
 
 
 # Choose the dataset path from the following list, and change the OUTPUT_DIR accordingly:
-# data/robomme_preprocessed_data/qwenvl_rrp/simple_subgoal_train.jsonl
-# data/robomme_preprocessed_data/qwenvl_rrp/grounded_subgoal_train.jsonl
+# data/robomme_preprocessed_data/qwenvl_ppr/simple_subgoal_train.jsonl
+# data/robomme_preprocessed_data/qwenvl_ppr/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-DATASET_PATH='data/robomme_preprocessed_data/qwenvl_rrp/simple_subgoal_train.jsonl'
-OUTPUT_DIR='runs/ckpts/vlm_subgoal_predictor/qwenvl_rrp/simple_subgoal'
+DATASET_PATH='data/robomme_preprocessed_data/qwenvl_ppr/simple_subgoal_train.jsonl'
+OUTPUT_DIR='runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/simple_subgoal'
 
 PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
 IMAGE_MAX_TOKEN_NUM=256 \

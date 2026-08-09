@@ -19,7 +19,7 @@ class Qwen3VLModel:
         adapter_path: str,
         subgoal_type: str = "simple_subgoal", 
     ):
-        self.model_name = "qwenvl_rrp"
+        self.model_name = "qwenvl_ppr"
         self.subgoal_type = subgoal_type
         self.image_size = (256, 256)
         
@@ -110,7 +110,7 @@ class Qwen3VLModel:
         ep_name = os.path.basename(save_dir)
         log_dir = log_dir or os.path.dirname(save_dir)
         os.makedirs(log_dir, exist_ok=True)
-        self.save_json_path = os.path.join(log_dir, f"{ep_name}_QwenVL_RRP_log.jsonl")
+        self.save_json_path = os.path.join(log_dir, f"{ep_name}_QwenVL_PPR_log.jsonl")
 
         
         if video_query is not None and len(video_query) > 0:

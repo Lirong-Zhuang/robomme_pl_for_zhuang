@@ -1,5 +1,5 @@
 """
-Build VLM subgoal prediction dataset for QwenVL RRP.
+Build VLM subgoal prediction dataset for QwenVL PPR.
 
 We duplicate keyframe training samples for balanced training data, which is
 crucial for the VLM to predict correct subgoal changes.
@@ -335,7 +335,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
 # def _parse_args() -> argparse.Namespace:
 #     parser = argparse.ArgumentParser(description="Preprocess raw HDF5 dataset for training")
 #     parser.add_argument("--raw_data_path", type=str, default="data/robomme_h5_data", help="Raw HDF5 directory")
-#     parser.add_argument("--preprocessed_data_path", type=str, default="data/vlm_subgoal_prediction_data/qwenvl_rrp", help="Output directory")
+#     parser.add_argument("--preprocessed_data_path", type=str, default="data/vlm_subgoal_prediction_data/qwenvl_ppr", help="Output directory")
 #     parser.add_argument("--max_episodes", type=int, default=None, help="Cap episodes per file (default: all)")
 #     parser.add_argument("--visualize", action="store_true", help="Write visualization MP4s")
 #     return parser.parse_args()

@@ -60,8 +60,8 @@ class Args:
     # subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
     subgoal_type: Optional[str] = "grounded_subgoal"
     gemini_model_name: str = "gemini-2.5-pro"
-    qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl_rrp/simple_subgoal/checkpoint-1400"
-    qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl_rrp/grounded_subgoal/checkpoint-1200"
+    qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/simple_subgoal/checkpoint-1400"
+    qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/grounded_subgoal/checkpoint-1200"
     memer_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
     save_memer_kf: bool = False
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
@@ -272,7 +272,7 @@ def setup_save_directory(args: Args) -> Path:
         if args.use_gemini:
             save_dir = save_dir / "gemini"
         elif args.use_qwenvl:
-            save_dir = save_dir / "qwenvl_rrp"
+            save_dir = save_dir / "qwenvl_ppr"
         elif args.use_memer:
             save_dir = save_dir / "memer"
         else:

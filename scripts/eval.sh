@@ -66,8 +66,8 @@ USE_HISTORY="auto"
 
 # VLM configuration.
 GEMINI_MODEL_NAME="gemini-2.5-pro"
-QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_rrp/simple_subgoal/checkpoint-1400"
-QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_rrp/grounded_subgoal/checkpoint-1200"
+QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/simple_subgoal/checkpoint-1400"
+QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/grounded_subgoal/checkpoint-1200"
 MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
 # Runtime configuration.
