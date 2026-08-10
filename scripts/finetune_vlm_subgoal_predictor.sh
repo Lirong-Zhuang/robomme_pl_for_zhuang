@@ -6,7 +6,7 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-DATASET_PATH='data/zhuanglr/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl'
+DATASET_PATH='/data/zhuanglr/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl'
 RUN_NAME='qwenvl_grounded_subgoal_256_v1.1'
 OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/qwenvl/${RUN_NAME#qwenvl_}"
 
@@ -45,6 +45,5 @@ swift sft \
     --output_dir $OUTPUT_DIR \
     --run_name $RUN_NAME \
     --warmup_ratio 0.05 \
-    --deepspeed zero2 \
     --dataset_num_proc 4 \
     --dataloader_num_workers 4
