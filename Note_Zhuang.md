@@ -9,22 +9,57 @@ bash scripts/eval.sh
 
 ## tmux
 
-open new window for tmux
+Create a named tmux session:
 
 ```bash
-tmux new -s xxxx
+tmux new -s vlm_train
 ```
 
-check tmux
+Detach from the current session without stopping the training process:
+
+```text
+Ctrl-b, then d
+```
+
+List existing tmux sessions:
 
 ```bash
 tmux ls
 ```
 
-attach tmux
+Reattach to the training session:
 
 ```bash
-tmux attach -t xxxx
+tmux attach -t vlm_train
+```
+
+Terminate the session after training has finished:
+
+```bash
+tmux kill-session -t vlm_train
+```
+
+## Train the VLM subgoal predictor
+
+Before training, edit `DATASET_PATH` and `OUTPUT_DIR` in
+`scripts/finetune_vlm_subgoal_predictor.sh`. The script is configured to use
+one GPU (`CUDA_VISIBLE_DEVICES=0`).
+
+Start training inside tmux:
+
+```bash
+tmux new -s vlm_train
+bash scripts/finetune_vlm_subgoal_predictor.sh
+```
+
+To use a different GPU, change `CUDA_VISIBLE_DEVICES=0` in the finetune
+script to the required device index before starting the run.
+
+The configured training dataset and checkpoints are written according to:
+
+```bash
+DATASET_PATH='data/robomme_preprocessed_data/qwenvl/simple_subgoal_train.jsonl'
+OUTPUT_DIR='runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal'
 ```
 
 ## Manuel
