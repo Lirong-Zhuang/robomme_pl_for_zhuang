@@ -22,7 +22,7 @@ set -Eeuo pipefail
 #   perceptual-tokendrop-context, perceptual-tokendrop-modul, perceptual-tokendrop-expert
 #   recurrent-rmt-context, recurrent-rmt-modul, recurrent-rmt-expert
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
-MODEL_TYPE="symbolic_simpleSG_qwenvl"
+MODEL_TYPE="symbolic_groundedSG_qwenvl"
 
 SEED=7
 CKPT_ID=79999
@@ -35,21 +35,21 @@ PORT=0
 
 # Task selection. Comma-separated values are supported.
 # Counting suite: 4 tasks x 50 episodes = 200 episodes.
-ONLY_TASKS="BinFill,PickXtimes,SwingXtimes,StopCube"
+ONLY_TASKS="SwingXtimes"
 EXCLUDE_TASKS=""
 RE_EVAL_TASKS=""
 
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=2
+NUM_EPISODES=50
 
 OBS_HORIZON=16
 MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
 # Preserve completed tasks/episodes and continue with anything still missing.
-OVERWRITE=true
+OVERWRITE=false
 
 # Save stdout/stderr from each episode under
 # <SAVE_DIR>/.../<TASK_NAME>/logs/, while still displaying it in the terminal.
@@ -67,7 +67,7 @@ USE_HISTORY="auto"
 # VLM configuration.
 GEMINI_MODEL_NAME="gemini-2.5-pro"
 QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal/checkpoint-1400"
-QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
+QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal_256_v1.1/v2-20260807-215307/checkpoint-876"
 MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
 # Runtime configuration.

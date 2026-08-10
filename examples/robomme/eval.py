@@ -272,7 +272,7 @@ def setup_save_directory(args: Args) -> Path:
         if args.use_gemini:
             save_dir = save_dir / "gemini"
         elif args.use_qwenvl:
-            save_dir = save_dir / "qwenvl"
+            save_dir = save_dir / "qwenvl256_v1.1"
         elif args.use_memer:
             save_dir = save_dir / "memer"
         else:
