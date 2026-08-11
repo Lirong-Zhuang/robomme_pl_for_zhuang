@@ -36,11 +36,30 @@ class BaseVLMSubgoalDatasetBuilder:
         max_episodes: int | None = None,
         visualize: bool = False,
         vlm_dir_name: str = "vlm_subgoal",
+        task_names: list[str] | None = None,
     ) -> None:
         self.raw_data_path = raw_data_path
         self.preprocessed_data_path = preprocessed_data_path
         self.max_episodes = max_episodes
         self.visualize = visualize
+        self.task_names = set(task_names) if task_names else None
+
+        available_tasks = {
+            get_env_id_from_filename(file)
+            for file in os.listdir(self.raw_data_path)
+            if file.endswith(".h5")
+        }
+        if not available_tasks:
+            raise ValueError(
+                f"No .h5 files found directly under {self.raw_data_path!r}"
+            )
+        if self.task_names is not None:
+            unknown_tasks = self.task_names - available_tasks
+            if unknown_tasks:
+                raise ValueError(
+                    f"Unknown task(s): {sorted(unknown_tasks)}. "
+                    f"Available tasks: {sorted(available_tasks)}"
+                )
 
         self.data_dir = os.path.join(preprocessed_data_path, vlm_dir_name)
         self.images_dir = os.path.join(self.data_dir, "images")
@@ -69,6 +88,11 @@ class BaseVLMSubgoalDatasetBuilder:
         results: list = []
         for file in os.listdir(self.raw_data_path):
             if not file.endswith(".h5"):
+                continue
+            if (
+                self.task_names is not None
+                and get_env_id_from_filename(file) not in self.task_names
+            ):
                 continue
             print(f"\nprocessing file: {file}")
             with h5py.File(os.path.join(self.raw_data_path, file), "r") as data:

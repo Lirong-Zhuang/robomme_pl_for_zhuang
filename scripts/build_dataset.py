@@ -113,6 +113,7 @@ if __name__ == "__main__":
             max_episodes=args.max_episodes,
             visualize=args.visualize,
             vlm_dir_name="qwenvl",
+            task_names=args.tasks,
         )
         builder.run()
     elif args.dataset_type == "vlm_subgoal_memer":
@@ -122,6 +123,7 @@ if __name__ == "__main__":
             max_episodes=args.max_episodes,
             visualize=args.visualize,
             vlm_dir_name="memer",
+            task_names=args.tasks,
         )
         builder.run()
     elif args.dataset_type == "vlm_subgoal_qpa":
@@ -131,6 +133,7 @@ if __name__ == "__main__":
             max_episodes=args.max_episodes,
             visualize=args.visualize,
             vlm_dir_name=QPA_DIR_NAME,
+            task_names=args.tasks,
         )
         builder.run()
     else:
