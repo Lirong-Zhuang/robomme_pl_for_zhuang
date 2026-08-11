@@ -5,6 +5,13 @@ Build RoboMME preprocessed pickle data from raw HDF5 data.
 uv run python scripts/build_dataset.py --dataset_type robomme_pkl
 ```
 
+Build only selected RoboMME tasks into a custom output directory.
+```
+uv run python scripts/build_dataset.py --dataset_type robomme_pkl \
+    --tasks BinFill \
+    --preprocessed_data_path data/robomme_preprocessed_binfill_data
+```
+
 Build VLM subgoal prediction dataset for QwenVL.
 ```
 uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qwenvl
@@ -73,6 +80,12 @@ def _parse_args() -> argparse.Namespace:
         help="Cap episodes per file (default: all)",
     )
     parser.add_argument(
+        "--tasks",
+        nargs="+",
+        default=None,
+        help="Only build these RoboMME task names, e.g. --tasks BinFill PickXtimes",
+    )
+    parser.add_argument(
         "--visualize",
         action="store_true",
         help="Write visualization MP4s",
@@ -90,6 +103,7 @@ if __name__ == "__main__":
             preprocessed_data_path=args.preprocessed_data_path,
             visualize=args.visualize,
             max_episodes=args.max_episodes,
+            task_names=args.tasks,
         )
         processor.run()
     elif args.dataset_type == "vlm_subgoal_qwenvl":

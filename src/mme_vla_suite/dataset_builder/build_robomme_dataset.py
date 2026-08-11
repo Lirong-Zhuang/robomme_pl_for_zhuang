@@ -21,6 +21,7 @@ from mme_vla_suite.shared.mem_buffer import MemoryBuffer, create_dict
 
 from mme_vla_suite.dataset_builder.robomme_h5_utils import (
     first_execution_step,
+    get_env_id_from_filename,
     remove_redundant_keyframes,
     resolve_subgoal,
 )
@@ -169,12 +170,26 @@ class DatasetProcessor:
         execution_horizon: int = 16,
         visualize: bool = False,
         max_episodes: int | None = None,
+        task_names: list[str] | None = None,
     ) -> None:
         self.raw_data_path = raw_data_path
         self.dataset_path = preprocessed_data_path
         self.execution_horizon = execution_horizon
         self.visualize = visualize
         self.max_episodes = max_episodes
+        self.task_names = set(task_names) if task_names else None
+        if self.task_names is not None:
+            available_tasks = {
+                get_env_id_from_filename(fname)
+                for fname in os.listdir(self.raw_data_path)
+                if fname.endswith(".h5")
+            }
+            unknown_tasks = self.task_names - available_tasks
+            if unknown_tasks:
+                raise ValueError(
+                    f"Unknown task(s): {sorted(unknown_tasks)}. "
+                    f"Available tasks: {sorted(available_tasks)}"
+                )
         if os.path.exists(self.dataset_path):
             shutil.rmtree(self.dataset_path)
         os.makedirs(self.dataset_path, exist_ok=True)
@@ -199,6 +214,11 @@ class DatasetProcessor:
 
         for fname in os.listdir(self.raw_data_path):
             if not fname.endswith(".h5"):
+                continue
+            if (
+                self.task_names is not None
+                and get_env_id_from_filename(fname) not in self.task_names
+            ):
                 continue
             print(f"Processing file: {fname}")
             path = os.path.join(self.raw_data_path, fname)
