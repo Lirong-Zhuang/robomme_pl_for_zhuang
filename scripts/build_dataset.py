@@ -7,9 +7,11 @@ uv run python scripts/build_dataset.py --dataset_type robomme_pkl
 
 Build only selected RoboMME tasks into a custom output directory.
 ```
-uv run python scripts/build_dataset.py --dataset_type robomme_pkl \
-    --tasks BinFill \
-    --preprocessed_data_path data/robomme_preprocessed_binfill_data
+uv run python scripts/build_dataset.py \
+  --dataset_type vlm_subgoal_qwenvl \
+  --raw_data_path /data/public/RoboMME \
+  --preprocessed_data_path data/robomme_preprocessed_binfill_data \
+  --tasks BinFill
 ```
 
 Build VLM subgoal prediction dataset for QwenVL.
