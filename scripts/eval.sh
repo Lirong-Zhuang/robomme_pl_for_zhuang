@@ -48,6 +48,10 @@ OBS_HORIZON=16
 MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
+# Optional final directory name for this evaluation run. When set, results are
+# written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
+# Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
+EVAL_RUN_NAME="qwenvl"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
@@ -221,6 +225,7 @@ EVAL_ARGS=(
     --args.obs-horizon "$OBS_HORIZON"
     --args.max-steps "$MAX_STEPS"
     --args.save-dir "$SAVE_DIR"
+    --args.run-name "$EVAL_RUN_NAME"
     --args.policy-name "$POLICY_NAME"
     --args.model-seed "$SEED"
     --args.model-ckpt-id "$CKPT_ID"
@@ -282,6 +287,7 @@ echo "Policy:          $POLICY_NAME"
 echo "Predictor:       $PREDICTOR"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Checkpoint:      $POLICY_DIR"
+echo "Evaluation run:  ${EVAL_RUN_NAME:-default}"
 echo "Task(s):         ${ONLY_TASKS:-all}"
 echo "Episode ID(s):   ${EPISODE_IDS:-0..$((NUM_EPISODES - 1))}"
 echo "Server GPU:      $GPU_ID_SERVER"

@@ -38,6 +38,7 @@ class Args:
     obs_horizon: int = 16
     max_steps: int = 1300
     save_dir: str = "runs/evaluation"
+    run_name: str = ""
     overwrite: bool = True
     save_episode_logs: bool = True
 
@@ -268,7 +269,9 @@ def setup_save_directory(args: Args) -> Path:
         / f"seed{args.model_seed}"
     )
 
-    if args.subgoal_type in SUBGOAL_TYPES:
+    if args.run_name:
+        save_dir = save_dir / args.run_name
+    elif args.subgoal_type in SUBGOAL_TYPES:
         if args.use_gemini:
             save_dir = save_dir / "gemini"
         elif args.use_qwenvl:
