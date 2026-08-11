@@ -35,7 +35,7 @@ PORT=0
 
 # Task selection. Comma-separated values are supported.
 # Counting suite: 4 tasks x 50 episodes = 200 episodes.
-ONLY_TASKS="SwingXtimes"
+ONLY_TASKS="BinFill,PickXtimes,StopCube"
 EXCLUDE_TASKS=""
 RE_EVAL_TASKS=""
 
