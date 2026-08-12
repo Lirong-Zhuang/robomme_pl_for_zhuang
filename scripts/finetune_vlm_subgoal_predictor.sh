@@ -31,18 +31,18 @@ swift sft \
     --packing false \
     --train_type lora \
     --torch_dtype bfloat16 \
-    --num_train_epochs 4 \
+    --num_train_epochs 2 \
     --per_device_train_batch_size 16 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 2 \
     --attn_impl sdpa \
     --padding_free false \
-    --learning_rate 1e-4 \
+    --learning_rate 5e-5 \
     --lora_rank 16 \
     --lora_alpha 32 \
     --target_modules all-linear \
     --freeze_vit true \
     --freeze_aligner true \
-    --gradient_checkpointing false \
+    --gradient_checkpointing true \
     --vit_gradient_checkpointing false \
     --save_strategy steps \
     --save_steps 100 \
