@@ -279,6 +279,13 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
 
             self._append_training_rows(simple_subgoal_data, grounded_subgoal_data)
 
+            dup_count = duplicate_idxs.get(idx, 0)
+            if dup_count > 0:
+                print(f"duplicate {idx} for {dup_count} more times")
+                self._append_training_rows(
+                    simple_subgoal_data, grounded_subgoal_data, times=dup_count
+                )
+
             if self.visualize:
                 vis_image = image.copy()
                 vis_image = cv2.putText(
@@ -287,19 +294,13 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
                 )
                 save_images.append(vis_image)
 
-                dup_count = duplicate_idxs.get(idx, 0)
-                if dup_count > 0:
-                    print(f"duplicate {idx} for {dup_count} more times")
-                    self._append_training_rows(
-                        simple_subgoal_data, grounded_subgoal_data, times=dup_count
+                for _ in range(dup_count):
+                    dup_image = image.copy()
+                    dup_image = cv2.putText(
+                        dup_image, f"Duplicate: {simple_subgoal}", (10, 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
                     )
-                    for _ in range(dup_count):
-                        dup_image = image.copy()
-                        dup_image = cv2.putText(
-                            dup_image, f"Duplicate: {simple_subgoal}", (10, 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-                        )
-                        save_images.append(dup_image)
+                    save_images.append(dup_image)
 
             last_simple_subgoal = simple_subgoal
             last_grounded_subgoal = grounded_subgoal

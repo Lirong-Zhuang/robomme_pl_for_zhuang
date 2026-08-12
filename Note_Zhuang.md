@@ -1,128 +1,128 @@
+# Note
 
-## Automat
+This branch and all branches derived from it are used to investigate how
+symbolic memory representations can maximize the memory capabilities of
+VLAs.
 
-change line 25-84 of file scripts/eval.sh to change the setup
+## 1. Build the dataset
 
-```bash
-bash scripts/eval.sh
+The QwenVL builder writes the processed dataset under
+`<preprocessed_data_path>/qwenvl/`. The training JSONL files are:
+
+```text
+qwenvl/simple_subgoal_train.jsonl
+qwenvl/grounded_subgoal_train.jsonl
 ```
 
-## tmux
+### Build all `.h5` files
 
-Create a named tmux session:
+Omit `--tasks` to process every `.h5` file directly under
+`--raw_data_path`:
+
+```bash
+uv run python scripts/build_dataset.py \
+  --dataset_type vlm_subgoal_qwenvl \
+  --raw_data_path /data/public/RoboMME \
+  --preprocessed_data_path data/robomme_preprocessed_data
+```
+
+### Build only specified tasks
+
+Use `--tasks` followed by one or more task names. This example processes only
+the `BinFill` dataset:
+
+```bash
+uv run python scripts/build_dataset.py \
+  --dataset_type vlm_subgoal_qwenvl \
+  --raw_data_path /data/public/RoboMME \
+  --preprocessed_data_path data/robomme_preprocessed_binfill_data \
+  --tasks BinFill
+```
+
+For multiple tasks, list their names separated by spaces, for example:
+
+```bash
+--tasks BinFill PickXtimes
+```
+
+Add `--visualize` only when visualization MP4s are needed. Keyframe duplicate
+training samples are generated whether or not visualization is enabled.
+
+## 2. Train the VLM subgoal predictor with tmux
+
+Before training, set `DATASET_PATH`, `RUN_NAME`, `OUTPUT_DIR`, and, if needed,
+`CUDA_VISIBLE_DEVICES` in `scripts/finetune_vlm_subgoal_predictor.sh`.
+
+Create and enter a named tmux session:
 
 ```bash
 tmux new -s vlm_train
 ```
 
-Detach from the current session without stopping the training process:
+Initialize micromamba and activate the `robomme` environment inside that
+session:
+
+```bash
+micromamba activate robomme
+```
+
+Then start training:
+
+```bash
+bash scripts/finetune_vlm_subgoal_predictor.sh
+```
+
+Detach without stopping training by pressing:
 
 ```text
 Ctrl-b, then d
 ```
 
-List existing tmux sessions:
+List running tmux sessions and check whether the training session still
+exists:
 
 ```bash
 tmux ls
 ```
 
-Reattach to the training session:
+Enter the training session again:
 
 ```bash
 tmux attach -t vlm_train
 ```
 
-Terminate the session after training has finished:
+If the session is already attached elsewhere, detach it there and attach it
+to the current terminal:
+
+```bash
+tmux attach -d -t vlm_train
+```
+
+After training has finished, the session can be closed from inside it with
+`exit`, or from another terminal with:
 
 ```bash
 tmux kill-session -t vlm_train
 ```
 
-## Train the VLM subgoal predictor
+## 3. Evaluation
 
-Before training, edit `DATASET_PATH` and `OUTPUT_DIR` in
-`scripts/finetune_vlm_subgoal_predictor.sh`. The script is configured to use
-one GPU (`CUDA_VISIBLE_DEVICES=0`).
+Before evaluation, edit the **Evaluation configuration** section near the top
+of `scripts/eval.sh`. In particular, check:
 
-Start training inside tmux:
+- `MODEL_TYPE`
+- `CKPT_ID`
+- `ONLY_TASKS` and `NUM_EPISODES`
+- `QWENVL_SIMPLE_ADAPTER_PATH` or the adapter path for the selected predictor
+- `GPU_ID_SERVER` and `GPU_ID_CLIENT`
+- `EVAL_RUN_NAME` and `SAVE_DIR`
 
-```bash
-tmux new -s vlm_train
-bash scripts/finetune_vlm_subgoal_predictor.sh
-```
-
-To use a different GPU, change `CUDA_VISIBLE_DEVICES=0` in the finetune
-script to the required device index before starting the run.
-
-The configured training dataset and checkpoints are written according to:
+Run the evaluation from the repository root:
 
 ```bash
-DATASET_PATH='data/robomme_preprocessed_data/qwenvl/simple_subgoal_train.jsonl'
-OUTPUT_DIR='runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal'
+bash scripts/eval.sh
 ```
 
-## Manuel
-
-This project uses two separate Python environments.
-
-### 1. Policy Learning / uv Environment
-
-Use this environment for the VLA policy learning code and policy server.
-
-Activate:
-
-```bash
-source .venv/bin/activate
-```
-
-Deactivate:
-
-```bash
-deactivate
-```
-
-Typical usage:
-
-```bash
-uv run scripts/serve_policy.py ...
-```
-
-### 2. RoboMME Simulator / conda Environment
-
-Use this environment for the RoboMME simulator, `simple_test.py`, and `eval.py`.
-
-Activate:
-
-```bash
-conda activate robomme
-```
-
-Deactivate:
-
-```bash
-conda deactivate
-```
-
-Typical usage:
-
-```bash
-python examples/robomme/simple_test.py
-python examples/robomme/eval.py ...
-```
-
-## Run a eval to observe the response
-
-change line 47-64 of file examples/robimme/eval.py to change the setup
-
-### Terminal 1 with uv env(openpi)
-
-```bash
-CUDA_VISIBLE_DEVICES=0 uv run scripts/serve_policy.py
-```
-
-### Terminal 2 with conda env(robomme)
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python examples/robomme/eval.py
-```
+The script starts the policy server, runs the evaluation in the foreground,
+writes results under `SAVE_DIR`, and stops the server automatically when the
+evaluation ends.
