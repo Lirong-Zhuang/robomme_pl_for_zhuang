@@ -7,7 +7,7 @@
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
 DATASET_PATH='/data/zhuanglr/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl'
-RUN_NAME='qwenvl_grounded_subgoal_256_v1.1'
+RUN_NAME='qwenvl_grounded_subgoal_256_v1.2'
 OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/qwenvl/${RUN_NAME#qwenvl_}"
 
 PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
@@ -20,14 +20,20 @@ swift sft \
     --model 'Qwen/Qwen3-VL-4B-Instruct' \
     --dataset $DATASET_PATH \
     --norm_bbox none \
-    --split_dataset_ratio 0.0 \
+    --split_dataset_ratio 0.1 \
+    --eval_strategy steps \
+    --eval_steps 100 \
+    --per_device_eval_batch_size 16 \
+    --metric_for_best_model eval_loss \
+    --greater_is_better false \
+    --load_best_model_at_end true \
     --load_from_cache_file false \
     --packing false \
     --train_type lora \
     --torch_dtype bfloat16 \
-    --num_train_epochs 2 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 16 \
+    --num_train_epochs 4 \
+    --per_device_train_batch_size 32 \
+    --gradient_accumulation_steps 2 \
     --attn_impl sdpa \
     --padding_free false \
     --learning_rate 1e-4 \
@@ -38,6 +44,7 @@ swift sft \
     --freeze_aligner true \
     --gradient_checkpointing true \
     --vit_gradient_checkpointing false \
+    --save_strategy steps \
     --save_steps 100 \
     --save_total_limit 2 \
     --logging_steps 100 \
