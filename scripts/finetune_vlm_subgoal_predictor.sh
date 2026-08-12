@@ -32,8 +32,8 @@ swift sft \
     --train_type lora \
     --torch_dtype bfloat16 \
     --num_train_epochs 4 \
-    --per_device_train_batch_size 32 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 16 \
+    --gradient_accumulation_steps 4 \
     --attn_impl sdpa \
     --padding_free false \
     --learning_rate 1e-4 \
@@ -42,7 +42,7 @@ swift sft \
     --target_modules all-linear \
     --freeze_vit true \
     --freeze_aligner true \
-    --gradient_checkpointing true \
+    --gradient_checkpointing false \
     --vit_gradient_checkpointing false \
     --save_strategy steps \
     --save_steps 100 \
@@ -52,5 +52,5 @@ swift sft \
     --output_dir $OUTPUT_DIR \
     --run_name $RUN_NAME \
     --warmup_ratio 0.05 \
-    --dataset_num_proc 4 \
-    --dataloader_num_workers 4
+    --dataset_num_proc 8 \
+    --dataloader_num_workers 8
