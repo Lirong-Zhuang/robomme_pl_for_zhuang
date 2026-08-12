@@ -6,8 +6,8 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-DATASET_PATH='data/robomme_preprocessed_data/qwenvl/simple_subgoal_train.jsonl'
-RUN_NAME='qwenvl_simple_subgoal'
+DATASET_PATH='data/robomme_preprocessed_binfill_data/qwenvl/simple_subgoal_train.jsonl'
+RUN_NAME='qwenvl_baseline_v1.2_simple_subgoal'
 OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/${RUN_NAME}"
 
 PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
@@ -19,30 +19,37 @@ CUDA_VISIBLE_DEVICES=0 \
 swift sft \
     --model 'Qwen/Qwen3-VL-4B-Instruct' \
     --dataset $DATASET_PATH \
-    --split_dataset_ratio 0.0 \
+    --split_dataset_ratio 0.1 \
+    --eval_strategy steps \
+    --eval_steps 50 \
+    --per_device_eval_batch_size 16 \
+    --metric_for_best_model loss \
+    --greater_is_better false \
+    --load_best_model_at_end true \
     --load_from_cache_file true \
     --packing false \
     --train_type lora \
     --torch_dtype bfloat16 \
-    --num_train_epochs 2 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 16 \
+    --num_train_epochs 6 \
+    --per_device_train_batch_size 16 \
+    --gradient_accumulation_steps 1 \
     --attn_impl sdpa \
     --padding_free false \
-    --learning_rate 1e-4 \
+    --learning_rate 5e-5 \
     --lora_rank 16 \
     --lora_alpha 32 \
     --target_modules all-linear \
     --freeze_vit true \
     --freeze_aligner true \
-    --gradient_checkpointing true \
+    --gradient_checkpointing false \
     --vit_gradient_checkpointing false \
-    --save_steps 100 \
+    --save_strategy steps \
+    --save_steps 50 \
     --save_total_limit 2 \
-    --logging_steps 100 \
+    --logging_steps 50 \
     --max_length 3200 \
     --output_dir $OUTPUT_DIR \
     --run_name $RUN_NAME \
     --warmup_ratio 0.05 \
-    --dataset_num_proc 4 \
-    --dataloader_num_workers 4
+    --dataset_num_proc 8 \
+    --dataloader_num_workers 8
