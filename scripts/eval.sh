@@ -42,7 +42,7 @@ RE_EVAL_TASKS=""
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=2
+NUM_EPISODES=50
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -66,7 +66,7 @@ USE_HISTORY="auto"
 
 # VLM configuration.
 GEMINI_MODEL_NAME="gemini-2.5-pro"
-QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/simple_subgoal/checkpoint-1400"
+QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/simple_subgoal_v1.1/v0-20260809-164530/checkpoint-800"
 QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_ppr/grounded_subgoal/checkpoint-1200"
 MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
