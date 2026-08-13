@@ -1,8 +1,6 @@
-# Note
+# Trinity
 
-This branch and all branches derived from it are used to investigate how
-symbolic memory representations can maximize the memory capabilities of
-VLAs.
+This branch develops a benchmark with three separated parts to do the memory-based tasks.
 
 ## 1. Build the dataset
 
