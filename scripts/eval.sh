@@ -42,7 +42,7 @@ RE_EVAL_TASKS=""
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=50
+NUM_EPISODES=100
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -51,7 +51,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="qwenvl_baseline_v1.2"
+EVAL_RUN_NAME="qwenvl_baseline_v1.3"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
@@ -70,7 +70,7 @@ USE_HISTORY="auto"
 
 # VLM configuration.
 GEMINI_MODEL_NAME="gemini-2.5-pro"
-QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.2_simple_subgoal/v0-20260811-230355/checkpoint-850"
+QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
 QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
