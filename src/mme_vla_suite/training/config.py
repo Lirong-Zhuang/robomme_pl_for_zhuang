@@ -490,6 +490,9 @@ class TrainConfig:
     assets_base_dir: str = "runs/assets"
     # Base directory for checkpoints.
     checkpoint_base_dir: str = "runs/ckpts"
+    # Optional role-level checkpoint directory. When unset, preserve the
+    # original behavior and use the internal training config name.
+    checkpoint_namespace: str | None = None
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -539,7 +542,8 @@ class TrainConfig:
         """Get the checkpoint directory for this config."""
         if not self.exp_name:
             raise ValueError("--exp_name must be set")
-        return (pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name).resolve()
+        namespace = self.checkpoint_namespace or self.name
+        return (pathlib.Path(self.checkpoint_base_dir) / namespace / self.exp_name).resolve()
 
     @property
     def trainable_filter(self) -> nnx.filterlib.Filter:
