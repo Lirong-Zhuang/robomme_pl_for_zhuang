@@ -39,8 +39,7 @@ class Executer:
         img: np.ndarray,
         wrist_img: np.ndarray,
         robot_state: np.ndarray,
-        task_prompt: str,
-        subgoal: Optional[str],
+        execution_goal: str,
         exec_horizon: int,
     ) -> np.ndarray:
         if self.client is None:
@@ -61,14 +60,12 @@ class Executer:
             "observation/image": img,
             "observation/wrist_image": wrist_img,
             "observation/state": robot_state,
-            # Kept unchanged in this step. Task removal will be handled as a
-            # separate change to avoid changing the current policy behavior.
-            "prompt": task_prompt,
+            "prompt": execution_goal,
         }
 
-        if subgoal is not None:
-            element["simple_subgoal"] = subgoal
-            element["grounded_subgoal"] = subgoal
+        if self.args.subgoal_type in ("simple_subgoal", "grounded_subgoal"):
+            element["simple_subgoal"] = execution_goal
+            element["grounded_subgoal"] = execution_goal
 
         action_chunk = self.client.infer(element)["actions"]
         return action_chunk[:exec_horizon]

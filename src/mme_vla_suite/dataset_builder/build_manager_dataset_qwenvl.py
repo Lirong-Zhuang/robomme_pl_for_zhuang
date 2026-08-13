@@ -36,6 +36,27 @@ GROUNDED_SUBGOAL_SYSTEM_PROMPT = (
 
 
 class DatasetBuilder(BaseManagerDatasetBuilder):
+    def _format_reporter_result(
+        self,
+        reporter_result: bool | None,
+        subgoal_name: str,
+    ) -> str:
+        """Format the Reporter result exactly as it is formatted at eval time."""
+        if reporter_result is True:
+            return (
+                f"The Reporter determined that the last predicted {subgoal_name} "
+                "has been completed."
+            )
+        if reporter_result is False:
+            return (
+                f"The Reporter determined that the last predicted {subgoal_name} "
+                "has not been completed."
+            )
+        return (
+            f"The Reporter did not provide a result for the last predicted "
+            f"{subgoal_name}."
+        )
+
     # -------------------------------------------------------------------------
     # Simple subgoal data
     # -------------------------------------------------------------------------
@@ -46,6 +67,7 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
         subgoal: str,
         image_path: str,
         video_path: str | None = None,
+        reporter_result: bool | None = None,
     ) -> dict:
         video_prefix = "<video>" if video_path else ""
         if len(self.history_simple_subgoals) == 0:
@@ -55,10 +77,15 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
                 "<image>What's the next language subgoal based on current observation?"
             )
         else:
+            reporter_text = self._format_reporter_result(
+                reporter_result,
+                "language subgoal",
+            )
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n"
-                "<image>What's the next language subgoal based on current observation?"
+                f"{reporter_text}\n"
+                "<image>What's the next language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
             )
 
         result = {
@@ -90,6 +117,7 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
         subgoal: str,
         image_path: str,
         video_path: str | None = None,
+        reporter_result: bool | None = None,
     ) -> dict:
         video_prefix = "<video>" if video_path else ""
         assistant_prompt, bbox = self._preprocess_grounded_subgoal(subgoal)
@@ -101,10 +129,15 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
                 "<image>What's the next grounded language subgoal based on current observation?"
             )
         else:
+            reporter_text = self._format_reporter_result(
+                reporter_result,
+                "grounded language subgoal",
+            )
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n"
-                "<image>What's the next grounded language subgoal based on current observation?"
+                f"{reporter_text}\n"
+                "<image>What's the next grounded language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
             )
 
         result = {
@@ -229,8 +262,20 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
             transition_idxs.append(len(timestep_indexs) - 1)
         print("transition_idxs: ", transition_idxs)
 
+        # A transition means that the previously predicted subgoal was completed.
+        # The final timestep is only an episode terminator, not a request for a
+        # next subgoal, so it must not be treated as a subgoal transition.
+        reporter_complete_idxs = set(transition_idxs[1:])
+        reporter_complete_idxs.discard(len(timestep_indexs) - 1)
+
         select_idxs, duplicate_idxs = self._compute_select_and_duplicate_idxs(
             transition_idxs, len(timestep_indexs), env_id
+        )
+        select_idxs = sorted(
+            set(
+                [exec_start_idx]
+                + [idx for idx in select_idxs if idx >= exec_start_idx]
+            )
         )
         print("select_idxs: ", select_idxs)
 
@@ -256,9 +301,20 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
             os.makedirs(visualization_video_path, exist_ok=True)
 
         for idx in select_idxs:
-            image = episode_data[f"timestep_{idx}"]["obs"]["front_rgb"][()]
-            simple_subgoal = episode_data[f"timestep_{idx}"]["info"]["simple_subgoal"][()].decode().lower()
-            grounded_subgoal = episode_data[f"timestep_{idx}"]["info"]["grounded_subgoal"][()].decode().lower()
+            timestep_data = episode_data[f"timestep_{idx}"]
+            timestep_info = timestep_data["info"]
+
+            # At deployment the environment terminates here, so Manager is not
+            # asked to predict another subgoal from an already completed task.
+            if (
+                "is_completed" in timestep_info
+                and bool(timestep_info["is_completed"][()])
+            ):
+                continue
+
+            image = timestep_data["obs"]["front_rgb"][()]
+            simple_subgoal = timestep_info["simple_subgoal"][()].decode().lower()
+            grounded_subgoal = timestep_info["grounded_subgoal"][()].decode().lower()
 
             if "complete" in simple_subgoal:
                 simple_subgoal = last_simple_subgoal
@@ -270,11 +326,25 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
             )
             imageio.imwrite(image_path, image)
 
+            reporter_result = (
+                None
+                if len(self.history_simple_subgoals) == 0
+                else idx in reporter_complete_idxs
+            )
+
             simple_subgoal_data = self.make_simple_subgoal_data(
-                task_goal, simple_subgoal, image_path, video_path
+                task_goal,
+                simple_subgoal,
+                image_path,
+                video_path,
+                reporter_result,
             )
             grounded_subgoal_data = self.make_grounded_subgoal_data(
-                task_goal, grounded_subgoal, image_path, video_path
+                task_goal,
+                grounded_subgoal,
+                image_path,
+                video_path,
+                reporter_result,
             )
 
             self._append_training_rows(simple_subgoal_data, grounded_subgoal_data)

@@ -121,9 +121,15 @@ class PaligemmaTokenizer:
         state: np.ndarray | None = None,
         subgoal: str | None = None, 
     ) -> tuple[np.ndarray, np.ndarray]:
-        cleaned_text = prompt.strip().replace("_", " ").replace("\n", " ")
-        if state is not None:
-            if subgoal is None:
+        if subgoal is not None:
+            # The symbolic Executer is conditioned only on the current subgoal.
+            # Task-level planning belongs to the Manager.
+            subgoal = subgoal.strip().replace("_", " ").replace("\n", " ")
+            full_prompt = f"Current Subgoal: {subgoal};\nAction: "
+            tokens = self._tokenizer.encode(full_prompt, add_bos=True)
+        else:
+            cleaned_text = prompt.strip().replace("_", " ").replace("\n", " ")
+            if state is not None:
                 # This is original Pi05 format, where the state is part of the discrete language input.
                 state = np.clip(state, -1, 1)
                 discretized_state = np.digitize(state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
@@ -131,20 +137,9 @@ class PaligemmaTokenizer:
                 full_prompt = f"Task: {cleaned_text}; State: {state_str};\nAction: "
                 tokens = self._tokenizer.encode(full_prompt, add_bos=True)
             else:
-                # this is used only for real robot symbolic variant. We do not use proprioceptive states in our experiment 
-                subgoal = subgoal.strip().replace("_", " ").replace("\n", " ")
-                full_prompt = f"Task: {cleaned_text}\nCurrent Subgoal: {subgoal}.\nAction: "
-                tokens = self._tokenizer.encode(full_prompt, add_bos=True)
-                
-        elif subgoal is not None:
-            # This is the subgoal format, where the subgoal is part of the language input. for both simple and grounded.
-            subgoal = subgoal.strip().replace("_", " ").replace("\n", " ")
-            full_prompt = f"Task: {cleaned_text};\nCurrent Subgoal: {subgoal};\nAction: "
-            tokens = self._tokenizer.encode(full_prompt, add_bos=True)
-        else:
-            # This is the Pi0 format, where the state is part of the continuous action expert input.
-            # tokenize "\n" separately as the "start of answer" token
-            tokens = self._tokenizer.encode(cleaned_text, add_bos=True) + self._tokenizer.encode("\n")
+                # This is the Pi0 format, where the state is part of the continuous action expert input.
+                # tokenize "\n" separately as the "start of answer" token
+                tokens = self._tokenizer.encode(cleaned_text, add_bos=True) + self._tokenizer.encode("\n")
         
         tokens_len = len(tokens)
         

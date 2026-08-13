@@ -129,7 +129,6 @@ class EpisodeEvaluator:
         reporter.start_episode(epstate, env_runner)
 
         img, wrist_img, robot_state = epstate.get_current_obs()
-        prompt = task_goal
         success_flag = "unknown"
         subgoal = None
         last_subgoal = None
@@ -154,8 +153,19 @@ class EpisodeEvaluator:
                     break
 
                 reporter.observe_subgoal(subgoal, img)
+                # Trinity's symbolic Executer receives only the current subgoal.
+                # Keep the task goal only for legacy non-symbolic policies, which
+                # do not have a Manager or a subgoal input.
+                if self.args.subgoal_type in SUBGOAL_TYPES:
+                    if subgoal is None:
+                        raise RuntimeError(
+                            "Symbolic Executer requires a subgoal from Manager"
+                        )
+                    execution_goal = subgoal
+                else:
+                    execution_goal = task_goal
                 action_chunk = executer.get_action_chunk(
-                    epstate, img, wrist_img, robot_state, prompt, subgoal,
+                    epstate, img, wrist_img, robot_state, execution_goal,
                     exec_horizon=self.args.obs_horizon
                 )
 

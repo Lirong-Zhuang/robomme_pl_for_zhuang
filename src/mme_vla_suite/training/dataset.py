@@ -207,6 +207,10 @@ class RoboMMEDataset(Dataset):
         if self.history_config is not None and self.history_config.representation_type == "symbolic":
             data["grounded_subgoal"] = self.add_grounding_augmentation(data["grounded_subgoal"], noise_range=8)
             data["simple_subgoal"] = self.add_grounding_augmentation(data["simple_subgoal"], noise_range=8)
+            # The symbolic Executer is trained with the current subgoal as its
+            # only language execution target. Do not pass the episode task goal
+            # stored in the raw sample's original prompt field to the model.
+            data["prompt"] = data[self.history_config.symbolic_memory.type]
  
         
         if self.history_config is not None:

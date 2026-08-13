@@ -10,7 +10,7 @@ Build only selected Manager tasks into a custom output directory.
 uv run python scripts/build_dataset.py \
   --dataset_type manager_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/robomme_preprocessed_binfill_data \
+  --preprocessed_data_path data/trinity_manager_binfill_data \
   --tasks BinFill
 ```
 
