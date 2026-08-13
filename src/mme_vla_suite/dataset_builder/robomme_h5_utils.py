@@ -1,6 +1,6 @@
 """Shared utilities for RoboMME HDF5 dataset scripts.
 
-Used by build_robomme_dataset.py and the VLM subgoal dataset builders
+Used by the Executer and Manager dataset builders
 (memer, qwenvl).
 """
 

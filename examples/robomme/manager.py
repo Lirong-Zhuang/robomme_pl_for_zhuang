@@ -70,6 +70,7 @@ class ManagerBase:
         count: int,
         current_subgoal: Optional[str],
         last_subgoal: Optional[str],
+        reporter_result: Optional[bool] = None,
     ) -> Tuple[Optional[str], bool]:
         # return (subgoal_str, has_api_error)
         raise NotImplementedError
@@ -106,6 +107,7 @@ class GeminiManager(ManagerBase):
         count: int,
         current_subgoal: Optional[str],
         last_subgoal: Optional[str],
+        reporter_result: Optional[bool] = None,
     ) -> Tuple[Optional[str], bool]:
         if not self._should_call(count):
             return current_subgoal, False
@@ -182,6 +184,7 @@ class QwenVLManager(ManagerBase):
         count: int,
         current_subgoal: Optional[str],
         last_subgoal: Optional[str],
+        reporter_result: Optional[bool] = None,
     ) -> Tuple[Optional[str], bool]:
         # Some tricks. QwenVL sometimes thinks the button has been pressed. hot fix for now.
         # Such special tricks are not encouraged if you consider participate RoboMME challenge @ CVPR 2026
@@ -197,7 +200,12 @@ class QwenVLManager(ManagerBase):
         else:
             keep_period = 0
 
-        response = self.api.call(self.video_buffer[-1], count, keep_period)
+        response = self.api.call(
+            self.video_buffer[-1],
+            count,
+            keep_period,
+            reporter_result,
+        )
         self.video_buffer.clear()
         return response, False
     
@@ -231,6 +239,7 @@ class MemERManager(ManagerBase):
         count: int,
         current_subgoal: Optional[str],
         last_subgoal: Optional[str],
+        reporter_result: Optional[bool] = None,
     ) -> Tuple[Optional[str], bool]:
         response = self.api.call()
         return response, False
@@ -250,6 +259,7 @@ class OracleManager(ManagerBase):
         count: int,
         current_subgoal: Optional[str],
         last_subgoal: Optional[str],
+        reporter_result: Optional[bool] = None,
     ) -> Tuple[Optional[str], bool]:
         if self.args.subgoal_type == "simple_subgoal":
             return self.env_runner.simple_subgoal_oracle, False

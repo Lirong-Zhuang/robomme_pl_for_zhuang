@@ -74,8 +74,10 @@ MANAGER_QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_base
 MANAGER_QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 MANAGER_MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
-# Reporter is introduced as an explicit role but remains disabled in this step.
-REPORTER_TYPE="none"
+# Reporter configuration. Set REPORTER_TYPE="none" to disable it.
+# REPORTER_MODEL_PATH can be a Hugging Face model ID or a local model directory.
+REPORTER_TYPE="qwenvl"
+REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 
 # Runtime configuration.
 
@@ -245,6 +247,7 @@ EVAL_ARGS=(
     --args.manager-qwenvl-groundSG-adapter-path "$MANAGER_QWENVL_GROUNDED_ADAPTER_PATH"
     --args.manager-memer-adapter-path "$MANAGER_MEMER_ADAPTER_PATH"
     --args.reporter-type "$REPORTER_TYPE"
+    --args.reporter-model-path "$REPORTER_MODEL_PATH"
 )
 
 EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")

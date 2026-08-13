@@ -1,5 +1,5 @@
 """
-Build VLM subgoal prediction dataset for MemER
+Build Manager subgoal prediction dataset for MemER
 """
 
 import json
@@ -12,7 +12,7 @@ import numpy as np
 import argparse
 
 from mme_vla_suite.dataset_builder.robomme_h5_utils import get_task_goal, get_timestep_indices
-from mme_vla_suite.dataset_builder.vlm_subgoal_dataset_base import BaseVLMSubgoalDatasetBuilder
+from mme_vla_suite.dataset_builder.manager_dataset_base import BaseManagerDatasetBuilder
 
 np.set_printoptions(precision=4, suppress=True)
 
@@ -117,7 +117,7 @@ SUBGOAL_SYSTEM_PROMPT = (
 # -----------------------------------------------------------------------------
 
 
-class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
+class DatasetBuilder(BaseManagerDatasetBuilder):
     def run(self) -> list:
         results = super().run()
         if results:

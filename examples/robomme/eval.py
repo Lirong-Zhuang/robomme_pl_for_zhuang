@@ -64,9 +64,9 @@ class Args:
     manager_save_memer_kf: bool = False
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
 
-    # Reporter. This first refactoring step keeps it disabled so evaluation
-    # behavior remains unchanged.
-    reporter_type: str = "none"
+    # Reporter
+    reporter_type: str = "qwenvl"
+    reporter_model_path: str = "Qwen/Qwen3-VL-4B-Instruct"
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 10 # number of episodes to evaluate for each task
@@ -133,6 +133,7 @@ class EpisodeEvaluator:
         success_flag = "unknown"
         subgoal = None
         last_subgoal = None
+        reporter_result = None
 
         while True:
             manager.step(epstate)
@@ -143,6 +144,7 @@ class EpisodeEvaluator:
                         epstate.count,
                         subgoal,
                         last_subgoal,
+                        reporter_result,
                     )
                 else:
                     subgoal = last_subgoal
@@ -151,6 +153,7 @@ class EpisodeEvaluator:
                 if has_api_error:
                     break
 
+                reporter.observe_subgoal(subgoal, img)
                 action_chunk = executer.get_action_chunk(
                     epstate, img, wrist_img, robot_state, prompt, subgoal,
                     exec_horizon=self.args.obs_horizon
@@ -179,7 +182,10 @@ class EpisodeEvaluator:
                 action=action.copy(),
                 subgoal=subgoal,
             )
-            reporter.step(epstate, subgoal)
+            # Ask Reporter once after each Executer action chunk. The result is
+            # included in the next QwenVL Manager request.
+            if not epstate.action_plan:
+                reporter_result = reporter.step(epstate, subgoal)
 
             if stop_flag:
                 break

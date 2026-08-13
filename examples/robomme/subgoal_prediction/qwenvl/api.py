@@ -163,7 +163,12 @@ class Qwen3VLModel:
                 self.history_grounded_subgoals.append(assistant_prompt)
                 self.history_grounded_bboxes.extend(bbox)
     
-    def prepare_infer_request(self, image_query: np.ndarray, step_idx: int) -> dict:
+    def prepare_infer_request(
+        self,
+        image_query: np.ndarray,
+        step_idx: int,
+        reporter_result: bool | None = None,
+    ) -> dict:
         
         image_path = os.path.join(self.save_dir, f"step_{step_idx}_image.png")
         imageio.imwrite(image_path, image_query)
@@ -173,13 +178,21 @@ class Qwen3VLModel:
             if len(self.history_simple_subgoals) == 0:
                 user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThis is the initial turn for prediction\n<image>What's the next language subgoal based on current observation?"
             else:
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n<image>What's the next language subgoal based on current observation?"
+                reporter_text = self._format_reporter_result(
+                    reporter_result,
+                    "language subgoal",
+                )
+                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n{reporter_text}\n<image>What's the next language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
                     
         else:        
             if len(self.history_grounded_subgoals) == 0:
                 user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThis is the initial turn for prediction\n<image>What's the next grounded language subgoal based on current observation?"
             else:            
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n<image>What's the next grounded language subgoal based on current observation?"
+                reporter_text = self._format_reporter_result(
+                    reporter_result,
+                    "grounded language subgoal",
+                )
+                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n{reporter_text}\n<image>What's the next grounded language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
         
         infer_request_dict = {
             "messages": [
@@ -209,15 +222,45 @@ class Qwen3VLModel:
             f.write("\n")
 
         return InferRequest(**infer_request_dict)
+
+    def _format_reporter_result(
+        self,
+        reporter_result: bool | None,
+        subgoal_name: str,
+    ) -> str:
+        if reporter_result is True:
+            return (
+                f"The Reporter determined that the last predicted {subgoal_name} "
+                "has been completed."
+            )
+        if reporter_result is False:
+            return (
+                f"The Reporter determined that the last predicted {subgoal_name} "
+                "has not been completed."
+            )
+        return (
+            f"The Reporter did not provide a result for the last predicted "
+            f"{subgoal_name}."
+        )
     
     
-    def call(self, image_query: np.ndarray, step_idx: int, keep_period: int = 0) -> str:        
+    def call(
+        self,
+        image_query: np.ndarray,
+        step_idx: int,
+        keep_period: int = 0,
+        reporter_result: bool | None = None,
+    ) -> str:
         if step_idx <= keep_period and self.last_response is not None:
             # some tasks that require press button, qwen models always skip
             # add some hard-coded rules to fix it
             response = self.last_response
         else:
-            infer_request = self.prepare_infer_request(image_query, step_idx)
+            infer_request = self.prepare_infer_request(
+                image_query,
+                step_idx,
+                reporter_result,
+            )
             response = self.engine.infer([infer_request], request_config=RequestConfig(max_tokens=128, temperature=0))
             response = response[0].choices[0].message.content
         

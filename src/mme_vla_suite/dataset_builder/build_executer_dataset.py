@@ -1,4 +1,4 @@
-"""Preprocess raw HDF5 RoboMME data into training-ready format.
+"""Build Executer training data from raw RoboMME HDF5 episodes.
 
 Converts episodes to features, token-drop indices, and per-step pickle samples.
 """
@@ -160,7 +160,7 @@ def visualize_frame_sampling(
     )
 
 
-class DatasetProcessor:
+class ExecuterDatasetProcessor:
     """Converts raw HDF5 episodes to preprocessed features, token-drop indices, and execution samples."""
 
     def __init__(

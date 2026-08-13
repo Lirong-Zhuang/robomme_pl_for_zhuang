@@ -1,11 +1,8 @@
 """
-Build VLM subgoal prediction dataset for QwenVL plus executed robot states.
+Build Manager subgoal prediction dataset for QwenVL.
 
 We duplicate keyframe training samples for balanced training data, which is
 crucial for the VLM to predict correct subgoal changes.
-
-This file is for the QwenVL predictor variant that includes a compact history
-of the robot's observed absolute joint states.
 """
 
 import json
@@ -16,7 +13,7 @@ import h5py
 import imageio
 import numpy as np
 
-from mme_vla_suite.dataset_builder.vlm_subgoal_dataset_base import BaseVLMSubgoalDatasetBuilder
+from mme_vla_suite.dataset_builder.manager_dataset_base import BaseManagerDatasetBuilder
 
 
 # -----------------------------------------------------------------------------
@@ -32,113 +29,13 @@ GROUNDED_SUBGOAL_SYSTEM_PROMPT = (
     "by predicting a sequence of grounded language subgoals"
 )
 
-ARM_STATE_DISTANCE_THRESHOLD = 0.10
-GRIPPER_OPENING_DISTANCE_THRESHOLD = 0.20
-
-
-def _format_threshold(value: float) -> str:
-    """Format a threshold compactly for use in an output directory name."""
-    return f"{value:g}"
-
-
-QPA_THRESHOLD_DIR_NAME = (
-    f"ad{_format_threshold(ARM_STATE_DISTANCE_THRESHOLD)}"
-    f"_gd{_format_threshold(GRIPPER_OPENING_DISTANCE_THRESHOLD)}"
-)
-QPA_DIR_NAME = os.path.join("qpa", QPA_THRESHOLD_DIR_NAME)
-
 
 # -----------------------------------------------------------------------------
 # Dataset builder
 # -----------------------------------------------------------------------------
 
 
-class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
-    def __init__(
-        self,
-        *args,
-        vlm_dir_name: str = QPA_DIR_NAME,
-        **kwargs,
-    ) -> None:
-        super().__init__(*args, vlm_dir_name=vlm_dir_name, **kwargs)
-
-    # -------------------------------------------------------------------------
-    # Joint-state history
-    # -------------------------------------------------------------------------
-
-    def _get_absolute_joint_state(
-        self,
-        episode_data: h5py.Group,
-        idx: int,
-    ) -> np.ndarray:
-        """Return the observed 7-DoF arm state plus total gripper opening."""
-        timestep = episode_data[f"timestep_{idx}"]
-        joint_state = np.asarray(timestep["obs"]["joint_state"][()], dtype=np.float32)
-        gripper_state = np.asarray(
-            timestep["obs"]["gripper_state"][()], dtype=np.float32
-        ).reshape(-1)
-        gripper_opening = np.asarray(
-            [np.sum(gripper_state, dtype=np.float32)],
-            dtype=np.float32,
-        )
-        return np.concatenate([joint_state, gripper_opening], axis=0)
-
-    def _select_key_states(
-        self,
-        states: list[np.ndarray],
-    ) -> list[np.ndarray]:
-        """Select key states with substantial arm motion or gripper events."""
-        if len(states) <= 2:
-            return states
-
-        key_states: list[np.ndarray] = [states[0]]
-        for state in states[1:-1]:
-            previous_key_state = key_states[-1]
-            arm_distance = float(
-                np.linalg.norm(state[:7] - previous_key_state[:7])
-            )
-            gripper_opening_changed = (
-                abs(float(state[7] - previous_key_state[7]))
-                >= GRIPPER_OPENING_DISTANCE_THRESHOLD
-            )
-            if (
-                arm_distance >= ARM_STATE_DISTANCE_THRESHOLD
-                or gripper_opening_changed
-            ):
-                key_states.append(state)
-
-        # The final state corresponding to the current image is always a key state.
-        if not np.array_equal(key_states[-1], states[-1]):
-            key_states.append(states[-1])
-
-        return key_states
-
-    def _build_key_state_history(
-        self,
-        episode_data: h5py.Group,
-        previous_idx: int | None,
-        current_idx: int,
-    ) -> list[np.ndarray]:
-        """Build key states observed since the previous VLM prediction."""
-        if previous_idx is None:
-            return []
-        states = [
-            self._get_absolute_joint_state(episode_data, idx)
-            for idx in range(previous_idx + 1, current_idx + 1)
-        ]
-        return self._select_key_states(states)
-
-    def _wrap_key_states(self, key_states: list[np.ndarray]) -> str:
-        if not key_states:
-            return "none"
-        formatted_states = []
-        for i, state in enumerate(key_states):
-            arm = ", ".join(f"{value:.4f}" for value in state[:7])
-            formatted_states.append(
-                f"{i + 1}. arm=[{arm}], gripper={state[7]:.4f}"
-            )
-        return "; ".join(formatted_states)
-
+class DatasetBuilder(BaseManagerDatasetBuilder):
     # -------------------------------------------------------------------------
     # Simple subgoal data
     # -------------------------------------------------------------------------
@@ -148,7 +45,6 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         task_goal: str,
         subgoal: str,
         image_path: str,
-        key_state_history: list[np.ndarray],
         video_path: str | None = None,
     ) -> dict:
         video_prefix = "<video>" if video_path else ""
@@ -162,8 +58,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n"
-                f"The robot key states are: {self._wrap_key_states(key_state_history)}\n"
-                "<image>What's the next language subgoal based on the current observation?"
+                "<image>What's the next language subgoal based on current observation?"
             )
 
         result = {
@@ -194,7 +89,6 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         task_goal: str,
         subgoal: str,
         image_path: str,
-        key_state_history: list[np.ndarray],
         video_path: str | None = None,
     ) -> dict:
         video_prefix = "<video>" if video_path else ""
@@ -210,8 +104,7 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             user_prompt = (
                 f"{video_prefix}The task goal is: {task_goal}\n"
                 f"The history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n"
-                f"The robot key states are: {self._wrap_key_states(key_state_history)}\n"
-                "<image>What's the next grounded language subgoal based on the current observation?"
+                "<image>What's the next grounded language subgoal based on current observation?"
             )
 
         result = {
@@ -339,12 +232,6 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
         select_idxs, duplicate_idxs = self._compute_select_and_duplicate_idxs(
             transition_idxs, len(timestep_indexs), env_id
         )
-        select_idxs = sorted(
-            set(
-                [exec_start_idx]
-                + [idx for idx in select_idxs if idx >= exec_start_idx]
-            )
-        )
         print("select_idxs: ", select_idxs)
 
         if exec_start_idx > 0:
@@ -368,7 +255,6 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             )
             os.makedirs(visualization_video_path, exist_ok=True)
 
-        previous_select_idx = None
         for idx in select_idxs:
             image = episode_data[f"timestep_{idx}"]["obs"]["front_rgb"][()]
             simple_subgoal = episode_data[f"timestep_{idx}"]["info"]["simple_subgoal"][()].decode().lower()
@@ -384,24 +270,11 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
             )
             imageio.imwrite(image_path, image)
 
-            key_state_history = self._build_key_state_history(
-                episode_data,
-                previous_select_idx,
-                idx,
-            )
             simple_subgoal_data = self.make_simple_subgoal_data(
-                task_goal,
-                simple_subgoal,
-                image_path,
-                key_state_history,
-                video_path,
+                task_goal, simple_subgoal, image_path, video_path
             )
             grounded_subgoal_data = self.make_grounded_subgoal_data(
-                task_goal,
-                grounded_subgoal,
-                image_path,
-                key_state_history,
-                video_path,
+                task_goal, grounded_subgoal, image_path, video_path
             )
 
             self._append_training_rows(simple_subgoal_data, grounded_subgoal_data)
@@ -421,18 +294,16 @@ class DatasetBuilder(BaseVLMSubgoalDatasetBuilder):
                 )
                 save_images.append(vis_image)
 
-                if dup_count > 0:
-                    for _ in range(dup_count):
-                        dup_image = image.copy()
-                        dup_image = cv2.putText(
-                            dup_image, f"Duplicate: {simple_subgoal}", (10, 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-                        )
-                        save_images.append(dup_image)
+                for _ in range(dup_count):
+                    dup_image = image.copy()
+                    dup_image = cv2.putText(
+                        dup_image, f"Duplicate: {simple_subgoal}", (10, 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
+                    )
+                    save_images.append(dup_image)
 
             last_simple_subgoal = simple_subgoal
             last_grounded_subgoal = grounded_subgoal
-            previous_select_idx = idx
 
         if self.visualize:
             out_path = os.path.join(

@@ -1,32 +1,32 @@
-"""Single entrypoint to run RoboMME and VLM subgoal dataset builders.
+"""Single entrypoint to run Executer, Manager, and Reporter dataset builders.
 
-Build RoboMME preprocessed pickle data from raw HDF5 data.
+Build Executer preprocessed pickle data from raw HDF5 data.
 ```
-uv run python scripts/build_dataset.py --dataset_type robomme_pkl
+uv run python scripts/build_dataset.py --dataset_type executer
 ```
 
-Build only selected RoboMME tasks into a custom output directory.
+Build only selected Manager tasks into a custom output directory.
 ```
 uv run python scripts/build_dataset.py \
-  --dataset_type vlm_subgoal_qwenvl \
+  --dataset_type manager_qwenvl \
   --raw_data_path /data/public/RoboMME \
   --preprocessed_data_path data/robomme_preprocessed_binfill_data \
   --tasks BinFill
 ```
 
-Build VLM subgoal prediction dataset for QwenVL.
+Build Manager subgoal prediction dataset for QwenVL.
 ```
-uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qwenvl
-```
-
-Build VLM subgoal prediction dataset for MemER.
-```
-uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_memer
+uv run python scripts/build_dataset.py --dataset_type manager_qwenvl
 ```
 
-Build VLM subgoal prediction dataset for QwenVL plus key states.
+Build Manager subgoal prediction dataset for MemER.
 ```
-uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qpa
+uv run python scripts/build_dataset.py --dataset_type manager_memer
+```
+
+Build Manager subgoal prediction dataset for QwenVL plus key states.
+```
+uv run python scripts/build_dataset.py --dataset_type manager_qpa
 ```
 
 """
@@ -34,16 +34,18 @@ uv run python scripts/build_dataset.py --dataset_type vlm_subgoal_qpa
 import argparse
 import time
 
-from mme_vla_suite.dataset_builder.build_robomme_dataset import DatasetProcessor
-from mme_vla_suite.dataset_builder.build_vlm_subgoal_dataset_memer import (
-    DatasetBuilder as MemerDatasetBuilder,
+from mme_vla_suite.dataset_builder.build_executer_dataset import (
+    ExecuterDatasetProcessor,
 )
-from mme_vla_suite.dataset_builder.build_vlm_subgoal_dataset_qpa import (
+from mme_vla_suite.dataset_builder.build_manager_dataset_memer import (
+    DatasetBuilder as MemerManagerDatasetBuilder,
+)
+from mme_vla_suite.dataset_builder.build_manager_dataset_qpa import (
     QPA_DIR_NAME,
-    DatasetBuilder as QPADatasetBuilder,
+    DatasetBuilder as QPAManagerDatasetBuilder,
 )
-from mme_vla_suite.dataset_builder.build_vlm_subgoal_dataset_qwenvl import (
-    DatasetBuilder as QwenVLDatasetBuilder,
+from mme_vla_suite.dataset_builder.build_manager_dataset_qwenvl import (
+    DatasetBuilder as QwenVLManagerDatasetBuilder,
 )
 
 
@@ -54,12 +56,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset_type",
         type=str,
-        default="robomme_pkl",
+        default="executer",
         choices=[
-            "robomme_pkl",
-            "vlm_subgoal_qwenvl",
-            "vlm_subgoal_qpa",
-            "vlm_subgoal_memer",
+            "executer",
+            "manager_qwenvl",
+            "manager_qpa",
+            "manager_memer",
+            "reporter",
         ],
         help="Dataset type to build",
     )
@@ -99,8 +102,8 @@ if __name__ == "__main__":
     args = _parse_args()
     t0 = time.perf_counter()
 
-    if args.dataset_type == "robomme_pkl":
-        processor = DatasetProcessor(
+    if args.dataset_type == "executer":
+        processor = ExecuterDatasetProcessor(
             raw_data_path=args.raw_data_path,
             preprocessed_data_path=args.preprocessed_data_path,
             visualize=args.visualize,
@@ -108,36 +111,40 @@ if __name__ == "__main__":
             task_names=args.tasks,
         )
         processor.run()
-    elif args.dataset_type == "vlm_subgoal_qwenvl":
-        builder = QwenVLDatasetBuilder(
+    elif args.dataset_type == "manager_qwenvl":
+        builder = QwenVLManagerDatasetBuilder(
             raw_data_path=args.raw_data_path,
             preprocessed_data_path=args.preprocessed_data_path,
             max_episodes=args.max_episodes,
             visualize=args.visualize,
-            vlm_dir_name="qwenvl",
+            manager_dir_name="qwenvl",
             task_names=args.tasks,
         )
         builder.run()
-    elif args.dataset_type == "vlm_subgoal_memer":
-        builder = MemerDatasetBuilder(
+    elif args.dataset_type == "manager_memer":
+        builder = MemerManagerDatasetBuilder(
             raw_data_path=args.raw_data_path,
             preprocessed_data_path=args.preprocessed_data_path,
             max_episodes=args.max_episodes,
             visualize=args.visualize,
-            vlm_dir_name="memer",
+            manager_dir_name="memer",
             task_names=args.tasks,
         )
         builder.run()
-    elif args.dataset_type == "vlm_subgoal_qpa":
-        builder = QPADatasetBuilder(
+    elif args.dataset_type == "manager_qpa":
+        builder = QPAManagerDatasetBuilder(
             raw_data_path=args.raw_data_path,
             preprocessed_data_path=args.preprocessed_data_path,
             max_episodes=args.max_episodes,
             visualize=args.visualize,
-            vlm_dir_name=QPA_DIR_NAME,
+            manager_dir_name=QPA_DIR_NAME,
             task_names=args.tasks,
         )
         builder.run()
+    elif args.dataset_type == "reporter":
+        raise NotImplementedError(
+            "Reporter dataset generation is not implemented yet."
+        )
     else:
         raise ValueError(f"Unknown dataset_type: {args.dataset_type}")
 

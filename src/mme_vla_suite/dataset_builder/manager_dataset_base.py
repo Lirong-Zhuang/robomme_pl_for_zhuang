@@ -1,4 +1,4 @@
-"""Base class for VLM subgoal dataset builders (QwenVL, MemER).
+"""Base class for Manager dataset builders (QwenVL, MemER).
 
 Shared setup, H5 iteration, and grounded-subgoal/bbox helpers.
 """
@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     pass
 
 
-class BaseVLMSubgoalDatasetBuilder:
-    """Base for building VLM subgoal JSONL datasets from RoboMME HDF5."""
+class BaseManagerDatasetBuilder:
+    """Base for building Manager JSONL datasets from RoboMME HDF5."""
 
     def __init__(
         self,
@@ -35,7 +35,7 @@ class BaseVLMSubgoalDatasetBuilder:
         preprocessed_data_path: str = "data/robomme_preprocessed_data",
         max_episodes: int | None = None,
         visualize: bool = False,
-        vlm_dir_name: str = "vlm_subgoal",
+        manager_dir_name: str = "vlm_subgoal",
         task_names: list[str] | None = None,
     ) -> None:
         self.raw_data_path = raw_data_path
@@ -61,7 +61,7 @@ class BaseVLMSubgoalDatasetBuilder:
                     f"Available tasks: {sorted(available_tasks)}"
                 )
 
-        self.data_dir = os.path.join(preprocessed_data_path, vlm_dir_name)
+        self.data_dir = os.path.join(preprocessed_data_path, manager_dir_name)
         self.images_dir = os.path.join(self.data_dir, "images")
         self.simple_subgoal_train_data_path = os.path.join(
             self.data_dir, "simple_subgoal_train.jsonl"
