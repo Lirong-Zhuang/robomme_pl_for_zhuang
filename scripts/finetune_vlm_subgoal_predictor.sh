@@ -6,8 +6,8 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-DATASET_PATH='data/robomme_preprocessed_binfill_data/qwenvl/simple_subgoal_train.jsonl'
-RUN_NAME='qwenvl_baseline_v1.2_simple_subgoal'
+DATASET_PATH='data/robomme_preprocessed_dup_binfill_data/qwenvl/simple_subgoal_train.jsonl'
+RUN_NAME='qwenvl_baseline_v1.3_simple_subgoal'
 OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/${RUN_NAME}"
 
 PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
@@ -30,7 +30,7 @@ swift sft \
     --packing false \
     --train_type lora \
     --torch_dtype bfloat16 \
-    --num_train_epochs 6 \
+    --num_train_epochs 4 \
     --per_device_train_batch_size 16 \
     --gradient_accumulation_steps 1 \
     --attn_impl sdpa \
