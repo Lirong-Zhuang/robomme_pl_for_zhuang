@@ -8,11 +8,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Optional, Any, TextIO, Tuple
 
-import numpy as np
-
-from openpi_client import websocket_client_policy as _websocket_client_policy
 from utils import (
-    pack_buffer,
     check_args,
     TASK_NAME_LIST,
     TASK_WITH_VIDEO_DEMO,
@@ -21,7 +17,9 @@ from utils import (
 )
 from utils import RolloutRecorder
 from env_runner import EnvRunner
-from subgoal_predictor import build_subgoal_predictor, SubgoalPredictorBase
+from manager import build_manager, ManagerBase
+from executer import build_executer, Executer
+from reporter import build_reporter, ReporterBase
 
 # qwen3-vl environment variables
 os.environ['IMAGE_MAX_TOKEN_NUM'] = '256'
@@ -32,8 +30,8 @@ os.environ['FPS_MAX_FRAMES'] = '10'
 
 @dataclasses.dataclass
 class Args:
-    host: str = "0.0.0.0"
-    port: int = 8011
+    executer_host: str = "0.0.0.0"
+    executer_port: int = 8011
 
     obs_horizon: int = 16
     max_steps: int = 1300
@@ -42,30 +40,33 @@ class Args:
     overwrite: bool = True
     save_episode_logs: bool = True
 
-    use_history: bool = True
-    # policy_name: str = "symbolic-simple-subgoal"
-    policy_name: str = "symbolic-grounded-subgoal"
-    model_seed: int = 7
-    model_ckpt_id: int = 79999
+    executer_use_history: bool = True
+    executer_name: str = "symbolic-grounded-subgoal"
+    executer_seed: int = 7
+    executer_ckpt_id: int = 79999
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
     only_tasks: str = "BinFill" # tasks split by comma
     exclude_tasks: str = "" # tasks split by comma
 
-    # VLM subgoal predictor
-    use_oracle: bool = False
-    use_qwenvl: bool = True
-    use_memer: bool = False
-    use_gemini: bool = False
+    # Manager
+    manager_use_oracle: bool = False
+    manager_use_qwenvl: bool = True
+    manager_use_memer: bool = False
+    manager_use_gemini: bool = False
     # subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
     subgoal_type: Optional[str] = "grounded_subgoal"
-    gemini_model_name: str = "gemini-2.5-pro"
-    qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal/checkpoint-1400"
-    qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
-    memer_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
-    save_memer_kf: bool = False
+    manager_gemini_model_name: str = "gemini-2.5-pro"
+    manager_qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal/checkpoint-1400"
+    manager_qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
+    manager_memer_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
+    manager_save_memer_kf: bool = False
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
+
+    # Reporter. This first refactoring step keeps it disabled so evaluation
+    # behavior remains unchanged.
+    reporter_type: str = "none"
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 10 # number of episodes to evaluate for each task
@@ -116,19 +117,16 @@ class EpisodeEvaluator:
     def eval_each_episode(
         self,
         env_runner: EnvRunner,
-        subgoal_predictor: SubgoalPredictorBase,
+        manager: ManagerBase,
+        executer: Executer,
+        reporter: ReporterBase,
         video_save_dir: Path,
     ) -> str:
-        client = _websocket_client_policy.MMEVLAWebsocketClientPolicy(
-            self.args.host, self.args.port
-        )
-        resp = client.reset()
-        while not resp.get("reset_finished", False):
-            time.sleep(0.1)
-
+        executer.start_episode()
         epstate = EpisodeState()
         task_goal, recorder = self.init_episode(env_runner, epstate, video_save_dir)
-        subgoal_predictor.start_episode(epstate, env_runner)        
+        manager.start_episode(epstate, env_runner)
+        reporter.start_episode(epstate, env_runner)
 
         img, wrist_img, robot_state = epstate.get_current_obs()
         prompt = task_goal
@@ -137,11 +135,11 @@ class EpisodeEvaluator:
         last_subgoal = None
 
         while True:
-            subgoal_predictor.step(epstate)
+            manager.step(epstate)
 
             if not epstate.action_plan:
                 if epstate.count % self.args.subgoal_keep_period == 0 or last_subgoal is None:
-                    subgoal, has_api_error = subgoal_predictor.get_subgoal(
+                    subgoal, has_api_error = manager.get_subgoal(
                         epstate.count,
                         subgoal,
                         last_subgoal,
@@ -153,8 +151,8 @@ class EpisodeEvaluator:
                 if has_api_error:
                     break
 
-                action_chunk = self.get_action_chunk(
-                    client, epstate, img, wrist_img, robot_state, prompt, subgoal, 
+                action_chunk = executer.get_action_chunk(
+                    epstate, img, wrist_img, robot_state, prompt, subgoal,
                     exec_horizon=self.args.obs_horizon
                 )
 
@@ -181,6 +179,7 @@ class EpisodeEvaluator:
                 action=action.copy(),
                 subgoal=subgoal,
             )
+            reporter.step(epstate, subgoal)
 
             if stop_flag:
                 break
@@ -191,7 +190,9 @@ class EpisodeEvaluator:
         video_filename = f"{env_runner.env_id}_ep{env_runner.episode_id}_{success_flag}_{task_goal}_{env_runner.difficulty}.mp4"
         recorder.save_video(video_filename)
 
-        subgoal_predictor.end_episode(epstate, success_flag)
+        manager.end_episode(epstate, success_flag)
+        reporter.end_episode(epstate, success_flag)
+        executer.end_episode()
         return success_flag
 
 
@@ -225,58 +226,23 @@ class EpisodeEvaluator:
         print(f"exec_start_idx: {epstate.exec_start_idx}")
         return task_goal, recorder
 
-    def get_action_chunk(
-        self,
-        client,
-        state: EpisodeState,
-        img: np.ndarray,
-        wrist_img: np.ndarray,
-        robot_state: np.ndarray,
-        prompt: str,
-        subgoal: Optional[str],
-        exec_horizon: int,
-    ) -> list:
-        if self.args.use_history:
-            resp = client.add_buffer(pack_buffer(
-                state.image_buffer,
-                state.state_buffer,
-                state.exec_start_idx,
-            ))
-            while not resp.get("add_buffer_finished", False):
-                time.sleep(0.1)
-
-        element = {
-            "observation/image": img,
-            "observation/wrist_image": wrist_img,
-            "observation/state": robot_state,
-            "prompt": prompt,
-        }
-
-        if subgoal is not None:
-            element['simple_subgoal'] = subgoal
-            element['grounded_subgoal'] = subgoal
-
-        action_chunk = client.infer(element)["actions"]
-        return action_chunk[:exec_horizon]
-
-
 def setup_save_directory(args: Args) -> Path:
     """Set up and validate save directories."""
     save_dir = (
         Path(args.save_dir)
-        / args.policy_name
-        / f"ckpt{args.model_ckpt_id}"
-        / f"seed{args.model_seed}"
+        / args.executer_name
+        / f"ckpt{args.executer_ckpt_id}"
+        / f"seed{args.executer_seed}"
     )
 
     if args.run_name:
         save_dir = save_dir / args.run_name
     elif args.subgoal_type in SUBGOAL_TYPES:
-        if args.use_gemini:
+        if args.manager_use_gemini:
             save_dir = save_dir / "gemini"
-        elif args.use_qwenvl:
+        elif args.manager_use_qwenvl:
             save_dir = save_dir / "qwenvl"
-        elif args.use_memer:
+        elif args.manager_use_memer:
             save_dir = save_dir / "memer"
         else:
             save_dir = save_dir / "oracle"
@@ -345,7 +311,9 @@ def evaluate(args: Args):
         for task in args.exclude_tasks.split(","):
             log_dict[task] = {str(i): False for i in range(50)}
 
-    subgoal_predictor = build_subgoal_predictor(args, save_dir)
+    manager = build_manager(args, save_dir)
+    executer = build_executer(args)
+    reporter = build_reporter(args, save_dir)
     evaluator = EpisodeEvaluator(args, save_dir)
 
     # log.json summarizes the latest completed run. Remove only this derived
@@ -391,7 +359,7 @@ def evaluate(args: Args):
                         env_runner.make_env(episode_id)
                         print(f"\n[robomme] env for task {task_name} episode {episode_id} setup finished")
                         success_flag = evaluator.eval_each_episode(
-                            env_runner, subgoal_predictor, video_save_dir
+                            env_runner, manager, executer, reporter, video_save_dir
                         )
                         if success_flag == "unknown":
                             log_dict[task_name][episode_id] = "error"

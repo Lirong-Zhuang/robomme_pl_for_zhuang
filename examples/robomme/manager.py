@@ -37,7 +37,7 @@ LONG_FIRST_ACTION_TASKS = [
 
 
 
-class SubgoalPredictorBase:
+class ManagerBase:
     def __init__(
         self,
         args,
@@ -78,12 +78,12 @@ class SubgoalPredictorBase:
         pass
 
 
-class NullSubgoalPredictor(SubgoalPredictorBase):
+class NullManager(ManagerBase):
     def get_subgoal(self, *args, **kwargs) -> Tuple[Optional[str], bool]:
         return None, False
     
 
-class GeminiSubgoalPredictor(SubgoalPredictorBase):
+class GeminiManager(ManagerBase):
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
         self.api = GeminiModel(
@@ -91,12 +91,12 @@ class GeminiSubgoalPredictor(SubgoalPredictorBase):
                 self.save_dir, self.env_name, "frames", f"ep{self.episode_id}"
             ),
             task_id=self.env_name,
-            model_name=self.args.gemini_model_name,
+            model_name=self.args.manager_gemini_model_name,
             task_goal=self.task_goal,
             subgoal_type=self.args.subgoal_type,
         )
         self.video_buffer.extend(epstate.image_buffer[:-1])
-        print(f"[robomme] Gemini agent for {self.args.subgoal_type}, task {self.env_name}, episode {self.episode_id}, setup finished")
+        print(f"[robomme] Gemini Manager for {self.args.subgoal_type}, task {self.env_name}, episode {self.episode_id}, setup finished")
 
     def step(self, epstate: EpisodeState) -> None:
         self.video_buffer.append(epstate.image_buffer[-1])
@@ -154,14 +154,14 @@ class GeminiSubgoalPredictor(SubgoalPredictorBase):
         return count % 48 == 0
 
 
-class QwenVLSubgoalPredictor(SubgoalPredictorBase):
+class QwenVLManager(ManagerBase):
     
     def setup_api(self) -> None:
         self.api = Qwen3VLModel(
-            adapter_path=self.args.qwenvl_simpleSG_adapter_path if self.args.subgoal_type == "simple_subgoal" else self.args.qwenvl_groundSG_adapter_path,
+            adapter_path=self.args.manager_qwenvl_simpleSG_adapter_path if self.args.subgoal_type == "simple_subgoal" else self.args.manager_qwenvl_groundSG_adapter_path,
             subgoal_type=self.args.subgoal_type,
         )
-        print(f"[robomme] QwenVL {self.args.subgoal_type} agent setup finished")
+        print(f"[robomme] QwenVL Manager for {self.args.subgoal_type} setup finished")
         
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
@@ -207,10 +207,10 @@ class QwenVLSubgoalPredictor(SubgoalPredictorBase):
         pass
 
 
-class MemERSubgoalPredictor(SubgoalPredictorBase):
+class MemERManager(ManagerBase):
     def setup_api(self) -> None:
-        self.api = Qwen3VLModelMemER(adapter_path=self.args.memer_adapter_path)
-        print("[robomme] MemER agent setup finished")
+        self.api = Qwen3VLModelMemER(adapter_path=self.args.manager_memer_adapter_path)
+        print("[robomme] MemER Manager setup finished")
     
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         super().start_episode(epstate, env_runner)
@@ -236,14 +236,14 @@ class MemERSubgoalPredictor(SubgoalPredictorBase):
         return response, False
 
     def end_episode(self, epstate: EpisodeState, success_flag: str) -> None:
-        if self.episode_dir and not self.args.save_memer_kf:
+        if self.episode_dir and not self.args.manager_save_memer_kf:
             shutil.rmtree(self.episode_dir) # save some space, you can comment this function out to keep all video frames
 
 
-class OracleSubgoalPredictor(SubgoalPredictorBase):
+class OracleManager(ManagerBase):
     
     def setup_api(self) -> None:
-        print("[robomme] Oracle agent setup finished")
+        print("[robomme] Oracle Manager setup finished")
     
     def get_subgoal(
         self,
@@ -257,17 +257,17 @@ class OracleSubgoalPredictor(SubgoalPredictorBase):
             return self.env_runner.grounded_subgoal_oracle, False
 
 
-def build_subgoal_predictor(
+def build_manager(
     args,
     save_dir: Path,
-) -> SubgoalPredictorBase:
-    if args.use_gemini:
-        return GeminiSubgoalPredictor(args, save_dir)
-    if args.use_qwenvl:
-        return QwenVLSubgoalPredictor(args, save_dir)
-    if args.use_memer:
-        return MemERSubgoalPredictor(args, save_dir)
-    if args.use_oracle:
-        return OracleSubgoalPredictor(args, save_dir)
+) -> ManagerBase:
+    if args.manager_use_gemini:
+        return GeminiManager(args, save_dir)
+    if args.manager_use_qwenvl:
+        return QwenVLManager(args, save_dir)
+    if args.manager_use_memer:
+        return MemERManager(args, save_dir)
+    if args.manager_use_oracle:
+        return OracleManager(args, save_dir)
     
-    return NullSubgoalPredictor(args, save_dir)
+    return NullManager(args, save_dir)
