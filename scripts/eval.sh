@@ -42,7 +42,7 @@ RE_EVAL_TASKS=""
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=100
+NUM_EPISODES=50
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -55,9 +55,10 @@ EVAL_RUN_NAME="trinity_v0.1"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
-# Save stdout/stderr from each episode under
-# <SAVE_DIR>/.../<TASK_NAME>/logs/, while still displaying it in the terminal.
-SAVE_EPISODE_LOGS=true
+# Save the per-episode Manager trace under
+# <SAVE_DIR>/.../<TASK_NAME>/manager_logs/, while still displaying it in the
+# terminal. Reporter requests have their own reporter_logs directory.
+SAVE_MANAGER_LOGS=true
 
 # Keep MemER's per-step images after an episode finishes. MemER keyframes are
 # references to a subset of these images, so retaining keyframes requires
@@ -69,22 +70,16 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
-MANAGER_GEMINI_MODEL_NAME="gemini-2.5-pro"
-MANAGER_QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
-MANAGER_QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
-MANAGER_MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
+MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
+MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
-# Reporter configuration. Set REPORTER_TYPE="none" to disable it.
-# REPORTER_MODEL_PATH can be a Hugging Face model ID or a local model directory.
+# Executer configuration
+EXECUTER_CONFIG="mme_vla_suite"
+EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
+
+# Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
-
-# Runtime configuration.
-
-# conda
-# CONDA_ENV="robomme"
-# # CONDA_INIT="$HOME/miniconda3/etc/profile.d/conda.sh"
-# CONDA_INIT="/opt/miniconda3/etc/profile.d/conda.sh"
 
 # micromamba
 MAMBA_ENV="robomme"
@@ -97,11 +92,6 @@ SERVER_LOG_DIR="runs/evaluation/server_logs"
 # Leave empty to use JAX's default. For a dedicated policy GPU, values such as
 # 0.90 or 0.95 can be useful.
 XLA_MEM_FRACTION="0.5"
-
-# Executer model selection. Leave empty to use values derived from EVAL_PRESET.
-# To evaluate a newly fine-tuned pi Executer later, set both values explicitly.
-EXECUTER_DIR=""
-EXECUTER_CONFIG=""
 
 # =============================================================================
 # Implementation
@@ -242,16 +232,14 @@ EVAL_ARGS=(
     --args.episode-ids "$EPISODE_IDS"
     --args.subgoal-type "$SUBGOAL_TYPE"
     --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
-    --args.manager-gemini-model-name "$MANAGER_GEMINI_MODEL_NAME"
-    --args.manager-qwenvl-simpleSG-adapter-path "$MANAGER_QWENVL_SIMPLE_ADAPTER_PATH"
-    --args.manager-qwenvl-groundSG-adapter-path "$MANAGER_QWENVL_GROUNDED_ADAPTER_PATH"
-    --args.manager-memer-adapter-path "$MANAGER_MEMER_ADAPTER_PATH"
+    --args.manager-simple-adapter-path "$MANAGER_SIMPLE_ADAPTER_PATH"
+    --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
     --args.reporter-type "$REPORTER_TYPE"
     --args.reporter-model-path "$REPORTER_MODEL_PATH"
 )
 
 EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
-EVAL_ARGS+=("$(bool_arg "$SAVE_EPISODE_LOGS" --args.save-episode-logs --args.no-save-episode-logs)")
+EVAL_ARGS+=("$(bool_arg "$SAVE_MANAGER_LOGS" --args.save-manager-logs --args.no-save-manager-logs)")
 EVAL_ARGS+=("$(bool_arg "$EXECUTER_USE_HISTORY" --args.executer-use-history --args.no-executer-use-history)")
 EVAL_ARGS+=("$(bool_arg "$MANAGER_SAVE_MEMER_KF" --args.manager-save-memer-kf --args.no-manager-save-memer-kf)")
 

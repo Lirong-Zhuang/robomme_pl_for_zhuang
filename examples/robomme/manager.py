@@ -160,7 +160,11 @@ class QwenVLManager(ManagerBase):
     
     def setup_api(self) -> None:
         self.api = Qwen3VLModel(
-            adapter_path=self.args.manager_qwenvl_simpleSG_adapter_path if self.args.subgoal_type == "simple_subgoal" else self.args.manager_qwenvl_groundSG_adapter_path,
+            adapter_path=(
+                self.args.manager_simple_adapter_path
+                if self.args.subgoal_type == "simple_subgoal"
+                else self.args.manager_grounded_adapter_path
+            ),
             subgoal_type=self.args.subgoal_type,
         )
         print(f"[robomme] QwenVL Manager for {self.args.subgoal_type} setup finished")
@@ -173,7 +177,6 @@ class QwenVLManager(ManagerBase):
             self.episode_dir,
             epstate.image_buffer[:-1],
             self.task_goal,
-            log_dir=os.path.join(task_dir, "logs"),
         )
 
     def step(self, epstate: EpisodeState) -> None:
@@ -211,13 +214,15 @@ class QwenVLManager(ManagerBase):
     
     def end_episode(self, epstate: EpisodeState, success_flag: str) -> None:
         # Keep QwenVL input images and the optional initial video under
-        # <task>/frames/ep<id>/ so paths recorded in the JSONL logs remain valid.
+        # <task>/frames/ep<id>/ so paths recorded in Manager logs remain valid.
         pass
 
 
 class MemERManager(ManagerBase):
     def setup_api(self) -> None:
-        self.api = Qwen3VLModelMemER(adapter_path=self.args.manager_memer_adapter_path)
+        self.api = Qwen3VLModelMemER(
+            adapter_path=self.args.manager_grounded_adapter_path
+        )
         print("[robomme] MemER Manager setup finished")
     
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
@@ -228,11 +233,13 @@ class MemERManager(ManagerBase):
             self.episode_dir,
             epstate.image_buffer[:-1],
             self.task_goal,
-            log_dir=os.path.join(task_dir, "logs"),
         )
 
     def step(self, epstate: EpisodeState) -> None:
-        self.api.add_execution_frame(epstate.image_buffer[-1])
+        self.api.add_execution_frame(
+            epstate.image_buffer[-1],
+            epstate.count,
+        )
 
     def get_subgoal(
         self,

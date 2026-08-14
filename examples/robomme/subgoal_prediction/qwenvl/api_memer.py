@@ -93,18 +93,12 @@ class Qwen3VLModelMemER:
         save_dir: str,
         video_query: List[np.ndarray] | None,
         task_goal: str = None,
-        log_dir: str | None = None,
     ) -> dict:
         self.save_dir = save_dir
         if os.path.exists(save_dir):
             shutil.rmtree(save_dir)
         os.makedirs(save_dir, exist_ok=True)
         
-        ep_name = os.path.basename(save_dir)
-        log_dir = log_dir or os.path.dirname(save_dir)
-        os.makedirs(log_dir, exist_ok=True)
-        self.save_json_path = os.path.join(log_dir, f"{ep_name}_MemER_log.jsonl")
-                
         if video_query is not None and len(video_query) > 0:
             imageio.mimsave(os.path.join(self.save_dir, f"step_0_video.mp4"), video_query, fps=30)
             self.video_path = os.path.join(self.save_dir, f"step_0_video.mp4")
@@ -186,9 +180,10 @@ class Qwen3VLModelMemER:
         return "[" + ", ".join(["<image>" for _ in image_paths]) + "]"
     
     
-    def add_execution_frame(self, image_query: np.ndarray):
-        image_path = os.path.join(self.save_dir, f"step_{len(self.execution_frame_paths)}_image.png")
-        imageio.imwrite(image_path, image_query)
+    def add_execution_frame(self, image_query: np.ndarray, step_idx: int):
+        image_path = os.path.join(self.save_dir, f"step_{step_idx}_image.png")
+        if not os.path.exists(image_path):
+            imageio.imwrite(image_path, image_query)
         self.execution_frame_paths.append(image_path)
         
     
@@ -238,10 +233,6 @@ class Qwen3VLModelMemER:
         print("\n\n")
         pprint.pprint(infer_request_dict, width=800)
         
-        with open(self.save_json_path, "a") as f:
-            json.dump(infer_request_dict, f)
-            f.write("\n")
-
         return InferRequest(**infer_request_dict)
     
     
@@ -250,10 +241,6 @@ class Qwen3VLModelMemER:
         response = self.engine.infer([infer_request], request_config=RequestConfig(max_tokens=128, temperature=0))
         response = response[0].choices[0].message.content        
         print("Response: ", response)
-
-        with open(self.save_json_path, "a") as f:
-            json.dump({"response": response}, f)
-            f.write("\n")
 
         try:
             self.update_history_subgoals(response)

@@ -38,7 +38,7 @@ class Args:
     save_dir: str = "runs/evaluation"
     run_name: str = ""
     overwrite: bool = True
-    save_episode_logs: bool = True
+    save_manager_logs: bool = True
 
     executer_use_history: bool = True
     executer_name: str = "symbolic-grounded-subgoal"
@@ -58,9 +58,8 @@ class Args:
     # subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
     subgoal_type: Optional[str] = "grounded_subgoal"
     manager_gemini_model_name: str = "gemini-2.5-pro"
-    manager_qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/simple_subgoal/checkpoint-1400"
-    manager_qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
-    manager_memer_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
+    manager_simple_adapter_path: str = ""
+    manager_grounded_adapter_path: str = ""
     manager_save_memer_kf: bool = False
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
 
@@ -91,20 +90,20 @@ class TeeStream:
 
 
 @contextmanager
-def episode_log(save_dir: Path, task_name: str, episode_id: int, enabled: bool):
-    """Capture one episode's stdout/stderr while preserving terminal output."""
+def manager_log(save_dir: Path, task_name: str, episode_id: int, enabled: bool):
+    """Capture the per-episode Manager trace while preserving terminal output."""
     if not enabled:
         yield None
         return
 
-    log_dir = save_dir / task_name / "logs"
+    log_dir = save_dir / task_name / "manager_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{task_name}_ep{episode_id}.log"
     with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
         stdout_tee = TeeStream(sys.stdout, log_file)
         stderr_tee = TeeStream(sys.stderr, log_file)
         with redirect_stdout(stdout_tee), redirect_stderr(stderr_tee):
-            print(f"[robomme] episode log: {log_path}")
+            print(f"[robomme] Manager log: {log_path}")
             yield log_path
 
 
@@ -152,7 +151,12 @@ class EpisodeEvaluator:
                 if has_api_error:
                     break
 
-                reporter.observe_subgoal(subgoal, img)
+                reporter.observe_subgoal(
+                    subgoal,
+                    img,
+                    epstate.count,
+                    reporter_result,
+                )
                 # Trinity's symbolic Executer receives only the current subgoal.
                 # Keep the task goal only for legacy non-symbolic policies, which
                 # do not have a Manager or a subgoal input.
@@ -368,8 +372,8 @@ def evaluate(args: Args):
                     print(f"[robomme] episode {episode_id} already evaluated, skipping...")
                     continue
 
-                with episode_log(
-                    save_dir, task_name, episode_id, args.save_episode_logs
+                with manager_log(
+                    save_dir, task_name, episode_id, args.save_manager_logs
                 ):
                     try:
                         env_runner.make_env(episode_id)

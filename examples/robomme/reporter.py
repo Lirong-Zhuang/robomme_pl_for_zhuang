@@ -1,6 +1,8 @@
 """Reporter implementations for RoboMME evaluation."""
 
 import json
+import pprint
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -38,6 +40,8 @@ class ReporterBase:
         self,
         subgoal: Optional[str],
         observation_before_subgoal: np.ndarray,
+        step_idx: int,
+        previous_subgoal_completed: Optional[bool] = None,
     ) -> None:
         pass
 
@@ -67,33 +71,67 @@ class QwenVLReporter(ReporterBase):
             attn_impl="sdpa",
         )
         self.current_subgoal: Optional[str] = None
-        self.observation_before_subgoal: Optional[np.ndarray] = None
-        self.episode_dir: Optional[Path] = None
+        self.observation_before_path: Optional[Path] = None
+        self.frames_dir: Optional[Path] = None
+        self.init_frames_dir: Optional[Path] = None
         self.log_path: Optional[Path] = None
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
-        self.observation_before_subgoal = None
-        self.episode_dir = (
+        self.observation_before_path = None
+        self.frames_dir = (
             self.save_dir
             / env_runner.env_id
             / "frames"
-            / f"reporter_ep{env_runner.episode_id}"
+            / f"ep{env_runner.episode_id}"
         )
-        self.episode_dir.mkdir(parents=True, exist_ok=True)
-        log_dir = self.save_dir / env_runner.env_id / "logs"
+        self.frames_dir.mkdir(parents=True, exist_ok=True)
+        self.init_frames_dir = (
+            self.save_dir
+            / env_runner.env_id
+            / "init_frames"
+            / f"ep{env_runner.episode_id}"
+        )
+        if self.init_frames_dir.exists():
+            shutil.rmtree(self.init_frames_dir)
+        self.init_frames_dir.mkdir(parents=True, exist_ok=True)
+        log_dir = self.save_dir / env_runner.env_id / "reporter_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        self.log_path = log_dir / f"ep{env_runner.episode_id}_Reporter_log.jsonl"
+        self.log_path = log_dir / (
+            f"{env_runner.env_id}_ep{env_runner.episode_id}.log"
+        )
+        self.log_path.write_text("", encoding="utf-8")
 
     def observe_subgoal(
         self,
         subgoal: Optional[str],
         observation_before_subgoal: np.ndarray,
+        step_idx: int,
+        previous_subgoal_completed: Optional[bool] = None,
     ) -> None:
-        if subgoal is None or subgoal == self.current_subgoal:
+        if subgoal is None:
             return
+        if (
+            subgoal == self.current_subgoal
+            and previous_subgoal_completed is not True
+        ):
+            return
+        if self.frames_dir is None or self.init_frames_dir is None:
+            return
+
         self.current_subgoal = subgoal
-        self.observation_before_subgoal = observation_before_subgoal.copy()
+        frame_path = self.frames_dir / f"step_{step_idx}_image.png"
+        if not frame_path.exists():
+            imageio.imwrite(frame_path, observation_before_subgoal)
+
+        self.observation_before_path = (
+            self.init_frames_dir / f"step_{step_idx}_image.png"
+        )
+        if not self.observation_before_path.exists():
+            imageio.imwrite(
+                self.observation_before_path,
+                observation_before_subgoal,
+            )
 
     def step(
         self,
@@ -102,20 +140,21 @@ class QwenVLReporter(ReporterBase):
     ) -> Optional[bool]:
         if (
             subgoal is None
-            or self.observation_before_subgoal is None
-            or self.episode_dir is None
+            or self.observation_before_path is None
+            or self.frames_dir is None
             or self.log_path is None
         ):
             return None
 
         current_observation, _, _ = epstate.get_current_obs()
         step_idx = epstate.count
-        before_path = self.episode_dir / f"step_{step_idx}_before.png"
-        current_path = self.episode_dir / f"step_{step_idx}_current.png"
-        imageio.imwrite(before_path, self.observation_before_subgoal)
-        imageio.imwrite(current_path, current_observation)
+        current_path = self.frames_dir / f"step_{step_idx}_image.png"
+        if not current_path.exists():
+            imageio.imwrite(current_path, current_observation)
 
         request = {
+            # The order matches the two <image> placeholders in the user prompt.
+            "images": [str(self.observation_before_path), str(current_path)],
             "messages": [
                 {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
                 {
@@ -123,8 +162,6 @@ class QwenVLReporter(ReporterBase):
                     "content": REPORTER_USER_PROMPT.replace("{subgoal}", subgoal),
                 },
             ],
-            # The order matches the two <image> placeholders in the user prompt.
-            "images": [str(before_path), str(current_path)],
         }
         response = self.engine.infer(
             [InferRequest(**request)],
@@ -133,16 +170,12 @@ class QwenVLReporter(ReporterBase):
         reporter_success = self._parse_success(response)
 
         with self.log_path.open("a", encoding="utf-8") as log_file:
-            json.dump(
-                {
-                    "step": step_idx,
-                    "request": request,
-                    "response": response,
-                    "success": reporter_success,
-                },
-                log_file,
+            log_file.write(
+                f"\nStep: {step_idx}\n"
+                f"{pprint.pformat(request, width=100, sort_dicts=False)}\n"
+                f"Response: {response}\n"
+                f"Parsed success: {reporter_success}\n"
             )
-            log_file.write("\n")
 
         print(f"[robomme] Reporter response: {response}")
         return reporter_success

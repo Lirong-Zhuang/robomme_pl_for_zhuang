@@ -10,7 +10,6 @@ os.environ['IMAGE_MAX_TOKEN_NUM'] = '256'
 os.environ['VIDEO_MAX_TOKEN_NUM'] = '64'
 os.environ['FPS_MAX_FRAMES'] = '10'
 
-import json
 from swift.llm import PtEngine, InferRequest, RequestConfig
 
 class Qwen3VLModel:
@@ -100,18 +99,11 @@ class Qwen3VLModel:
         save_dir: str,
         video_query: List[np.ndarray] | None,
         task_goal: str = None,
-        log_dir: str | None = None,
     ) -> dict:
         self.save_dir = save_dir
         if os.path.exists(save_dir):
             shutil.rmtree(save_dir)
         os.makedirs(save_dir, exist_ok=True)
-        
-        ep_name = os.path.basename(save_dir)
-        log_dir = log_dir or os.path.dirname(save_dir)
-        os.makedirs(log_dir, exist_ok=True)
-        self.save_json_path = os.path.join(log_dir, f"{ep_name}_QwenVL_log.jsonl")
-
         
         if video_query is not None and len(video_query) > 0:
             imageio.mimsave(os.path.join(self.save_dir, f"step_0_video.mp4"), video_query, fps=30)
@@ -171,7 +163,8 @@ class Qwen3VLModel:
     ) -> dict:
         
         image_path = os.path.join(self.save_dir, f"step_{step_idx}_image.png")
-        imageio.imwrite(image_path, image_query)
+        if not os.path.exists(image_path):
+            imageio.imwrite(image_path, image_query)
         video_prefix = "<video>" if self.video_path else ""
         
         if self.subgoal_type == "simple_subgoal":            
@@ -217,10 +210,6 @@ class Qwen3VLModel:
         print("\n\n")
         pprint.pprint(infer_request_dict)
         
-        with open(self.save_json_path, "a") as f:
-            json.dump(infer_request_dict, f)
-            f.write("\n")
-
         return InferRequest(**infer_request_dict)
 
     def _format_reporter_result(
