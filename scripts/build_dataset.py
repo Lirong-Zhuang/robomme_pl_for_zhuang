@@ -10,8 +10,9 @@ Build only selected Manager tasks into a custom output directory.
 uv run python scripts/build_dataset.py \
   --dataset_type manager_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_manager_binfill_data \
-  --tasks BinFill
+  --preprocessed_data_path data/trinity_preprocessed_data/manager_binfill_example1 \
+  --tasks BinFill \
+  --max_episodes 1
 ```
 
 Build Manager subgoal prediction dataset for QwenVL.
