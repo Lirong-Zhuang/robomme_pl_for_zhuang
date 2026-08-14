@@ -7,8 +7,8 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-MANAGER_DATASET_PATH='data/robomme_preprocessed_dup_binfill_data/qwenvl/simple_subgoal_train.jsonl'
-MANAGER_RUN_NAME='qwenvl_v1.1_simple_subgoal'
+MANAGER_DATASET_PATH='data/trinity_preprocessed_data/manager_binfill_data_1/qwenvl/simple_subgoal_train.jsonl'
+MANAGER_RUN_NAME='qwen_manager_v1_simple_subgoal'
 MANAGER_OUTPUT_DIR="runs/ckpts/manager/${MANAGER_RUN_NAME}"
 
 PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
