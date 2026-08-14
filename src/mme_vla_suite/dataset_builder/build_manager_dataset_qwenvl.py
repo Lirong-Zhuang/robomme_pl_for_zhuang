@@ -216,6 +216,7 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
             duplicate_idxs[end_idx] = max(mid_number - 1, 0)
 
         duplicate_idxs.pop(num_timesteps - 1, None)
+        select_idxs.extend(transition_idxs)
         select_idxs.append(num_timesteps - 1)
         select_idxs = sorted(list(set(select_idxs)))
         return select_idxs, duplicate_idxs
