@@ -12,6 +12,70 @@ qwenvl/simple_subgoal_train.jsonl
 qwenvl/grounded_subgoal_train.jsonl
 ```
 
+### `data/` and `runs/` layout
+
+All paths below are relative to the repository root. Names in angle brackets
+are supplied by the corresponding build, training, or evaluation command.
+
+```text
+data/
+├── robomme_data_h5/                         # optional local raw RoboMME HDF5 data
+│   └── <TaskName>.h5
+├── robomme_preprocessed_data/               # Executer training dataset
+│   ├── data/
+│   │   └── <sample_id>.pkl
+│   ├── features/
+│   │   └── episode_<episode_id>/
+│   │       ├── token_emb_<step>.npy
+│   │       └── kept_indices.json
+│   └── meta/
+│       └── stats.json
+└── trinity_preprocessed_data/               # Manager training datasets
+    └── <manager_dataset_name>/
+        └── qwenvl/
+            ├── images/
+            │   ├── <TaskName>_ep<episode>_step<step>.png
+            │   └── <TaskName>_ep<episode>_video.mp4
+            ├── simple_subgoal_train.jsonl
+            └── grounded_subgoal_train.jsonl
+
+runs/
+├── assets/
+│   └── mme_vla_suite/                       # Executer normalization/assets data
+├── ckpts/
+│   ├── manager/
+│   │   └── <manager_run_name>/
+│   │       └── <version>/
+│   │           └── checkpoint-<step>/       # Manager LoRA checkpoint
+│   ├── executer/
+│   │   └── <executer_run_name>/
+│   │       └── <step>/                      # newly trained Trinity Executer
+│   └── mme_vla_suite/
+│       └── symbolic-simple-subgoal/
+│           └── 79999/                       # legacy rep Executer checkpoint
+└── evaluation/
+    ├── server_logs/
+    └── <executer_name>/
+        └── ckpt<checkpoint_id>/
+            └── seed<seed>/
+                └── <evaluation_run_name>/
+                    ├── progress.json
+                    ├── log.json
+                    └── <TaskName>/
+                        ├── frames/
+                        │   └── ep<episode_id>/
+                        │       └── step_<step>_image.png
+                        ├── init_frames/
+                        │   └── ep<episode_id>/
+                        │       └── step_<step>_image.png
+                        ├── manager_logs/
+                        │   └── <TaskName>_ep<episode_id>.log
+                        ├── reporter_logs/
+                        │   └── <TaskName>_ep<episode_id>.log
+                        └── videos/
+                            └── <evaluation_video>.mp4
+```
+
 ### Build all `.h5` files
 
 Omit `--tasks` to process every `.h5` file directly under
@@ -19,9 +83,9 @@ Omit `--tasks` to process every `.h5` file directly under
 
 ```bash
 uv run python scripts/build_dataset.py \
-  --dataset_type vlm_subgoal_qwenvl \
+  --dataset_type manager_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/robomme_preprocessed_data
+  --preprocessed_data_path data/trinity_preprocessed_data/manager_all_data
 ```
 
 ### Build only specified tasks
@@ -31,9 +95,9 @@ the `BinFill` dataset:
 
 ```bash
 uv run python scripts/build_dataset.py \
-  --dataset_type vlm_subgoal_qwenvl \
+  --dataset_type manager_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/robomme_preprocessed_binfill_data \
+  --preprocessed_data_path data/trinity_preprocessed_data/manager_binfill_data_1 \
   --tasks BinFill
 ```
 

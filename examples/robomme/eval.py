@@ -134,10 +134,26 @@ class EpisodeEvaluator:
         reporter_result = None
 
         while True:
+            should_predict_subgoal = (
+                not epstate.action_plan
+                and (
+                    epstate.count % self.args.subgoal_keep_period == 0
+                    or last_subgoal is None
+                )
+            )
+            if should_predict_subgoal:
+                # Trinity v0 ordering: Reporter receives the current
+                # observation first and compares it against the latest init
+                # frame. A successful comparison promotes the current frame
+                # before its result is passed to Manager.
+                reporter_result = reporter.step(epstate, subgoal)
+
+            # Manager receives/buffers the same current observation only after
+            # Reporter has finished the pre-prediction check.
             manager.step(epstate)
 
             if not epstate.action_plan:
-                if epstate.count % self.args.subgoal_keep_period == 0 or last_subgoal is None:
+                if should_predict_subgoal:
                     subgoal, has_api_error = manager.get_subgoal(
                         epstate.count,
                         subgoal,
@@ -196,11 +212,6 @@ class EpisodeEvaluator:
                 action=action.copy(),
                 subgoal=subgoal,
             )
-            # Ask Reporter once after each Executer action chunk. The result is
-            # included in the next QwenVL Manager request.
-            if not epstate.action_plan:
-                reporter_result = reporter.step(epstate, subgoal)
-
             if stop_flag:
                 break
 

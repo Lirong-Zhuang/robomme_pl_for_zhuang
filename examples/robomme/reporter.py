@@ -142,6 +142,7 @@ class QwenVLReporter(ReporterBase):
             subgoal is None
             or self.observation_before_path is None
             or self.frames_dir is None
+            or self.init_frames_dir is None
             or self.log_path is None
         ):
             return None
@@ -169,6 +170,16 @@ class QwenVLReporter(ReporterBase):
         )[0].choices[0].message.content
         reporter_success = self._parse_success(response)
 
+        next_init_path = None
+        if reporter_success is True:
+            # The completed subgoal ends at the current observation. Promote
+            # that exact frame before returning so the next Manager prediction
+            # and every later Reporter comparison use the newest init frame.
+            next_init_path = self.init_frames_dir / f"step_{step_idx}_image.png"
+            if not next_init_path.exists():
+                shutil.copy2(current_path, next_init_path)
+            self.observation_before_path = next_init_path
+
         with self.log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(
                 f"\nStep: {step_idx}\n"
@@ -176,6 +187,8 @@ class QwenVLReporter(ReporterBase):
                 f"Response: {response}\n"
                 f"Parsed success: {reporter_success}\n"
             )
+            if next_init_path is not None:
+                log_file.write(f"Next init frame: {next_init_path}\n")
 
         print(f"[robomme] Reporter response: {response}")
         return reporter_success

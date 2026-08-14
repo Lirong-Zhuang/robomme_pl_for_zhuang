@@ -189,24 +189,10 @@ class QwenVLManager(ManagerBase):
         last_subgoal: Optional[str],
         reporter_result: Optional[bool] = None,
     ) -> Tuple[Optional[str], bool]:
-        # Some tricks. QwenVL sometimes thinks the button has been pressed. hot fix for now.
-        # Such special tricks are not encouraged if you consider participate RoboMME challenge @ CVPR 2026
-        if self.env_name in ["ButtonUnmask", "PickHighlight"]:
-            keep_period = 90
-        elif self.env_name == "ButtonUnmaskSwap":
-            if last_subgoal and "press the first button" in last_subgoal:
-                keep_period = 100
-            elif last_subgoal and "press the second button" in last_subgoal:
-                keep_period = 250
-            else:
-                keep_period = 0
-        else:
-            keep_period = 0
-
         response = self.api.call(
             self.video_buffer[-1],
             count,
-            keep_period,
+            0,
             reporter_result,
         )
         self.video_buffer.clear()
