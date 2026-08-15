@@ -6,7 +6,7 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-DATASET_PATH='data/robomme_preprocessed_dup_data/qwenvl/grounded_subgoal_train.jsonl'
+DATASET_PATH='/data/hdd/zhuanglr/robomme_preprocessed_dup_data/qwenvl/grounded_subgoal_train.jsonl'
 RUN_NAME='qwenvl_grounded_subgoal_256_v1.3'
 OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/qwenvl/${RUN_NAME#qwenvl_}"
 
@@ -20,13 +20,10 @@ swift sft \
     --model 'Qwen/Qwen3-VL-4B-Instruct' \
     --dataset $DATASET_PATH \
     --norm_bbox none \
-    --split_dataset_ratio 0.1 \
-    --eval_strategy steps \
-    --eval_steps 100 \
+    --split_dataset_ratio 0.0 \
+    --eval_strategy no \
     --per_device_eval_batch_size 16 \
-    --metric_for_best_model eval_loss \
-    --greater_is_better false \
-    --load_best_model_at_end true \
+    --load_best_model_at_end false \
     --load_from_cache_file false \
     --packing false \
     --train_type lora \
@@ -52,5 +49,5 @@ swift sft \
     --output_dir $OUTPUT_DIR \
     --run_name $RUN_NAME \
     --warmup_ratio 0.05 \
-    --dataset_num_proc 8 \
-    --dataloader_num_workers 8
+    --dataset_num_proc 4 \
+    --dataloader_num_workers 4
