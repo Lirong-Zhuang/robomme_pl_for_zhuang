@@ -27,7 +27,7 @@ MODEL_TYPE="symbolic_simpleSG_qwenvl"
 SEED=7
 CKPT_ID=79999
 GPU_ID_SERVER=0
-GPU_ID_CLIENT=0
+GPU_ID_CLIENT=1
 
 # Set PORT=0 to choose a free port automatically.
 HOST="0.0.0.0"
@@ -51,7 +51,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="qwenvl_baseline_v1.3"
+EVAL_RUN_NAME="qwenvl_test"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
@@ -81,17 +81,22 @@ MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/chec
 # # CONDA_INIT="$HOME/miniconda3/etc/profile.d/conda.sh"
 # CONDA_INIT="/opt/miniconda3/etc/profile.d/conda.sh"
 
-# micromamba
+# micromamba server 192
+# MAMBA_ENV="robomme"
+# MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
+# MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
+
+# micromamba server 161
 MAMBA_ENV="robomme"
-MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
-MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
+MAMBA_ROOT_PREFIX="/home/zhuanglr/robomme_pl_for_zhuang/.micromamba"
+MAMBA_EXE="/home/zhuanglr/robomme_pl_for_zhuang/.tools/micromamba/bin/micromamba"
 
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
 
 # Leave empty to use JAX's default. For a dedicated policy GPU, values such as
 # 0.90 or 0.95 can be useful.
-XLA_MEM_FRACTION="0.5"
+XLA_MEM_FRACTION=""
 
 # Optional overrides. Leave empty to use paths derived from MODEL_TYPE.
 POLICY_DIR=""
