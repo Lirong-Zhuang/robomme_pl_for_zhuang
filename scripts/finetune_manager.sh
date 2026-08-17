@@ -32,8 +32,8 @@ swift sft \
     --train_type lora \
     --torch_dtype bfloat16 \
     --num_train_epochs 4 \
-    --per_device_train_batch_size 16 \
-    --gradient_accumulation_steps 1 \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
     --attn_impl sdpa \
     --padding_free false \
     --learning_rate 5e-5 \
