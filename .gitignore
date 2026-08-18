@@ -218,3 +218,14 @@ __marimo__/
 # Running files
 runs/
 /runs
+
+
+# Micromamba
+/.micromamba/
+/.venv/
+/.uv-cache/
+/.uv-python/
+/.tools/
+/hf_cache/
+/openpi_data/
+/.deps/

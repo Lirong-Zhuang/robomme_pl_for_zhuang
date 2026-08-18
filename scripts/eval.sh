@@ -27,7 +27,7 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 EXECUTER_SEED=7
 EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
-MANAGER_REPORTER_GPU_ID=0
+MANAGER_REPORTER_GPU_ID=1
 
 # Set EXECUTER_PORT=0 to choose a free port automatically.
 EXECUTER_HOST="0.0.0.0"
@@ -51,7 +51,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.1"
+EVAL_RUN_NAME="trinity_v0.3"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
@@ -70,7 +70,7 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
-MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
+MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v2_simple_subgoal/v0-20260818-005415/checkpoint-1400"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
@@ -81,17 +81,22 @@ EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 
-# micromamba
+# micromamba server 117
+# MAMBA_ENV="robomme"
+# MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
+# MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
+
+# micromamba server 161
 MAMBA_ENV="robomme"
-MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
-MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
+MAMBA_ROOT_PREFIX="/home/zhuanglr/robomme_pl_for_zhuang/.micromamba"
+MAMBA_EXE="/home/zhuanglr/robomme_pl_for_zhuang/.tools/micromamba/bin/micromamba"
 
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
 
 # Leave empty to use JAX's default. For a dedicated policy GPU, values such as
 # 0.90 or 0.95 can be useful.
-XLA_MEM_FRACTION="0.5"
+XLA_MEM_FRACTION=""
 
 # =============================================================================
 # Implementation
