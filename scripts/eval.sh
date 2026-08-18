@@ -25,7 +25,7 @@ set -Eeuo pipefail
 EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 EXECUTER_SEED=7
-EXECUTER_CKPT_ID=79999
+EXECUTER_CKPT_ID=0
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=1
 
@@ -74,8 +74,10 @@ MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v2_simple_subgoal/v
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
-EXECUTER_CONFIG="mme_vla_suite"
-EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
+# EXECUTER_CONFIG="mme_vla_suite"
+# EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
+EXECUTER_CONFIG="pi05_baseline"
+EXECUTER_DIR="/home/zhuanglr/.cache/openpi/openpi-assets/checkpoints/pi05_base"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
