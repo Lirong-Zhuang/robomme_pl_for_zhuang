@@ -42,7 +42,7 @@ RE_EVAL_TASKS=""
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=50
+NUM_EPISODES=1
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -51,9 +51,9 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.3"
+EVAL_RUN_NAME="trinity_v0.4"
 # Preserve completed tasks/episodes and continue with anything still missing.
-OVERWRITE=true
+OVERWRITE=false
 
 # Save the per-episode Manager trace under
 # <SAVE_DIR>/.../<TASK_NAME>/manager_logs/, while still displaying it in the
@@ -70,7 +70,7 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
-MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v2_simple_subgoal/v0-20260818-005415/checkpoint-1400"
+MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
