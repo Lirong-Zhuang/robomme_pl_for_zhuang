@@ -80,6 +80,8 @@ EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
+# Empty means the original, non-fine-tuned Qwen3-VL Reporter.
+REPORTER_ADAPTER_PATH=""
 
 # micromamba server 117
 # MAMBA_ENV="robomme"
@@ -241,6 +243,7 @@ EVAL_ARGS=(
     --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
     --args.reporter-type "$REPORTER_TYPE"
     --args.reporter-model-path "$REPORTER_MODEL_PATH"
+    --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
 )
 
 EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
@@ -287,6 +290,7 @@ echo "Evaluation:      $REQUESTED_EVAL_PRESET"
 echo "Manager:         $MANAGER_TYPE"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
+echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
 echo "Executer ckpt:   $EXECUTER_DIR"
