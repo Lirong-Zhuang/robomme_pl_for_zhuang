@@ -2,8 +2,10 @@
 
 set -Eeuo pipefail
 
-# Run this script from the repository root:
-#   bash scripts/eval.sh
+# Resolve imports and relative paths from the repository root, regardless of
+# the directory from which this script is launched.
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO_ROOT"
 #
 # The Executer policy server is started as a managed background process because eval.py
 # must run at the same time. eval.py itself runs in the foreground, so all
@@ -346,6 +348,7 @@ printf ' %q' "${EVAL_ARGS[@]}"
 printf '\n\n'
 
 CUDA_VISIBLE_DEVICES="$MANAGER_REPORTER_GPU_ID" \
+PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
 MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \
 "$MAMBA_EXE" run -n "$MAMBA_ENV" \
 python examples/robomme/eval.py "${EVAL_ARGS[@]}"
