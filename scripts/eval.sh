@@ -42,7 +42,7 @@ RE_EVAL_TASKS=""
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=1
+NUM_EPISODES=50
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -51,7 +51,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.4"
+EVAL_RUN_NAME="trinity_v0.6"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
