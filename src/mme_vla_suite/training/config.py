@@ -552,6 +552,19 @@ class TrainConfig:
 
 OPENPI_DATA_HOME = os.getenv("OPENPI_DATA_HOME", "~/.cache/openpi")
 
+# Keep the LoRA model and its freeze filter coupled. Overriding only the model
+# variant from the CLI would leave TrainConfig.freeze_filter unchanged and
+# accidentally train the frozen Gemma base weights as well.
+_MME_VLA_LORA_MODEL = history_pi0.HistoryPi0Config(
+    pi05=True,
+    paligemma_variant="gemma_2b_lora",
+    action_expert_variant="gemma_300m",
+    action_horizon=20,
+    use_history=True,
+    history_config=None,
+    discrete_state_input=False,
+)
+
 _CONFIGS = [
     TrainConfig(
         name="pi05_baseline",
@@ -616,6 +629,37 @@ _CONFIGS = [
         num_workers=4,
         ema_decay=0.999,
         fsdp_devices=4,
+    ),
+    TrainConfig(
+        name="mme_vla_suite_lora",
+        model=_MME_VLA_LORA_MODEL,
+        data=RoboMMEDataConfig(
+            repo_id="robomme",
+            # LoRA changes the trainable model structure, not the robot/action
+            # normalization. Reuse the existing MME-VLA normalization assets.
+            assets=AssetsConfig(assets_dir="runs/assets/mme_vla_suite"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=64,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=100_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        freeze_filter=_MME_VLA_LORA_MODEL.get_freeze_filter(),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            os.path.join(OPENPI_DATA_HOME, "openpi-assets/checkpoints/pi05_base/params"),
+        ),
+        num_train_steps=80_000,
+        save_interval=10_000,
+        keep_period=10_000,
+        num_workers=4,
+        # EMA duplicates the full parameter tree and offsets much of LoRA's
+        # memory saving. OpenPI's LoRA recipes disable it for the same reason.
+        ema_decay=None,
+        fsdp_devices=1,
     ),
 ]
 
