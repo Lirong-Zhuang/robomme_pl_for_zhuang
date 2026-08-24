@@ -2,7 +2,11 @@
 
 Build Executer preprocessed pickle data from raw HDF5 data.
 ```
-uv run python scripts/build_dataset.py --dataset_type executer
+uv run python scripts/build_dataset.py \
+  --dataset_type executer \
+  --raw_data_path data/robomme_data_h5 \
+  --preprocessed_data_path data/trinity_preprocessed_data/executer_binfill_data_0 \
+  --tasks BinFill
 ```
 
 Build only selected Manager tasks into a custom output directory.
