@@ -110,6 +110,45 @@ For multiple tasks, list their names separated by spaces, for example:
 Add `--visualize` only when visualization MP4s are needed. Keyframe duplicate
 training samples are generated whether or not visualization is enabled.
 
+### Build Reporter data
+
+Reporter data uses the same selected frames and transition-frame duplication
+as the QwenVL Manager builder. Within each subgoal span, the first observation
+is the subgoal start frame. Selected intermediate observations are labelled
+`{"success": false}` and the subgoal transition observation is labelled
+`{"success": true}`. The terminal episode frame is excluded because the live
+Reporter is not called after the environment terminates.
+
+```bash
+uv run python scripts/build_dataset.py \
+  --dataset_type reporter_qwenvl \
+  --raw_data_path /data/public/RoboMME \
+  --preprocessed_data_path /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data
+```
+
+The builder writes:
+
+```text
+reporter_data/reporter_qwenvl/images/
+reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
+reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
+```
+
+Each JSONL row contains `system`, `user`, and `assistant` messages plus two
+images. The prompt is imported from the same shared module as live Reporter
+inference, preventing training/inference prompt drift.
+
+Before training, select the simple or grounded JSONL and GPU settings near the
+top of `scripts/finetune_reporter.sh`, then run:
+
+```bash
+bash scripts/finetune_reporter.sh
+```
+
+To evaluate a trained LoRA, set `reporter_adapter_path` in
+`examples/robomme/eval.py` to the generated checkpoint directory. Leave it
+empty to continue using the original Qwen3-VL model.
+
 ## 2. Train the VLM subgoal predictor with tmux
 
 Before training, set `DATASET_PATH`, `RUN_NAME`, `OUTPUT_DIR`, and, if needed,

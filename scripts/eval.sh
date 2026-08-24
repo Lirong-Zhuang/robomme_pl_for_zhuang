@@ -2,8 +2,10 @@
 
 set -Eeuo pipefail
 
-# Run this script from the repository root:
-#   bash scripts/eval.sh
+# Resolve imports and relative paths from the repository root, regardless of
+# the directory from which this script is launched.
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO_ROOT"
 #
 # The Executer policy server is started as a managed background process because eval.py
 # must run at the same time. eval.py itself runs in the foreground, so all
@@ -25,9 +27,9 @@ set -Eeuo pipefail
 EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 EXECUTER_SEED=7
-EXECUTER_CKPT_ID=0
-EXECUTER_GPU_ID=0
-MANAGER_REPORTER_GPU_ID=1
+EXECUTER_CKPT_ID=79999
+EXECUTER_GPU_ID=2
+MANAGER_REPORTER_GPU_ID=3
 
 # Set EXECUTER_PORT=0 to choose a free port automatically.
 EXECUTER_HOST="0.0.0.0"
@@ -51,9 +53,9 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.5"
+EVAL_RUN_NAME="trinity_v0.8"
 # Preserve completed tasks/episodes and continue with anything still missing.
-OVERWRITE=true
+OVERWRITE=false
 
 # Save the per-episode Manager trace under
 # <SAVE_DIR>/.../<TASK_NAME>/manager_logs/, while still displaying it in the
@@ -82,6 +84,8 @@ EXECUTER_DIR="/home/zhuanglr/.cache/openpi/openpi-assets/checkpoints/pi05_base"
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
+# Empty means the original, non-fine-tuned Qwen3-VL Reporter.
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-1280"
 
 # micromamba server 117
 # MAMBA_ENV="robomme"
@@ -243,6 +247,7 @@ EVAL_ARGS=(
     --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
     --args.reporter-type "$REPORTER_TYPE"
     --args.reporter-model-path "$REPORTER_MODEL_PATH"
+    --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
 )
 
 EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
@@ -289,6 +294,7 @@ echo "Evaluation:      $REQUESTED_EVAL_PRESET"
 echo "Manager:         $MANAGER_TYPE"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
+echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
 echo "Executer ckpt:   $EXECUTER_DIR"
@@ -344,6 +350,7 @@ printf ' %q' "${EVAL_ARGS[@]}"
 printf '\n\n'
 
 CUDA_VISIBLE_DEVICES="$MANAGER_REPORTER_GPU_ID" \
+PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
 MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \
 "$MAMBA_EXE" run -n "$MAMBA_ENV" \
 python examples/robomme/eval.py "${EVAL_ARGS[@]}"

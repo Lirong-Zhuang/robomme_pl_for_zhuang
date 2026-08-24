@@ -33,6 +33,15 @@ Build Manager subgoal prediction dataset for QwenVL plus key states.
 uv run python scripts/build_dataset.py --dataset_type manager_qpa
 ```
 
+Build Reporter completion-classification data for QwenVL.
+```
+uv run python scripts/build_dataset.py \
+  --dataset_type reporter_qwenvl \
+  --raw_data_path data/robomme_data_h5 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_1 \
+  --tasks BinFill
+```
+
 """
 
 import argparse
@@ -51,6 +60,9 @@ from mme_vla_suite.dataset_builder.build_manager_dataset_qpa import (
 from mme_vla_suite.dataset_builder.build_manager_dataset_qwenvl import (
     DatasetBuilder as QwenVLManagerDatasetBuilder,
 )
+from mme_vla_suite.dataset_builder.build_reporter_dataset import (
+    DatasetBuilder as ReporterDatasetBuilder,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -66,7 +78,7 @@ def _parse_args() -> argparse.Namespace:
             "manager_qwenvl",
             "manager_qpa",
             "manager_memer",
-            "reporter",
+            "reporter_qwenvl",
         ],
         help="Dataset type to build",
     )
@@ -145,10 +157,16 @@ if __name__ == "__main__":
             task_names=args.tasks,
         )
         builder.run()
-    elif args.dataset_type == "reporter":
-        raise NotImplementedError(
-            "Reporter dataset generation is not implemented yet."
+    elif args.dataset_type == "reporter_qwenvl":
+        builder = ReporterDatasetBuilder(
+            raw_data_path=args.raw_data_path,
+            preprocessed_data_path=args.preprocessed_data_path,
+            max_episodes=args.max_episodes,
+            visualize=args.visualize,
+            reporter_dir_name="reporter_qwenvl",
+            task_names=args.tasks,
         )
+        builder.run()
     else:
         raise ValueError(f"Unknown dataset_type: {args.dataset_type}")
 

@@ -11,21 +11,11 @@ import numpy as np
 from swift.llm import InferRequest, PtEngine, RequestConfig
 
 from env_runner import EnvRunner
+from mme_vla_suite.reporter_prompts import (
+    REPORTER_SYSTEM_PROMPT,
+    format_reporter_user_prompt,
+)
 from utils import EpisodeState
-
-
-REPORTER_SYSTEM_PROMPT = (
-    "You are a helpful assistant to determine whether the current robot subgoal "
-    "is complete by comparing two observations. "
-    'Return only {"success": true} or {"success": false}. '
-)
-
-REPORTER_USER_PROMPT = (
-    "Subgoal: {subgoal}\n"
-    "Observation before executing the subgoal: <image>\n"
-    "Observation after execution: <image>\n"
-    "Determine whether the subgoal is complete based on the observations before and after execution. "
-)
 
 
 class ReporterBase:
@@ -61,15 +51,22 @@ class NullReporter(ReporterBase):
 
 
 class QwenVLReporter(ReporterBase):
-    """Use the original, non-fine-tuned Qwen3-VL model as Reporter."""
+    """Use Qwen3-VL, optionally with a fine-tuned Reporter adapter."""
 
     def __init__(self, args, save_dir: Path):
         super().__init__(args, save_dir)
-        print(f"Loading Reporter model from {args.reporter_model_path}")
-        self.engine = PtEngine(
+        adapter_path = getattr(args, "reporter_adapter_path", "")
+        print(
+            f"Loading Reporter model from {args.reporter_model_path}"
+            + (f" with adapter {adapter_path}" if adapter_path else "")
+        )
+        engine_kwargs = dict(
             model_id_or_path=args.reporter_model_path,
             attn_impl="sdpa",
         )
+        if adapter_path:
+            engine_kwargs["adapters"] = [adapter_path]
+        self.engine = PtEngine(**engine_kwargs)
         self.current_subgoal: Optional[str] = None
         self.observation_before_path: Optional[Path] = None
         self.frames_dir: Optional[Path] = None
@@ -160,7 +157,7 @@ class QwenVLReporter(ReporterBase):
                 {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": REPORTER_USER_PROMPT.replace("{subgoal}", subgoal),
+                    "content": format_reporter_user_prompt(subgoal),
                 },
             ],
         }
