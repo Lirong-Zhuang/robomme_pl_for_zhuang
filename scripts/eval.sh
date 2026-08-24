@@ -28,8 +28,8 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 EXECUTER_SEED=7
 EXECUTER_CKPT_ID=79999
-EXECUTER_GPU_ID=0
-MANAGER_REPORTER_GPU_ID=1
+EXECUTER_GPU_ID=2
+MANAGER_REPORTER_GPU_ID=3
 
 # Set EXECUTER_PORT=0 to choose a free port automatically.
 EXECUTER_HOST="0.0.0.0"
@@ -53,7 +53,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.6"
+EVAL_RUN_NAME="trinity_v0.8"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -83,7 +83,7 @@ EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
-REPORTER_ADAPTER_PATH=""
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-1280"
 
 # micromamba server 117
 # MAMBA_ENV="robomme"

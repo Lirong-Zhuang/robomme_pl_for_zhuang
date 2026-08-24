@@ -31,7 +31,11 @@ uv run python scripts/build_dataset.py --dataset_type manager_qpa
 
 Build Reporter completion-classification data for QwenVL.
 ```
-uv run python scripts/build_dataset.py --dataset_type reporter_qwenvl
+uv run python scripts/build_dataset.py \
+  --dataset_type reporter_qwenvl \
+  --raw_data_path data/robomme_data_h5 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_1 \
+  --tasks BinFill
 ```
 
 """

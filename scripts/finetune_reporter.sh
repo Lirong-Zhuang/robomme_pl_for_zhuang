@@ -7,7 +7,7 @@
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 
-REPORTER_DATASET_PATH='/home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl'
+REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_1/reporter_qwenvl/simple_subgoal_train.jsonl'
 REPORTER_RUN_NAME='qwen_reporter_v1_simple_subgoal'
 REPORTER_OUTPUT_DIR="/home/zhuanglr/robomme_pl_for_zhuang/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 
@@ -20,8 +20,13 @@ CUDA_VISIBLE_DEVICES=0,1 \
 swift sft \
     --model 'Qwen/Qwen3-VL-4B-Instruct' \
     --dataset "$REPORTER_DATASET_PATH" \
-    --split_dataset_ratio 0.0 \
-    --eval_strategy no \
+    --split_dataset_ratio 0.1 \
+    --eval_strategy steps \
+    --eval_steps 50 \
+    --per_device_eval_batch_size 16 \
+    --metric_for_best_model loss \
+    --greater_is_better false \
+    --load_best_model_at_end true \
     --load_from_cache_file true \
     --packing false \
     --train_type lora \

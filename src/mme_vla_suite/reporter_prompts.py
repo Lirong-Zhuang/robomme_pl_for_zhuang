@@ -11,8 +11,6 @@ REPORTER_USER_PROMPT = (
     "Observation before executing the current subgoal: <image>\n"
     "Observation after execution: <image>\n"
     "Determine whether the current subgoal is complete based on the observations before and after execution. "
-    "The episode may contain many subgoals, and other subgoals may have been completed "
-    "before or may be evaluated later. "
 )
 
 
