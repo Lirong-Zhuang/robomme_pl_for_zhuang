@@ -229,3 +229,6 @@ runs/
 /hf_cache/
 /openpi_data/
 /.deps/
+
+# wandb
+wandb/

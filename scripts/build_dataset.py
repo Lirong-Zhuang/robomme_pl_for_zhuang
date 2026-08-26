@@ -4,7 +4,7 @@ Build Executer preprocessed pickle data from raw HDF5 data.
 ```
 uv run python scripts/build_dataset.py \
   --dataset_type executer \
-  --raw_data_path data/robomme_data_h5 \
+  --raw_data_path /data/public/RoboMME \
   --preprocessed_data_path data/trinity_preprocessed_data/executer_binfill_data_0 \
   --tasks BinFill
 ```
@@ -13,7 +13,7 @@ Build only selected Manager tasks into a custom output directory.
 ```
 uv run python scripts/build_dataset.py \
   --dataset_type manager_qwenvl \
-  --raw_data_path data/robomme_data_h5 \
+  --raw_data_path /data/public/RoboMME \
   --preprocessed_data_path data/trinity_preprocessed_data/manager_binfill_data_1 \
   --tasks BinFill
 ```
@@ -37,7 +37,7 @@ Build Reporter completion-classification data for QwenVL.
 ```
 uv run python scripts/build_dataset.py \
   --dataset_type reporter_qwenvl \
-  --raw_data_path data/robomme_data_h5 \
+  --raw_data_path /data/public/RoboMME \
   --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_1 \
   --tasks BinFill
 ```

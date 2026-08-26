@@ -28,8 +28,8 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 EXECUTER_SEED=7
 EXECUTER_CKPT_ID=79999
-EXECUTER_GPU_ID=2
-MANAGER_REPORTER_GPU_ID=3
+EXECUTER_GPU_ID=0
+MANAGER_REPORTER_GPU_ID=0
 
 # Set EXECUTER_PORT=0 to choose a free port automatically.
 EXECUTER_HOST="0.0.0.0"
@@ -88,14 +88,14 @@ REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-1280"
 
 # micromamba server 117
-# MAMBA_ENV="robomme"
-# MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
-# MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
+MAMBA_ENV="robomme"
+MAMBA_ROOT_PREFIX="/data/zhuanglr/micromamba"
+MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
 
 # micromamba server 161
-MAMBA_ENV="robomme"
-MAMBA_ROOT_PREFIX="/home/zhuanglr/robomme_pl_for_zhuang/.micromamba"
-MAMBA_EXE="/home/zhuanglr/robomme_pl_for_zhuang/.tools/micromamba/bin/micromamba"
+# MAMBA_ENV="robomme"
+# MAMBA_ROOT_PREFIX="/home/zhuanglr/robomme_pl_for_zhuang/.micromamba"
+# MAMBA_EXE="/home/zhuanglr/robomme_pl_for_zhuang/.tools/micromamba/bin/micromamba"
 
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
