@@ -19,7 +19,6 @@ EXECUTER_DATASET_PATH="data/trinity_preprocessed_data/executer_binfill_data_0"
 # Examples: GPU_IDS="0" and FSDP_DEVICES=1; GPU_IDS="0,1" and FSDP_DEVICES=2.
 GPU_IDS="0"
 FSDP_DEVICES=1
-XLA_MEMORY_FRACTION=0.9
 
 # Training settings.
 BATCH_SIZE=32
@@ -33,7 +32,7 @@ KEEP_PERIOD=5000
 # export WANDB_API_KEY="<YOUR_WANDB_API_KEY>"
 
 CUDA_VISIBLE_DEVICES="$GPU_IDS" \
-XLA_PYTHON_CLIENT_MEM_FRACTION="$XLA_MEMORY_FRACTION" \
+XLA_PYTHON_CLIENT_PREALLOCATE=false \
 uv run scripts/train.py "$EXECUTER_TRAIN_CONFIG" \
     --exp-name="$EXECUTER_RUN_NAME" \
     --checkpoint-namespace="$EXECUTER_CHECKPOINT_NAMESPACE" \
