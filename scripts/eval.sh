@@ -134,6 +134,25 @@ bool_arg() {
     esac
 }
 
+resolve_repo_path() {
+    local path=$1
+    if [[ -z "$path" || "$path" == /* ]]; then
+        printf '%s' "$path"
+    else
+        printf '%s/%s' "$REPO_ROOT" "$path"
+    fi
+}
+
+require_local_dir() {
+    local label=$1
+    local path=$2
+    if [[ ! -d "$path" ]]; then
+        echo "ERROR: $label directory not found: $path" >&2
+        echo "Sync the checkpoint to this server or update its path in scripts/eval.sh." >&2
+        exit 1
+    fi
+}
+
 for command_name in uv lsof shuf; do
     if ! command -v "$command_name" &>/dev/null; then
         echo "ERROR: required command '$command_name' was not found." >&2
@@ -208,6 +227,27 @@ fi
 if [[ -z "$EXECUTER_DIR" ]]; then
     EXECUTER_DIR="runs/ckpts/$EXECUTER_CONFIG_TYPE/$EXECUTER_NAME/$EXECUTER_CKPT_ID"
 fi
+
+# ms-swift treats a missing relative adapter path as a remote Hub model ID.
+# Resolve every local checkpoint before entering micromamba and fail before
+# starting either GPU process when the selected directory is unavailable.
+EXECUTER_DIR=$(resolve_repo_path "$EXECUTER_DIR")
+MANAGER_SIMPLE_ADAPTER_PATH=$(resolve_repo_path "$MANAGER_SIMPLE_ADAPTER_PATH")
+MANAGER_GROUNDED_ADAPTER_PATH=$(resolve_repo_path "$MANAGER_GROUNDED_ADAPTER_PATH")
+REPORTER_ADAPTER_PATH=$(resolve_repo_path "$REPORTER_ADAPTER_PATH")
+
+require_local_dir "Executer checkpoint" "$EXECUTER_DIR"
+if [[ "$MANAGER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "memer" ]]; then
+    if [[ "$SUBGOAL_TYPE" == "simple_subgoal" ]]; then
+        require_local_dir "Manager adapter" "$MANAGER_SIMPLE_ADAPTER_PATH"
+    else
+        require_local_dir "Manager adapter" "$MANAGER_GROUNDED_ADAPTER_PATH"
+    fi
+fi
+if [[ -n "$REPORTER_ADAPTER_PATH" ]]; then
+    require_local_dir "Reporter adapter" "$REPORTER_ADAPTER_PATH"
+fi
+
 if [[ "$EXECUTER_PORT" == "0" ]]; then
     EXECUTER_PORT=$(find_free_port)
 fi
