@@ -9,8 +9,14 @@ uv run python -m  challenge_interface.scripts.deploy --checkpoint-dir perceptual
 """
 
 import argparse
-from mme_vla_suite.policies.policy_config import create_trained_policy
+import os
 from pathlib import Path
+
+# The shared server allocates GPU memory strictly on demand.
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
+from mme_vla_suite.policies.policy_config import create_trained_policy
 from mme_vla_suite.training.config import get_config
 
 

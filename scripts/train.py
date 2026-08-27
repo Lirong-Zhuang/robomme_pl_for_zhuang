@@ -1,7 +1,13 @@
 import dataclasses
 import functools
 import logging
+import os
 import platform
+
+# The shared server allocates GPU memory strictly on demand.
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
 import jax
 import jax.numpy as jnp
 import numpy as np

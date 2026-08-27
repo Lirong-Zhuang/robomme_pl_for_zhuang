@@ -95,7 +95,9 @@ git clone git@hf.co:datasets/Yinpei/robomme_preprocessed_data_sample data/robomm
 export WANDB_API_KEY=<YOUR_WANDB_API_KEY>
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 export MME_VLA_TYPE="perceptual-framesamp-modul"
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.95 uv run scripts/train.py mme_vla_suite \
+XLA_PYTHON_CLIENT_PREALLOCATE=false \
+XLA_PYTHON_CLIENT_ALLOCATOR=platform \
+uv run scripts/train.py mme_vla_suite \
 --exp-name=<model_name> \
 --batch-size=64 \
 --num-workers=4 \
@@ -312,7 +314,7 @@ Q2: Why does the evaluation stop?
 A2: We observed that, on long-horizon tasks such as VideoPlaceButton, the WebSocket connection can break due to large video frames. If the evaluation process is interrupted, you can rerun `scripts/eval.sh`, and the program will resume based on the generated `progress.json`.
 
 Q3: CUDA runs out of memory when training VLA models.  
-A3: You can set the environment variable `XLA_PYTHON_CLIENT_MEM_FRACTION=0.95` to allow JAX to use more GPU memory.
+A3: On shared GPUs, set `XLA_PYTHON_CLIENT_PREALLOCATE=false` and `XLA_PYTHON_CLIENT_ALLOCATOR=platform` so JAX allocates and releases GPU memory on demand.
 
 ## 🙏 Acknowledgement
 This work was supported in part by NSF SES-2128623, NSF CAREER #2337870, NSF NRI #2220876, NSF NAIRR250085, and NSF IIS-1949634. We would also like to thank the excellent [OpenPi](https://github.com/Physical-Intelligence/openpi/tree/main) codebase from Physical-Intelligence.

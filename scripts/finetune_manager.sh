@@ -11,7 +11,7 @@ MANAGER_DATASET_PATH='data/trinity_preprocessed_data/manager_binfill_data_1/qwen
 MANAGER_RUN_NAME='qwen_manager_v2_simple_subgoal'
 MANAGER_OUTPUT_DIR="runs/ckpts/manager/${MANAGER_RUN_NAME}"
 
-PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
+PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
 IMAGE_MAX_TOKEN_NUM=256 \
 VIDEO_MAX_TOKEN_NUM=64 \
 FPS_MAX_FRAMES=10 \

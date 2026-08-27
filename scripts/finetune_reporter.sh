@@ -11,7 +11,7 @@ REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_1/re
 REPORTER_RUN_NAME='qwen_reporter_v1_simple_subgoal'
 REPORTER_OUTPUT_DIR="/home/zhuanglr/robomme_pl_for_zhuang/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 
-PYTORCH_ALLOC_CONF='expandable_segments:True' \
+PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
 IMAGE_MAX_TOKEN_NUM=256 \
 VIDEO_MAX_TOKEN_NUM=64 \
 FPS_MAX_FRAMES=10 \

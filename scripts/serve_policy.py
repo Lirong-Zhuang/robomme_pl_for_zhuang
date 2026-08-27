@@ -1,7 +1,12 @@
 import dataclasses
 import enum
 import logging
+import os
 import socket
+
+# The shared server allocates GPU memory strictly on demand.
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
 import tyro
 

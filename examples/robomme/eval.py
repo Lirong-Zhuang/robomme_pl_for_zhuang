@@ -8,6 +8,9 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Optional, Any, TextIO, Tuple
 
+# Do not retain unused CUDA allocations on the shared evaluation GPU.
+os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
+
 from utils import (
     check_args,
     TASK_NAME_LIST,
