@@ -46,4 +46,5 @@ uv run scripts/train.py "$EXECUTER_TRAIN_CONFIG" \
     --keep-period="$KEEP_PERIOD" \
     --dataset-path="$EXECUTER_DATASET_PATH" \
     --model.use-history \
+    --resume \
     --model.history-config="${EXECUTER_TYPE}.yaml"
