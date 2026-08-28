@@ -11,7 +11,7 @@ EXECUTER_TYPE="symbolic-simple-subgoal"
 
 # Experiment and data settings.
 EXECUTER_TRAIN_CONFIG="mme_vla_suite_lora"
-EXECUTER_RUN_NAME="excuter_pi0.5_v1"
+EXECUTER_RUN_NAME="excuter_pi0.5_v2"
 EXECUTER_CHECKPOINT_NAMESPACE="executer"
 EXECUTER_DATASET_PATH="data/trinity_preprocessed_data/executer_binfill_data_0"
 
@@ -22,12 +22,12 @@ FSDP_DEVICES=1
 
 # Training settings.
 BATCH_SIZE=32
-NUM_TRAIN_STEPS=20000
+NUM_TRAIN_STEPS=80000
 NUM_WORKERS=4
 SEED=42
 LOG_INTERVAL=100
-SAVE_INTERVAL=5000
-KEEP_PERIOD=5000
+SAVE_INTERVAL=10000
+KEEP_PERIOD=10000
 
 # export WANDB_API_KEY="<YOUR_WANDB_API_KEY>"
 
