@@ -87,3 +87,28 @@ def test_reporter_rows_follow_manager_selection_and_duplication(tmp_path: Path):
     # The next Reporter span starts from the newly completed transition frame.
     assert simple_rows[3]["images"][0].endswith("step40.png")
     assert simple_rows[3]["images"][1].endswith("step50.png")
+
+
+def test_reporter_can_disable_duplicate_rows_for_test_data(tmp_path: Path):
+    raw_dir = tmp_path / "raw"
+    output_dir = tmp_path / "processed"
+    raw_dir.mkdir()
+    _write_episode(raw_dir / "data_BinFill.h5")
+
+    builder = DatasetBuilder(
+        raw_data_path=str(raw_dir),
+        preprocessed_data_path=str(output_dir),
+        duplicate_samples=False,
+    )
+    counts = builder.run()
+
+    assert counts == [{"positive": 2, "negative": 3, "duplicates": 0}]
+    simple_rows = _read_jsonl(
+        output_dir / "reporter_qwenvl" / "simple_subgoal_train.jsonl"
+    )
+    labels = [
+        json.loads(row["messages"][2]["content"])["success"]
+        for row in simple_rows
+    ]
+    assert labels == [False, True, True, False, False]
+    assert len(simple_rows) == len({json.dumps(row, sort_keys=True) for row in simple_rows})

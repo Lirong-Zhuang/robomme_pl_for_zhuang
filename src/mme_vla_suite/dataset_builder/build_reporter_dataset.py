@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Collection, Mapping
 
 import cv2
 import h5py
@@ -39,6 +40,8 @@ class DatasetBuilder(ManagerDatasetBuilder):
         visualize: bool = False,
         reporter_dir_name: str = "reporter_qwenvl",
         task_names: list[str] | None = None,
+        episode_indices_by_task: Mapping[str, Collection[int]] | None = None,
+        duplicate_samples: bool = True,
     ) -> None:
         super().__init__(
             raw_data_path=raw_data_path,
@@ -47,6 +50,8 @@ class DatasetBuilder(ManagerDatasetBuilder):
             visualize=visualize,
             manager_dir_name=reporter_dir_name,
             task_names=task_names,
+            episode_indices_by_task=episode_indices_by_task,
+            duplicate_samples=duplicate_samples,
         )
 
     @staticmethod
@@ -214,7 +219,11 @@ class DatasetBuilder(ManagerDatasetBuilder):
                 else:
                     negative_rows += 1
 
-                dup_count = duplicate_idxs.get(idx, 0)
+                dup_count = (
+                    duplicate_idxs.get(idx, 0)
+                    if self.duplicate_samples
+                    else 0
+                )
                 if dup_count:
                     print(f"duplicate Reporter step {idx} for {dup_count} more times")
                     self._append_reporter_rows(

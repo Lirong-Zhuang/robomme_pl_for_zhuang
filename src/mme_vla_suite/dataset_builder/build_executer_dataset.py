@@ -11,6 +11,7 @@ import os
 import pickle
 import shutil
 import time
+from collections.abc import Collection, Mapping
 
 import cv2
 import h5py
@@ -171,6 +172,7 @@ class ExecuterDatasetProcessor:
         visualize: bool = False,
         max_episodes: int | None = None,
         task_names: list[str] | None = None,
+        episode_indices_by_task: Mapping[str, Collection[int]] | None = None,
     ) -> None:
         self.raw_data_path = raw_data_path
         self.dataset_path = preprocessed_data_path
@@ -178,6 +180,14 @@ class ExecuterDatasetProcessor:
         self.visualize = visualize
         self.max_episodes = max_episodes
         self.task_names = set(task_names) if task_names else None
+        self.episode_indices_by_task = (
+            {
+                task_name: set(episode_indices)
+                for task_name, episode_indices in episode_indices_by_task.items()
+            }
+            if episode_indices_by_task is not None
+            else None
+        )
         if self.task_names is not None:
             available_tasks = {
                 get_env_id_from_filename(fname)
@@ -230,6 +240,14 @@ class ExecuterDatasetProcessor:
                 )
                 if self.max_episodes is not None:
                     episode_indices = episode_indices[:self.max_episodes]
+                if self.episode_indices_by_task is not None:
+                    env_id = get_env_id_from_filename(fname)
+                    selected = self.episode_indices_by_task.get(env_id, set())
+                    episode_indices = [
+                        episode_idx
+                        for episode_idx in episode_indices
+                        if episode_idx in selected
+                    ]
                 for episode_idx in episode_indices:  
                     global_episode_idx, mem_buffer, exec_sample_id, total_sample_id = (
                         self._process_episode(

@@ -406,7 +406,7 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
 
             self._append_training_rows(simple_subgoal_data, grounded_subgoal_data)
 
-            dup_count = duplicate_idxs.get(idx, 0)
+            dup_count = duplicate_idxs.get(idx, 0) if self.duplicate_samples else 0
             if dup_count > 0:
                 print(f"duplicate {idx} for {dup_count} more times")
                 self._append_training_rows(

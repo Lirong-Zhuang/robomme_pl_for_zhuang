@@ -1,6 +1,5 @@
 """Reporter implementations for RoboMME evaluation."""
 
-import json
 import pprint
 import shutil
 from pathlib import Path
@@ -11,6 +10,7 @@ import numpy as np
 from swift.llm import InferRequest, PtEngine, RequestConfig
 
 from env_runner import EnvRunner
+from mme_vla_suite.reporter_evaluation import parse_reporter_success
 from mme_vla_suite.reporter_prompts import (
     REPORTER_SYSTEM_PROMPT,
     format_reporter_user_prompt,
@@ -192,19 +192,7 @@ class QwenVLReporter(ReporterBase):
 
     @staticmethod
     def _parse_success(response: str) -> Optional[bool]:
-        text = response.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
-        try:
-            success = json.loads(text).get("success")
-        except (json.JSONDecodeError, AttributeError):
-            return None
-        return success if isinstance(success, bool) else None
+        return parse_reporter_success(response)
 
 
 def build_reporter(args, save_dir: Path) -> ReporterBase:
