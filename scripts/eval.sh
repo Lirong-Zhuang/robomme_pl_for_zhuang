@@ -27,7 +27,7 @@ cd "$REPO_ROOT"
 EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 EXECUTER_SEED=7
-EXECUTER_CKPT_ID=19999
+EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
 
@@ -53,7 +53,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.10"
+EVAL_RUN_NAME="trinity_v0.11"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -77,7 +77,7 @@ MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_
 
 # Executer configuration
 EXECUTER_CONFIG="mme_vla_suite_lora"
-EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v1/19999"
+EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/79999"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
