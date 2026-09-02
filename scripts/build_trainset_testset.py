@@ -26,7 +26,7 @@ import math
 import random
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import h5py
 
@@ -240,6 +240,7 @@ def _build_one_split(
     episode_indices_by_task: dict[str, list[int]],
     visualize: bool,
     duplicate_samples: bool,
+    data_split: Literal["train", "test"],
 ) -> None:
     common_kwargs: dict[str, Any] = {
         "raw_data_path": str(raw_data_path),
@@ -255,24 +256,28 @@ def _build_one_split(
             **common_kwargs,
             manager_dir_name="qwenvl",
             duplicate_samples=duplicate_samples,
+            data_split=data_split,
         )
     elif dataset_type == "manager_memer":
         processor = MemerManagerDatasetBuilder(
             **common_kwargs,
             manager_dir_name="memer",
             duplicate_samples=duplicate_samples,
+            data_split=data_split,
         )
     elif dataset_type == "manager_qpa":
         processor = QPAManagerDatasetBuilder(
             **common_kwargs,
             manager_dir_name=QPA_DIR_NAME,
             duplicate_samples=duplicate_samples,
+            data_split=data_split,
         )
     elif dataset_type == "reporter_qwenvl":
         processor = ReporterDatasetBuilder(
             **common_kwargs,
             reporter_dir_name="reporter_qwenvl",
             duplicate_samples=duplicate_samples,
+            data_split=data_split,
         )
     else:  # pragma: no cover - argparse prevents this branch.
         raise ValueError(f"Unknown dataset_type: {dataset_type}")
@@ -360,6 +365,7 @@ def main() -> None:
         episode_indices_by_task=train_split,
         visualize=args.visualize,
         duplicate_samples=True,
+        data_split="train",
     )
     print(f"\nBuilding testset at {test_output_path}")
     _build_one_split(
@@ -370,6 +376,7 @@ def main() -> None:
         episode_indices_by_task=test_split,
         visualize=args.visualize,
         duplicate_samples=False,
+        data_split="test",
     )
     print(f"Time taken: {(time.perf_counter() - started_at) / 60:.2f} minutes")
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Collection, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import cv2
 import h5py
@@ -40,6 +40,7 @@ class BaseManagerDatasetBuilder:
         task_names: list[str] | None = None,
         episode_indices_by_task: Mapping[str, Collection[int]] | None = None,
         duplicate_samples: bool = True,
+        data_split: Literal["train", "test"] = "train",
     ) -> None:
         self.raw_data_path = raw_data_path
         self.preprocessed_data_path = preprocessed_data_path
@@ -47,6 +48,7 @@ class BaseManagerDatasetBuilder:
         self.visualize = visualize
         self.task_names = set(task_names) if task_names else None
         self.duplicate_samples = duplicate_samples
+        self.data_split = data_split
         self.episode_indices_by_task = (
             {
                 task_name: set(episode_indices)
@@ -75,11 +77,11 @@ class BaseManagerDatasetBuilder:
 
         self.data_dir = os.path.join(preprocessed_data_path, manager_dir_name)
         self.images_dir = os.path.join(self.data_dir, "images")
-        self.simple_subgoal_train_data_path = os.path.join(
-            self.data_dir, "simple_subgoal_train.jsonl"
+        self.simple_subgoal_data_path = os.path.join(
+            self.data_dir, f"simple_subgoal_{data_split}.jsonl"
         )
-        self.grounded_subgoal_train_data_path = os.path.join(
-            self.data_dir, "grounded_subgoal_train.jsonl"
+        self.grounded_subgoal_data_path = os.path.join(
+            self.data_dir, f"grounded_subgoal_{data_split}.jsonl"
         )
         self._setup_output_dirs()
         self.history_simple_subgoals = []
@@ -90,10 +92,10 @@ class BaseManagerDatasetBuilder:
         if os.path.exists(self.images_dir):
             shutil.rmtree(self.images_dir)
         os.makedirs(self.images_dir, exist_ok=True)
-        if os.path.exists(self.simple_subgoal_train_data_path):
-            os.remove(self.simple_subgoal_train_data_path)
-        if os.path.exists(self.grounded_subgoal_train_data_path):
-            os.remove(self.grounded_subgoal_train_data_path)
+        if os.path.exists(self.simple_subgoal_data_path):
+            os.remove(self.simple_subgoal_data_path)
+        if os.path.exists(self.grounded_subgoal_data_path):
+            os.remove(self.grounded_subgoal_data_path)
 
     def run(self) -> list:
         """Process all H5 files and episodes. Returns list of process_per_episode return values."""

@@ -39,32 +39,13 @@ os.environ.setdefault("FPS_MAX_FRAMES", "10")
 
 from mme_vla_suite.reporter_evaluation import ReporterMetrics
 from mme_vla_suite.reporter_evaluation import evaluate_reporter_sequence
+from mme_vla_suite.reporter_evaluation import resolve_reporter_test_dataset
 
 
 def _resolve_repo_path(value: str) -> str:
     if not value or Path(value).is_absolute():
         return value
     return str((REPO_ROOT / value).resolve())
-
-
-def _resolve_test_dataset(testset_path: Path, subgoal_type: str) -> Path:
-    """Accept either a Reporter JSONL file or one of its parent directories."""
-    path = testset_path.expanduser().resolve()
-    if path.is_file():
-        return path
-    filenames = (
-        f"{subgoal_type}_subgoal_test.jsonl",
-        f"{subgoal_type}_subgoal_train.jsonl",
-    )
-    candidates = [path / filename for filename in filenames]
-    candidates.extend(path / "reporter_qwenvl" / filename for filename in filenames)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    tried = "\n  ".join(str(candidate) for candidate in candidates)
-    raise FileNotFoundError(
-        f"Could not find a {subgoal_type} Reporter JSONL under {path}. Tried:\n  {tried}"
-    )
 
 
 def _build_engine(model_path: str, adapter_path: str | None) -> tuple[Any, type, Any]:
@@ -148,8 +129,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_TESTSET_PATH,
         help=(
-            "Reporter JSONL file, testset directory, or testset/reporter_qwenvl "
-            "directory."
+            "Reporter JSONL file, dataset root, testset directory, or "
+            "testset/reporter_qwenvl directory."
         ),
     )
     parser.add_argument(
@@ -175,7 +156,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    dataset_path = _resolve_test_dataset(args.testset_path, args.subgoal_type)
+    dataset_path = resolve_reporter_test_dataset(args.testset_path, args.subgoal_type)
     adapter_path = "" if args.no_adapter else _resolve_repo_path(args.adapter_path)
     if adapter_path and not Path(adapter_path).is_dir():
         raise FileNotFoundError(f"Reporter adapter not found: {adapter_path}")

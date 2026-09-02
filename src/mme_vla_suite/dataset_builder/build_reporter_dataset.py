@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Collection, Mapping
+from typing import Literal
 
 import cv2
 import h5py
@@ -42,6 +43,7 @@ class DatasetBuilder(ManagerDatasetBuilder):
         task_names: list[str] | None = None,
         episode_indices_by_task: Mapping[str, Collection[int]] | None = None,
         duplicate_samples: bool = True,
+        data_split: Literal["train", "test"] = "train",
     ) -> None:
         super().__init__(
             raw_data_path=raw_data_path,
@@ -52,6 +54,7 @@ class DatasetBuilder(ManagerDatasetBuilder):
             task_names=task_names,
             episode_indices_by_task=episode_indices_by_task,
             duplicate_samples=duplicate_samples,
+            data_split=data_split,
         )
 
     @staticmethod
@@ -86,13 +89,13 @@ class DatasetBuilder(ManagerDatasetBuilder):
         """Append both subgoal variants, including requested duplicates."""
         for _ in range(times):
             with open(
-                self.simple_subgoal_train_data_path,
+                self.simple_subgoal_data_path,
                 "a",
                 encoding="utf-8",
             ) as file:
                 file.write(json.dumps(simple_data) + "\n")
             with open(
-                self.grounded_subgoal_train_data_path,
+                self.grounded_subgoal_data_path,
                 "a",
                 encoding="utf-8",
             ) as file:

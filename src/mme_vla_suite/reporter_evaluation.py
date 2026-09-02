@@ -17,6 +17,28 @@ from typing import Any
 from typing import Protocol
 
 
+def resolve_reporter_test_dataset(testset_path: Path, subgoal_type: str) -> Path:
+    """Resolve a Reporter test JSONL from a file, split root, or dataset root."""
+    path = testset_path.expanduser().resolve()
+    if path.is_file():
+        return path
+    search_roots = (
+        path,
+        path / "reporter_qwenvl",
+        path / "testset",
+        path / "testset" / "reporter_qwenvl",
+    )
+    test_filename = f"{subgoal_type}_subgoal_test.jsonl"
+    candidates = [root / test_filename for root in search_roots]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    tried = "\n  ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        f"Could not find a {subgoal_type} Reporter JSONL under {path}. Tried:\n  {tried}"
+    )
+
+
 def parse_reporter_success(response: str) -> bool | None:
     """Parse the strict JSON response used by both live and offline Reporter."""
     text = response.strip()

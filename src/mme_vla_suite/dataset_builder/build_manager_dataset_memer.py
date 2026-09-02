@@ -412,9 +412,9 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
                     len(memory_frames) + len(execution_frames), max_frame_len
                 )
 
-                with open(self.simple_subgoal_train_data_path, "a") as f:
+                with open(self.simple_subgoal_data_path, "a") as f:
                     f.write(json.dumps(simple_subgoal_data) + "\n")
-                with open(self.grounded_subgoal_train_data_path, "a") as f:
+                with open(self.grounded_subgoal_data_path, "a") as f:
                     f.write(json.dumps(grounded_subgoal_data) + "\n")
 
                 if self.visualize:

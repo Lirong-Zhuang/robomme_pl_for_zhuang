@@ -229,9 +229,9 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
     ) -> None:
         """Append training rows to the JSONL files."""
         for _ in range(times):
-            with open(self.simple_subgoal_train_data_path, "a") as f:
+            with open(self.simple_subgoal_data_path, "a") as f:
                 f.write(json.dumps(simple_subgoal_data) + "\n")
-            with open(self.grounded_subgoal_train_data_path, "a") as f:
+            with open(self.grounded_subgoal_data_path, "a") as f:
                 f.write(json.dumps(grounded_subgoal_data) + "\n")
 
     # -------------------------------------------------------------------------
