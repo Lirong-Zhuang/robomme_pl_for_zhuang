@@ -8,6 +8,7 @@ from mme_vla_suite.reporter_evaluation import aggregate_metrics
 from mme_vla_suite.reporter_evaluation import evaluate_reporter_dataset
 from mme_vla_suite.reporter_evaluation import evaluate_reporter_sequence
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
+from mme_vla_suite.reporter_evaluation import score_reporter_completion
 
 
 class FakeInferRequest:
@@ -216,3 +217,156 @@ def test_sequence_uses_predictions_to_update_init_and_skips_duplicates(tmp_path:
     ]
     assert [row["init_updated"] for row in predictions] == [True, False, False]
     assert [row["correct"] for row in predictions] == [False, False, True]
+
+
+def _completion_record(
+    call_number: int,
+    *,
+    expected: bool = False,
+    predicted: bool | None = False,
+    episode: int = 0,
+) -> dict:
+    return {
+        "task": "BinFill",
+        "episode": episode,
+        "current_step": call_number * 16,
+        "line_number": call_number,
+        "expected": expected,
+        "predicted": predicted,
+    }
+
+
+def test_completion_scoring_debounces_and_reports_delayed_warning():
+    records = [
+        _completion_record(1),
+        _completion_record(2, expected=True, predicted=True),
+        _completion_record(3, predicted=True),  # Same true run: ignored.
+        _completion_record(4),
+        _completion_record(5, expected=True),
+        _completion_record(6),
+        _completion_record(7),
+        _completion_record(8, predicted=True),  # Three calls late: warning.
+        _completion_record(9),
+    ]
+
+    report = score_reporter_completion(records)
+    episode = report["episodes"][0]
+
+    assert report["mean_completion"] == 1.0
+    assert report["fully_completed_episodes"] == 1
+    assert report["episodes_with_delay_warning"] == 1
+    assert episode["raw_predicted_true_count"] == 3
+    assert episode["debounced_predicted_true_count"] == 2
+    assert episode["completed_subgoals"] == 3
+    assert episode["total_subgoals"] == 3
+    assert episode["transitions"][1]["status"] == "delayed_warning"
+    assert episode["transitions"][1]["delay_calls"] == 3
+
+
+def test_completion_scoring_stops_at_premature_trigger():
+    records = [
+        _completion_record(1),
+        _completion_record(2, expected=True, predicted=True),
+        _completion_record(3),
+        _completion_record(4, predicted=True),  # Early for the next transition.
+        _completion_record(5),
+        _completion_record(6, expected=True),
+        _completion_record(7),
+    ]
+
+    report = score_reporter_completion(records)
+    episode = report["episodes"][0]
+
+    assert episode["status"] == "premature_trigger"
+    assert episode["completed_subgoals"] == 1
+    assert episode["total_subgoals"] == 3
+    assert episode["completion"] == pytest.approx(1 / 3)
+    assert episode["failure"]["subgoal_number"] == 2
+
+
+def test_completion_scoring_stalls_after_four_delayed_calls():
+    records = [
+        _completion_record(1, expected=True),
+        _completion_record(2),
+        _completion_record(3),
+        _completion_record(4),
+        _completion_record(5),
+        _completion_record(6, predicted=True),
+    ]
+
+    report = score_reporter_completion(records)
+    episode = report["episodes"][0]
+
+    assert episode["status"] == "stalled_timeout"
+    assert episode["completion"] == 0.0
+    assert episode["failure"]["delay_calls"] == 5
+
+
+def test_completion_scoring_penalizes_extra_true_in_final_subgoal():
+    records = [
+        _completion_record(1, expected=True, predicted=True),
+        _completion_record(2),
+        _completion_record(3, predicted=True),
+    ]
+
+    report = score_reporter_completion(records)
+    episode = report["episodes"][0]
+
+    assert episode["status"] == "final_subgoal_premature_trigger"
+    assert episode["completed_subgoals"] == 1
+    assert episode["total_subgoals"] == 2
+    assert episode["completion"] == 0.5
+
+
+def test_completion_scoring_uses_episode_macro_average_and_delay_boundaries():
+    records = [
+        _completion_record(1, expected=True, episode=0),
+        _completion_record(2, episode=0),
+        _completion_record(3, predicted=True, episode=0),  # Two calls late: full credit.
+        _completion_record(1, expected=True, episode=1),
+        _completion_record(2, episode=1),
+        _completion_record(3, episode=1),
+        _completion_record(4, episode=1),
+        _completion_record(5, predicted=True, episode=1),  # Four calls late: warning.
+    ]
+
+    report = score_reporter_completion(records)
+
+    assert report["mean_completion"] == 1.0
+    assert report["fully_completed_episodes"] == 2
+    assert report["episodes_with_delay_warning"] == 1
+    assert report["episodes"][0]["warnings"] == []
+    assert report["episodes"][1]["warnings"][0]["delay_calls"] == 4
+
+
+def test_completion_scoring_allows_two_early_frames_but_not_three():
+    allowed_records = [
+        {
+            **_completion_record(1, predicted=True),
+            "current_step": 98,
+        },
+        {
+            **_completion_record(2, expected=True),
+            "current_step": 100,
+        },
+    ]
+    rejected_records = [
+        {
+            **_completion_record(1, predicted=True),
+            "current_step": 97,
+        },
+        {
+            **_completion_record(2, expected=True),
+            "current_step": 100,
+        },
+    ]
+
+    allowed = score_reporter_completion(allowed_records)["episodes"][0]
+    rejected = score_reporter_completion(rejected_records)["episodes"][0]
+
+    assert allowed["status"] == "completed"
+    assert allowed["completion"] == 1.0
+    assert allowed["transitions"][0]["delay_frames"] == -2
+    assert rejected["status"] == "premature_trigger"
+    assert rejected["completion"] == 0.0
+    assert rejected["failure"]["early_frames"] == 3

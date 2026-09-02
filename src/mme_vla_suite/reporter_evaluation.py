@@ -166,6 +166,227 @@ class ReporterFrame:
     current_step: int
 
 
+def score_reporter_completion(
+    records: Sequence[dict[str, Any]],
+    *,
+    early_tolerance_frames: int = 2,
+    full_credit_delay_calls: int = 2,
+    maximum_delay_calls: int = 4,
+) -> dict[str, Any]:
+    """Score causal, prefix-safe subgoal completion for every episode.
+
+    A ground-truth ``true`` marks a transition to the next subgoal. Predicted
+    ``true`` runs are debounced to their rising edge. Predictions are consumed
+    in order: an event earlier than ``early_tolerance_frames``, a missing
+    event, or an event later than ``maximum_delay_calls`` stops progress for
+    that episode. Delays beyond ``full_credit_delay_calls`` remain completed
+    but are reported as warnings.
+
+    An episode with N expected transitions contains N + 1 subgoals. The final
+    subgoal receives credit only when all transitions were safe and no extra
+    rising-edge ``true`` occurs afterward.
+    """
+    if early_tolerance_frames < 0:
+        raise ValueError("early_tolerance_frames must be non-negative")
+    if full_credit_delay_calls < 0:
+        raise ValueError("full_credit_delay_calls must be non-negative")
+    if maximum_delay_calls < full_credit_delay_calls:
+        raise ValueError(
+            "maximum_delay_calls must be at least full_credit_delay_calls"
+        )
+
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for record in records:
+        try:
+            episode_key = (str(record["task"]), int(record["episode"]))
+            int(record["current_step"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Completion scoring records require task, episode, and current_step"
+            ) from error
+        grouped.setdefault(episode_key, []).append(record)
+
+    episodes: list[dict[str, Any]] = []
+    for (task_name, episode_id), episode_records in sorted(grouped.items()):
+        ordered = sorted(
+            episode_records,
+            key=lambda record: (int(record["current_step"]), int(record["line_number"])),
+        )
+
+        expected_events: list[dict[str, int]] = []
+        predicted_events: list[dict[str, int]] = []
+        raw_predicted_true_count = 0
+        previous_was_true = False
+        for call_index, record in enumerate(ordered):
+            event = {
+                "call_number": call_index + 1,
+                "current_step": int(record["current_step"]),
+                "line_number": int(record["line_number"]),
+            }
+            if record.get("expected") is True:
+                expected_events.append(event)
+
+            predicted_true = record.get("predicted") is True
+            if predicted_true:
+                raw_predicted_true_count += 1
+                if not previous_was_true:
+                    predicted_events.append(event)
+            previous_was_true = predicted_true
+
+        transitions: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        predicted_index = 0
+        completed_subgoals = 0
+        status = "completed"
+        failure: dict[str, Any] | None = None
+
+        for transition_index, expected_event in enumerate(expected_events, start=1):
+            if predicted_index >= len(predicted_events):
+                status = "stalled_missing_true"
+                failure = {
+                    "type": status,
+                    "subgoal_number": transition_index,
+                    "expected_event": expected_event,
+                }
+                transitions.append(
+                    {
+                        "subgoal_number": transition_index,
+                        "status": status,
+                        "expected_event": expected_event,
+                        "predicted_event": None,
+                        "delay_calls": None,
+                        "delay_frames": None,
+                    }
+                )
+                break
+
+            predicted_event = predicted_events[predicted_index]
+            delay_calls = (
+                predicted_event["call_number"] - expected_event["call_number"]
+            )
+            delay_frames = (
+                predicted_event["current_step"] - expected_event["current_step"]
+            )
+            detail = {
+                "subgoal_number": transition_index,
+                "expected_event": expected_event,
+                "predicted_event": predicted_event,
+                "delay_calls": delay_calls,
+                "delay_frames": delay_frames,
+            }
+
+            if delay_frames < -early_tolerance_frames:
+                status = "premature_trigger"
+                detail["status"] = status
+                transitions.append(detail)
+                failure = {
+                    "type": status,
+                    "subgoal_number": transition_index,
+                    "expected_event": expected_event,
+                    "predicted_event": predicted_event,
+                    "early_calls": -delay_calls,
+                    "early_frames": -delay_frames,
+                }
+                break
+            if delay_calls > maximum_delay_calls:
+                status = "stalled_timeout"
+                detail["status"] = status
+                transitions.append(detail)
+                failure = {
+                    "type": status,
+                    "subgoal_number": transition_index,
+                    "expected_event": expected_event,
+                    "predicted_event": predicted_event,
+                    "delay_calls": delay_calls,
+                    "delay_frames": delay_frames,
+                }
+                break
+
+            predicted_index += 1
+            completed_subgoals += 1
+            if delay_calls > full_credit_delay_calls:
+                detail["status"] = "delayed_warning"
+                warning = {
+                    "type": "delayed_warning",
+                    "subgoal_number": transition_index,
+                    "delay_calls": delay_calls,
+                    "delay_frames": delay_frames,
+                }
+                warnings.append(warning)
+            else:
+                detail["status"] = "completed"
+            transitions.append(detail)
+
+        if failure is None:
+            if predicted_index < len(predicted_events):
+                status = "final_subgoal_premature_trigger"
+                predicted_event = predicted_events[predicted_index]
+                failure = {
+                    "type": status,
+                    "subgoal_number": len(expected_events) + 1,
+                    "predicted_event": predicted_event,
+                }
+            else:
+                # The dataset terminates without another Reporter request, so a
+                # clean final segment is treated as the final completed subgoal.
+                completed_subgoals += 1
+
+        total_subgoals = len(expected_events) + 1
+        completion = completed_subgoals / total_subgoals
+        episodes.append(
+            {
+                "task": task_name,
+                "episode": episode_id,
+                "completion": completion,
+                "completed_subgoals": completed_subgoals,
+                "total_subgoals": total_subgoals,
+                "status": status,
+                "total_reporter_calls": len(ordered),
+                "expected_true_count": len(expected_events),
+                "raw_predicted_true_count": raw_predicted_true_count,
+                "debounced_predicted_true_count": len(predicted_events),
+                "expected_events": expected_events,
+                "predicted_events": predicted_events,
+                "transitions": transitions,
+                "warnings": warnings,
+                "failure": failure,
+            }
+        )
+
+    mean_completion = (
+        sum(episode["completion"] for episode in episodes) / len(episodes)
+        if episodes
+        else None
+    )
+    return {
+        "scoring": {
+            "early_tolerance_frames": early_tolerance_frames,
+            "full_credit_delay_calls": full_credit_delay_calls,
+            "maximum_delay_calls": maximum_delay_calls,
+            "early_trigger_policy": "fatal_beyond_tolerance",
+            "consecutive_true_policy": "keep_first_rising_edge",
+        },
+        "episode_count": len(episodes),
+        "mean_completion": mean_completion,
+        "fully_completed_episodes": sum(
+            episode["completion"] == 1.0 for episode in episodes
+        ),
+        "premature_trigger_episodes": sum(
+            episode["status"]
+            in {"premature_trigger", "final_subgoal_premature_trigger"}
+            for episode in episodes
+        ),
+        "stalled_episodes": sum(
+            episode["status"] in {"stalled_missing_true", "stalled_timeout"}
+            for episode in episodes
+        ),
+        "episodes_with_delay_warning": sum(
+            bool(episode["warnings"]) for episode in episodes
+        ),
+        "episodes": episodes,
+    }
+
+
 _REPORTER_FRAME_NAME = re.compile(
     r"^(?P<task>.+)_ep(?P<episode>\d+)_step(?P<step>\d+)\.[^.]+$"
 )

@@ -67,4 +67,10 @@ sample in each episode supplies the initial frame; later init frames are
 updated only when the Reporter itself predicts `{"success": true}`. Exact
 duplicates are disabled when `build_trainset_testset.py` creates the test set;
 the evaluator also skips any duplicates found in older test sets as a safety
-check. The command writes `summary.json` and `predictions.jsonl`.
+check. Completion is scored as causal subgoal progress: consecutive `true`
+outputs are debounced, predictions up to two frames early are accepted, delays
+up to two Reporter calls receive full credit,
+delays of three or four calls are completed with a warning, and premature or
+later transitions stop progress for that episode. The command writes
+`summary.json`, `episode_completion.jsonl`, `predictions.jsonl`, `errors.json`,
+and the corresponding `error_frames/` diagnostics.

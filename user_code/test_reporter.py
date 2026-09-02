@@ -48,6 +48,7 @@ os.environ.setdefault("FPS_MAX_FRAMES", "10")
 from mme_vla_suite.reporter_evaluation import ReporterMetrics
 from mme_vla_suite.reporter_evaluation import evaluate_reporter_sequence
 from mme_vla_suite.reporter_evaluation import resolve_reporter_test_dataset
+from mme_vla_suite.reporter_evaluation import score_reporter_completion
 
 
 def _resolve_repo_path(value: str) -> str:
@@ -214,6 +215,34 @@ def _print_summary(result: ReporterMetrics) -> None:
     print("Invalid/unparseable JSON outputs count as incorrect.")
 
 
+def _load_prediction_records(predictions_path: Path) -> list[dict[str, Any]]:
+    with predictions_path.open(encoding="utf-8") as predictions_file:
+        return [json.loads(line) for line in predictions_file if line.strip()]
+
+
+def _print_completion_summary(completion_report: dict[str, Any]) -> None:
+    print("\nTask-progress completion summary")
+    print(f"Episodes: {completion_report['episode_count']}")
+    print(
+        "Mean completion: "
+        f"{_format_rate(completion_report['mean_completion'])}"
+    )
+    print(
+        "Fully completed episodes: "
+        f"{completion_report['fully_completed_episodes']}/"
+        f"{completion_report['episode_count']}"
+    )
+    print(
+        "Premature-trigger episodes: "
+        f"{completion_report['premature_trigger_episodes']}"
+    )
+    print(f"Stalled episodes: {completion_report['stalled_episodes']}")
+    print(
+        "Episodes with 3-4 call delay warnings: "
+        f"{completion_report['episodes_with_delay_warning']}"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -270,11 +299,37 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--progress-every", type=int, default=50)
+    parser.add_argument(
+        "--early-tolerance-frames",
+        type=int,
+        default=2,
+        help="Maximum frames that a true prediction may precede its expected event.",
+    )
+    parser.add_argument(
+        "--full-credit-delay-calls",
+        type=int,
+        default=2,
+        help="Maximum delayed Reporter calls that receive full completion credit.",
+    )
+    parser.add_argument(
+        "--maximum-delay-calls",
+        type=int,
+        default=4,
+        help="Maximum delayed Reporter calls before the episode is considered stalled.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.early_tolerance_frames < 0:
+        raise ValueError("--early-tolerance-frames must be non-negative")
+    if args.full_credit_delay_calls < 0:
+        raise ValueError("--full-credit-delay-calls must be non-negative")
+    if args.maximum_delay_calls < args.full_credit_delay_calls:
+        raise ValueError(
+            "--maximum-delay-calls must be at least --full-credit-delay-calls"
+        )
     dataset_path = resolve_reporter_test_dataset(args.testset_path, args.subgoal_type)
     adapter_path = "" if args.no_adapter else _resolve_repo_path(args.adapter_path)
     if adapter_path and not Path(adapter_path).is_dir():
@@ -283,6 +338,7 @@ def main() -> None:
     output_dir = args.output_dir.expanduser().resolve() / args.result_name
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_path = output_dir / "predictions.jsonl"
+    episodes_path = output_dir / "episode_completion.jsonl"
     errors_path = output_dir / "errors.json"
     error_frames_dir = output_dir / "error_frames"
     engine = None
@@ -316,31 +372,52 @@ def main() -> None:
         errors_path,
         error_frames_dir,
     )
+    completion_report = score_reporter_completion(
+        _load_prediction_records(predictions_path),
+        early_tolerance_frames=args.early_tolerance_frames,
+        full_credit_delay_calls=args.full_credit_delay_calls,
+        maximum_delay_calls=args.maximum_delay_calls,
+    )
+    with episodes_path.open("w", encoding="utf-8") as episodes_file:
+        for episode in completion_report["episodes"]:
+            episodes_file.write(
+                json.dumps(episode, ensure_ascii=False) + "\n"
+            )
     summary_path = output_dir / "summary.json"
     summary = {
         "name": result.name,
         "dataset_path": result.dataset_path,
         "model_path": result.model_path,
         "adapter_path": result.adapter_path,
-        "total": result.total,
-        "correct": result.correct,
-        "parsed": result.parsed,
-        "invalid": result.invalid,
-        "accuracy": result.accuracy,
-        "true_sample_correct": result.true_positive,
-        "true_sample_total": result.completed_total,
-        "true_sample_accuracy": result.completed_recall,
-        "false_sample_correct": result.true_negative,
-        "false_sample_total": result.incomplete_total,
-        "false_sample_accuracy": result.incomplete_recall,
+        "completion": {
+            key: value
+            for key, value in completion_report.items()
+            if key != "episodes"
+        },
+        "frame_diagnostics": {
+            "total": result.total,
+            "correct": result.correct,
+            "parsed": result.parsed,
+            "invalid": result.invalid,
+            "accuracy": result.accuracy,
+            "true_sample_correct": result.true_positive,
+            "true_sample_total": result.completed_total,
+            "true_sample_accuracy": result.completed_recall,
+            "false_sample_correct": result.true_negative,
+            "false_sample_total": result.incomplete_total,
+            "false_sample_accuracy": result.incomplete_recall,
+        },
     }
     summary_path.write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    _print_completion_summary(completion_report)
+    print("\nLegacy per-frame diagnostics (not used for completion scoring)")
     _print_summary(result)
     print(f"Results directory: {output_dir}")
     print(f"Per-frame predictions: {predictions_path}")
+    print(f"Per-episode completion details: {episodes_path}")
     print(f"Summary: {summary_path}")
     print(f"Errors: {errors_path} ({error_report['total_errors']} rows)")
     print(f"Error frame pairs: {error_frames_dir}")
