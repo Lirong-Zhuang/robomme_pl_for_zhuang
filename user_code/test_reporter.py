@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CUDA_VISIBLE_DEVICES = "0"
 
 DEFAULT_REPORTER_MODEL_PATH = "Qwen/Qwen3-VL-4B-Instruct"
-DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-950"
+DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v4.1_simple_subgoal/v0-20260901-043235/checkpoint-900"
 
 DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_2"
 DEFAULT_SUBGOAL_TYPE = "simple"

@@ -7,16 +7,16 @@
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 
-REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_1/reporter_qwenvl/simple_subgoal_train.jsonl'
-REPORTER_RUN_NAME='qwen_reporter_v1_simple_subgoal'
+REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_2/trainset/reporter_qwenvl/simple_subgoal_train.jsonl'
+REPORTER_RUN_NAME='qwen_reporter_v4.1_simple_subgoal'
 REPORTER_OUTPUT_DIR="/home/zhuanglr/robomme_pl_for_zhuang/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 
 PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
 IMAGE_MAX_TOKEN_NUM=256 \
 VIDEO_MAX_TOKEN_NUM=64 \
 FPS_MAX_FRAMES=10 \
-NPROC_PER_NODE=2 \
-CUDA_VISIBLE_DEVICES=0,1 \
+NPROC_PER_NODE=1 \
+CUDA_VISIBLE_DEVICES=0 \
 swift sft \
     --model 'Qwen/Qwen3-VL-4B-Instruct' \
     --dataset "$REPORTER_DATASET_PATH" \
@@ -32,7 +32,7 @@ swift sft \
     --train_type lora \
     --torch_dtype bfloat16 \
     --num_train_epochs 4 \
-    --per_device_train_batch_size 8 \
+    --per_device_train_batch_size 16 \
     --gradient_accumulation_steps 1 \
     --attn_impl sdpa \
     --padding_free false \
