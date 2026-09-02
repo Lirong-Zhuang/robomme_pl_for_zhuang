@@ -3,7 +3,7 @@
 Edit the USER CONFIG section below, then run:
 
     micromamba activate robomme
-    python user_code/test_reporter.py
+    python user_code/test_reporter.py --result-name my_reporter_test
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import argparse
 import gc
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v4.1_simple_s
 DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_2"
 DEFAULT_SUBGOAL_TYPE = "simple"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
+DEFAULT_RESULT_NAME = "reporter_qwen_v4.1_ckpt900"
 # ======================================================================
 
 # This must be set before swift/torch loads the model. If "1" is selected,
@@ -98,6 +100,98 @@ def _format_rate(rate: float | None) -> str:
     return "n/a" if rate is None else f"{100 * rate:.2f}%"
 
 
+def _result_name(value: str) -> str:
+    """Require one user-selected directory name below the output root."""
+    name = value.strip()
+    if not name or name in {".", ".."} or Path(name).name != name:
+        raise argparse.ArgumentTypeError(
+            "result name must be one non-empty directory name without slashes"
+        )
+    return name
+
+
+def _error_type(expected: bool, predicted: bool | None) -> str:
+    if predicted is None:
+        return "invalid_output"
+    if expected:
+        return "false_negative"
+    return "false_positive"
+
+
+def _export_errors(
+    predictions_path: Path,
+    errors_path: Path,
+    error_frames_dir: Path,
+) -> dict[str, Any]:
+    """Export incorrect predictions and copy both images used for each decision."""
+    if error_frames_dir.exists():
+        shutil.rmtree(error_frames_dir)
+    error_frames_dir.mkdir(parents=True)
+
+    errors: list[dict[str, Any]] = []
+    with predictions_path.open(encoding="utf-8") as predictions_file:
+        for line in predictions_file:
+            record = json.loads(line)
+            if record["correct"]:
+                continue
+
+            error_index = len(errors) + 1
+            error_type = _error_type(record["expected"], record["predicted"])
+            prefix = (
+                f"error{error_index:04d}_{record['task']}_ep{record['episode']}_"
+                f"step{record['current_step']}_{error_type}"
+            )
+            used_init_source = Path(record["used_init_image"])
+            current_source = Path(record["current_image"])
+            used_init_target = error_frames_dir / (
+                f"{prefix}_used_init{used_init_source.suffix}"
+            )
+            current_target = error_frames_dir / (
+                f"{prefix}_current{current_source.suffix}"
+            )
+            shutil.copy2(used_init_source, used_init_target)
+            shutil.copy2(current_source, current_target)
+
+            error_record = dict(record)
+            error_record.update(
+                {
+                    "error_index": error_index,
+                    "error_type": error_type,
+                    "dataset_init_frame_name": Path(
+                        record["dataset_init_image"]
+                    ).name,
+                    "used_init_frame_name": used_init_source.name,
+                    "error_frame_name": current_source.name,
+                    "saved_used_init_image": str(
+                        used_init_target.relative_to(errors_path.parent)
+                    ),
+                    "saved_error_image": str(
+                        current_target.relative_to(errors_path.parent)
+                    ),
+                }
+            )
+            errors.append(error_record)
+
+    error_report = {
+        "total_errors": len(errors),
+        "false_positives": sum(
+            error["error_type"] == "false_positive" for error in errors
+        ),
+        "false_negatives": sum(
+            error["error_type"] == "false_negative" for error in errors
+        ),
+        "invalid_outputs": sum(
+            error["error_type"] == "invalid_output" for error in errors
+        ),
+        "errors": errors,
+    }
+    errors_path.write_text(
+        json.dumps(error_report, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return error_report
+
+
 def _print_summary(result: ReporterMetrics) -> None:
     print("\nSequential Reporter test summary")
     print(f"Dataset: {result.dataset_path}")
@@ -107,8 +201,16 @@ def _print_summary(result: ReporterMetrics) -> None:
     print(f"Correct: {result.correct}/{result.total}")
     print(f"Accuracy: {_format_rate(result.accuracy)}")
     print(f"Parse rate: {_format_rate(result.parse_rate)}")
-    print(f"Complete recall: {_format_rate(result.completed_recall)}")
-    print(f"Incomplete recall: {_format_rate(result.incomplete_recall)}")
+    print(
+        "Expected=true accuracy (subgoal should change): "
+        f"{result.true_positive}/{result.completed_total} "
+        f"({_format_rate(result.completed_recall)})"
+    )
+    print(
+        "Expected=false accuracy (subgoal should not change): "
+        f"{result.true_negative}/{result.incomplete_total} "
+        f"({_format_rate(result.incomplete_recall)})"
+    )
     print("Invalid/unparseable JSON outputs count as incorrect.")
 
 
@@ -158,6 +260,13 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
+        help="Parent directory that contains named Reporter result folders.",
+    )
+    parser.add_argument(
+        "--result-name",
+        type=_result_name,
+        default=DEFAULT_RESULT_NAME,
+        help="Name of this result folder below --output-dir.",
     )
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--progress-every", type=int, default=50)
@@ -171,8 +280,11 @@ def main() -> None:
     if adapter_path and not Path(adapter_path).is_dir():
         raise FileNotFoundError(f"Reporter adapter not found: {adapter_path}")
 
-    output_dir = args.output_dir.expanduser().resolve()
+    output_dir = args.output_dir.expanduser().resolve() / args.result_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    predictions_path = output_dir / "predictions.jsonl"
+    errors_path = output_dir / "errors.json"
+    error_frames_dir = output_dir / "error_frames"
     engine = None
     try:
         engine, infer_request_type, request_config = _build_engine(
@@ -187,7 +299,7 @@ def main() -> None:
             request_config=request_config,
             model_path=args.model_path,
             adapter_path=adapter_path,
-            predictions_path=output_dir / "predictions.jsonl",
+            predictions_path=predictions_path,
             image_root=args.image_root,
             max_samples=args.max_samples,
             progress_every=args.progress_every,
@@ -199,14 +311,39 @@ def main() -> None:
             del old_engine
             _clear_model_cache()
 
+    error_report = _export_errors(
+        predictions_path,
+        errors_path,
+        error_frames_dir,
+    )
     summary_path = output_dir / "summary.json"
+    summary = {
+        "name": result.name,
+        "dataset_path": result.dataset_path,
+        "model_path": result.model_path,
+        "adapter_path": result.adapter_path,
+        "total": result.total,
+        "correct": result.correct,
+        "parsed": result.parsed,
+        "invalid": result.invalid,
+        "accuracy": result.accuracy,
+        "true_sample_correct": result.true_positive,
+        "true_sample_total": result.completed_total,
+        "true_sample_accuracy": result.completed_recall,
+        "false_sample_correct": result.true_negative,
+        "false_sample_total": result.incomplete_total,
+        "false_sample_accuracy": result.incomplete_recall,
+    }
     summary_path.write_text(
-        json.dumps(result.to_dict(), indent=2, ensure_ascii=False) + "\n",
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     _print_summary(result)
-    print(f"Per-frame predictions: {output_dir / 'predictions.jsonl'}")
+    print(f"Results directory: {output_dir}")
+    print(f"Per-frame predictions: {predictions_path}")
     print(f"Summary: {summary_path}")
+    print(f"Errors: {errors_path} ({error_report['total_errors']} rows)")
+    print(f"Error frame pairs: {error_frames_dir}")
 
 
 if __name__ == "__main__":
