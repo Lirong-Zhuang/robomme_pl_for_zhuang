@@ -9,12 +9,13 @@ EXECUTER_TYPE="symbolic-simple-subgoal"
 # Keep the internal training config ID configurable. Its current value remains
 # "mme_vla_suite" for checkpoint and norm-stat compatibility.
 EXECUTER_TRAIN_CONFIG="mme_vla_suite"
-EXECUTER_RUN_NAME="${EXECUTER_TYPE}_your_model_name"
+EXECUTER_RUN_NAME="excuter_pi0.5_v3"
 EXECUTER_CHECKPOINT_NAMESPACE="executer"
 
-export WANDB_API_KEY="<YOUR_WANDB_API_KEY>"
+# Authenticate outside this tracked script, for example:
+# export WANDB_API_KEY="<your-personal-wandb-api-key>"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 \
+CUDA_VISIBLE_DEVICES=0 \
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
 XLA_PYTHON_CLIENT_ALLOCATOR=platform \
 uv run scripts/train.py "$EXECUTER_TRAIN_CONFIG" \
@@ -22,7 +23,7 @@ uv run scripts/train.py "$EXECUTER_TRAIN_CONFIG" \
 --checkpoint-namespace="$EXECUTER_CHECKPOINT_NAMESPACE" \
 --batch-size=64 \
 --num-workers=4 \
---fsdp-devices=4 \
+--fsdp-devices=1 \
 --dataset-path=data/robomme_preprocessed_data \
 --model.use_history \
 --model.history_config="${EXECUTER_TYPE}.yaml"

@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import wandb
-import time
 
 from typing import Any
 import tqdm_loggable.auto as tqdm
@@ -460,6 +459,4 @@ def main(config: _config.TrainConfig, tentative_run: bool = False):
 
 
 if __name__ == "__main__":
-    main(_config.cli(), tentative_run=True)
-    time.sleep(20)
     main(_config.cli())
