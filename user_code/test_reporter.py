@@ -2,7 +2,8 @@
 
 Edit the USER CONFIG section below, then run:
 
-    uv run python user_code/test_reporter.py
+    micromamba activate robomme
+    python user_code/test_reporter.py
 """
 
 from __future__ import annotations
@@ -11,11 +12,16 @@ import argparse
 import gc
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 # ============================= USER CONFIG =============================
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 CUDA_VISIBLE_DEVICES = "0"
 
@@ -55,8 +61,12 @@ def _build_engine(model_path: str, adapter_path: str | None) -> tuple[Any, type,
         from swift.llm import RequestConfig
     except ImportError as error:
         raise RuntimeError(
-            "ms-swift is required for Reporter scoring. Run this script in the same "
-            "environment used by examples/robomme/eval.py."
+            "ms-swift is not installed in the current Python environment. "
+            "Activate the same environment used for Reporter training and "
+            "examples/robomme/eval.py, then run: "
+            "`micromamba activate robomme` followed by "
+            "`python user_code/test_reporter.py`. Do not use `uv run` unless "
+            "ms-swift is also installed in the uv environment."
         ) from error
 
     engine_kwargs: dict[str, Any] = {
