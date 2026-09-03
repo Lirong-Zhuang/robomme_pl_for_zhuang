@@ -84,6 +84,8 @@ REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-950"
+# Debounce consecutive Reporter successes before passing them to the Manager.
+REPORTER_DEBOUNCE=false
 
 # micromamba server 117
 MAMBA_ENV="robomme"
@@ -288,6 +290,7 @@ EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
 EVAL_ARGS+=("$(bool_arg "$SAVE_MANAGER_LOGS" --args.save-manager-logs --args.no-save-manager-logs)")
 EVAL_ARGS+=("$(bool_arg "$EXECUTER_USE_HISTORY" --args.executer-use-history --args.no-executer-use-history)")
 EVAL_ARGS+=("$(bool_arg "$MANAGER_SAVE_MEMER_KF" --args.manager-save-memer-kf --args.no-manager-save-memer-kf)")
+EVAL_ARGS+=("$(bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce)")
 
 case "$MANAGER_TYPE" in
     oracle)
@@ -329,6 +332,7 @@ echo "Manager:         $MANAGER_TYPE"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
+echo "Reporter debounce: $REPORTER_DEBOUNCE"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
 echo "Executer ckpt:   $EXECUTER_DIR"

@@ -52,3 +52,34 @@ uv run python user_code/export_h5_key_states_csv.py \
   data/robomme_data_h5/record_dataset_BinFill.h5 \
   --episode 1
 ```
+
+Reporter test scoring
+
+```bash
+uv run python user_code/test_reporter.py
+```
+
+Set `CUDA_VISIBLE_DEVICES`, the Reporter checkpoint, the test-set path, and the
+output directory in the `USER CONFIG` block at the top of
+`user_code/test_reporter.py`. Command-line options remain available when a
+one-off override is useful. `REPORTER_DEBOUNCE=True` enables periodic debounce;
+set it to `False` or pass `--no-reporter-debounce` to use every raw Reporter
+result directly, matching `dev_trinity`. The script evaluates one Reporter sequentially. The first
+sample in each episode supplies the initial frame; later init frames are
+updated only on a debounced, effective `{"success": true}`. The first `true`
+in a continuous run is effective, the next two are suppressed,
+and the fourth becomes effective again; this repeats every three calls while
+`true` continues. A `false` or invalid output resets the run. Exact duplicates
+are disabled when `build_trainset_testset.py` creates the test set;
+the evaluator also skips any duplicates found in older test sets as a safety
+check. Completion is scored as causal subgoal progress: consecutive `true`
+outputs are debounced, predictions up to two Reporter calls early are accepted,
+delays up to two Reporter calls receive full credit,
+delays of three or four calls are completed with a warning, and premature or
+later transitions stop progress for that episode. During sequential inference,
+both the init frame and active subgoal advance only on a debounced predicted
+`true`; dataset labels never advance the prompt. The command writes
+`summary.json`, `episode_completion.jsonl`, `predictions.jsonl`, and `errors.json`.
+Error images are not copied, which avoids duplicating the dataset and consuming
+extra storage. Every prediction row contains
+the numeric `frame` as well as the full `current_frame` image path.

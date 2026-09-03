@@ -1,6 +1,5 @@
 """Reporter implementations for RoboMME evaluation."""
 
-import json
 import pprint
 import shutil
 from pathlib import Path
@@ -11,6 +10,8 @@ import numpy as np
 from swift.llm import InferRequest, PtEngine, RequestConfig
 
 from env_runner import EnvRunner
+from mme_vla_suite.reporter_evaluation import debounce_reporter_success
+from mme_vla_suite.reporter_evaluation import parse_reporter_success
 from mme_vla_suite.reporter_prompts import (
     REPORTER_SYSTEM_PROMPT,
     format_reporter_user_prompt,
@@ -72,10 +73,13 @@ class QwenVLReporter(ReporterBase):
         self.frames_dir: Optional[Path] = None
         self.init_frames_dir: Optional[Path] = None
         self.log_path: Optional[Path] = None
+        self.reporter_debounce = bool(getattr(args, "reporter_debounce", True))
+        self.consecutive_true_count = 0
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
         self.observation_before_path = None
+        self.consecutive_true_count = 0
         self.frames_dir = (
             self.save_dir
             / env_runner.env_id
@@ -165,7 +169,21 @@ class QwenVLReporter(ReporterBase):
             [InferRequest(**request)],
             request_config=RequestConfig(max_tokens=64, temperature=0),
         )[0].choices[0].message.content
-        reporter_success = self._parse_success(response)
+        raw_reporter_success = self._parse_success(response)
+        if self.reporter_debounce:
+            reporter_success = debounce_reporter_success(
+                raw_reporter_success,
+                self.consecutive_true_count,
+            )
+            self.consecutive_true_count = (
+                self.consecutive_true_count + 1
+                if raw_reporter_success is True
+                else 0
+            )
+        else:
+            # dev_trinity behavior: no filtering between Reporter and Manager.
+            reporter_success = raw_reporter_success
+            self.consecutive_true_count = 0
 
         next_init_path = None
         if reporter_success is True:
@@ -182,7 +200,9 @@ class QwenVLReporter(ReporterBase):
                 f"\nStep: {step_idx}\n"
                 f"{pprint.pformat(request, width=100, sort_dicts=False)}\n"
                 f"Response: {response}\n"
-                f"Parsed success: {reporter_success}\n"
+                f"Parsed success: {raw_reporter_success}\n"
+                f"Debounce enabled: {self.reporter_debounce}\n"
+                f"Effective success: {reporter_success}\n"
             )
             if next_init_path is not None:
                 log_file.write(f"Next init frame: {next_init_path}\n")
@@ -192,19 +212,7 @@ class QwenVLReporter(ReporterBase):
 
     @staticmethod
     def _parse_success(response: str) -> Optional[bool]:
-        text = response.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
-        try:
-            success = json.loads(text).get("success")
-        except (json.JSONDecodeError, AttributeError):
-            return None
-        return success if isinstance(success, bool) else None
+        return parse_reporter_success(response)
 
 
 def build_reporter(args, save_dir: Path) -> ReporterBase:

@@ -302,9 +302,9 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
     ) -> None:
         """Append training rows to the JSONL files."""
         for _ in range(times):
-            with open(self.simple_subgoal_train_data_path, "a") as f:
+            with open(self.simple_subgoal_data_path, "a") as f:
                 f.write(json.dumps(simple_subgoal_data) + "\n")
-            with open(self.grounded_subgoal_train_data_path, "a") as f:
+            with open(self.grounded_subgoal_data_path, "a") as f:
                 f.write(json.dumps(grounded_subgoal_data) + "\n")
 
     # -------------------------------------------------------------------------
@@ -406,7 +406,7 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
 
             self._append_training_rows(simple_subgoal_data, grounded_subgoal_data)
 
-            dup_count = duplicate_idxs.get(idx, 0)
+            dup_count = duplicate_idxs.get(idx, 0) if self.duplicate_samples else 0
             if dup_count > 0:
                 print(f"duplicate {idx} for {dup_count} more times")
                 self._append_training_rows(

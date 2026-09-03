@@ -72,6 +72,9 @@ class Args:
     # to evaluate the original, non-fine-tuned Qwen3-VL as Reporter.
     reporter_model_path: str = "Qwen/Qwen3-VL-4B-Instruct"
     reporter_adapter_path: str = ""
+    # True: debounce continuous true runs (effective on calls 1, 4, 7, ...).
+    # False: match dev_trinity and pass every parsed Reporter result directly.
+    reporter_debounce: bool = True
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 10 # number of episodes to evaluate for each task
