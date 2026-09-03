@@ -56,14 +56,28 @@ def parse_reporter_success(response: str) -> bool | None:
     return success if isinstance(success, bool) else None
 
 
+CONSECUTIVE_TRUE_RETRIGGER_INTERVAL_CALLS = 3
+
+
 def debounce_reporter_success(
     predicted: bool | None,
-    previous_prediction_was_true: bool,
+    preceding_consecutive_true_count: int,
 ) -> bool | None:
-    """Return the effective result after suppressing consecutive true outputs."""
+    """Debounce true runs while allowing a periodic effective retrigger.
+
+    The first true is effective. If true continues uninterrupted, the fourth,
+    seventh, and every third later call are effective again. False or invalid
+    output is handled by callers as a reset of the consecutive-true counter.
+    """
     if predicted is None:
         return None
-    return predicted and not previous_prediction_was_true
+    if not predicted:
+        return False
+    return (
+        preceding_consecutive_true_count
+        % CONSECUTIVE_TRUE_RETRIGGER_INTERVAL_CALLS
+        == 0
+    )
 
 
 def _reporter_task_from_messages(messages: Sequence[dict[str, Any]]) -> str:
@@ -201,15 +215,16 @@ def score_reporter_completion(
     """Score causal, prefix-safe subgoal completion for every episode.
 
     A ground-truth ``true`` marks a transition to the next subgoal. Predicted
-    ``true`` runs are debounced to their rising edge. Predictions are consumed
-    in order: an event earlier than ``early_tolerance_calls``, a missing
+    ``true`` runs keep their first event and periodically retrigger after three
+    more uninterrupted true calls. Predictions are consumed in order: an event
+    earlier than ``early_tolerance_calls``, a missing
     event, or an event later than ``maximum_delay_calls`` stops progress for
     that episode. Delays beyond ``full_credit_delay_calls`` remain completed
     but are reported as warnings.
 
     An episode with N expected transitions contains N + 1 subgoals. The final
     subgoal receives credit only when all transitions were safe and no extra
-    rising-edge ``true`` occurs afterward.
+    effective ``true`` occurs afterward.
     """
     if early_tolerance_calls < 0:
         raise ValueError("early_tolerance_calls must be non-negative")
@@ -241,7 +256,7 @@ def score_reporter_completion(
         expected_events: list[dict[str, int]] = []
         predicted_events: list[dict[str, int]] = []
         raw_predicted_true_count = 0
-        previous_was_true = False
+        consecutive_true_count = 0
         for call_index, record in enumerate(ordered):
             event = {
                 "call_number": call_index + 1,
@@ -255,18 +270,21 @@ def score_reporter_completion(
             predicted_true = predicted is True
             if predicted_true:
                 raw_predicted_true_count += 1
-            # Sequential inference records already contain the exact rising-edge
+            # Sequential inference records already contain the exact debounced
             # decision that drove its init-image/subgoal state. Consume that same
             # value so completion scoring cannot drift from the simulated episode.
             # The fallback keeps this utility usable with minimal hand-built rows.
             effective_true = record.get("effective_true")
             if effective_true is None:
                 effective_true = (
-                    debounce_reporter_success(predicted, previous_was_true) is True
+                    debounce_reporter_success(predicted, consecutive_true_count)
+                    is True
                 )
             if effective_true is True:
                 predicted_events.append(event)
-            previous_was_true = predicted_true
+            consecutive_true_count = (
+                consecutive_true_count + 1 if predicted_true else 0
+            )
 
         transitions: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -413,7 +431,10 @@ def score_reporter_completion(
             "full_credit_delay_calls": full_credit_delay_calls,
             "maximum_delay_calls": maximum_delay_calls,
             "early_trigger_policy": "fatal_beyond_tolerance",
-            "consecutive_true_policy": "keep_first_rising_edge",
+            "consecutive_true_policy": "first_then_periodic_retrigger",
+            "consecutive_true_retrigger_interval_calls": (
+                CONSECUTIVE_TRUE_RETRIGGER_INTERVAL_CALLS
+            ),
         },
         "episode_count": len(episodes),
         "mean_completion": mean_completion,
@@ -654,9 +675,10 @@ def evaluate_reporter_sequence(
     """Evaluate with prediction-driven init frames and subgoal prompts.
 
     The first row of each episode supplies the initial frame and subgoal prompt.
-    Only a rising-edge ``success=true`` promotes the current frame and advances
-    the active subgoal. False, invalid, and consecutive true predictions retain
-    both states, matching the completion scorer's debounce policy.
+    An effective ``success=true`` promotes the current frame and advances the
+    active subgoal. The first true in a run is effective, the next two are
+    suppressed, and the fourth is effective again. False and invalid outputs
+    reset that run, matching the completion scorer's debounce policy.
     """
     samples = load_reporter_samples(dataset_path, image_root=image_root)
     frames, duplicates_skipped = prepare_reporter_sequence(samples)
@@ -684,7 +706,7 @@ def evaluate_reporter_sequence(
     active_episode: tuple[str, int] | None = None
     predicted_init_path: str | None = None
     active_subgoal_index = 0
-    previous_prediction_was_true = False
+    consecutive_true_count = 0
     invalid_outputs = 0
     with output_path.open("w", encoding="utf-8") as output_file:
         for processed_calls, frame in enumerate(frames, start=1):
@@ -695,7 +717,7 @@ def evaluate_reporter_sequence(
                 active_episode = episode_key
                 predicted_init_path = sample.images[0]
                 active_subgoal_index = 0
-                previous_prediction_was_true = False
+                consecutive_true_count = 0
             if predicted_init_path is None:  # pragma: no cover - guarded above.
                 raise RuntimeError("Reporter sequence has no init frame")
 
@@ -727,10 +749,12 @@ def evaluate_reporter_sequence(
                 else None
             )
             effective_true = (
-                debounce_reporter_success(predicted, previous_prediction_was_true)
+                debounce_reporter_success(predicted, consecutive_true_count)
                 is True
             )
-            previous_prediction_was_true = predicted is True
+            consecutive_true_count = (
+                consecutive_true_count + 1 if predicted is True else 0
+            )
             init_updated = effective_true
             subgoal_advanced = False
             if init_updated:
@@ -771,6 +795,7 @@ def evaluate_reporter_sequence(
             output_record = {
                 "task": frame.task_name,
                 "episode": frame.episode_id,
+                "frame": frame.current_step,
                 "current_frame": current_path,
                 "reporter_init_image": used_init_path,
                 "expected": sample.expected,

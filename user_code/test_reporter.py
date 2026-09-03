@@ -12,7 +12,6 @@ import argparse
 import gc
 import json
 import os
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -122,12 +121,8 @@ def _error_type(expected: bool, predicted: bool | None) -> str:
 def _export_errors(
     prediction_records: list[dict[str, Any]],
     errors_path: Path,
-    error_frames_dir: Path,
 ) -> dict[str, Any]:
-    """Export incorrect predictions and copy both images used for each decision."""
-    if error_frames_dir.exists():
-        shutil.rmtree(error_frames_dir)
-    error_frames_dir.mkdir(parents=True)
+    """Export incorrect-prediction metadata without copying image files."""
 
     errors: list[dict[str, Any]] = []
     incomparable_calls_skipped = 0
@@ -140,20 +135,8 @@ def _export_errors(
 
         error_index = len(errors) + 1
         error_type = _error_type(record["expected"], record["predicted"])
-        prefix = (
-            f"error{error_index:04d}_{record['task']}_ep{record['episode']}_"
-            f"step{record['current_step']}_{error_type}"
-        )
         used_init_source = Path(record["used_init_image"])
         current_source = Path(record["current_image"])
-        used_init_target = error_frames_dir / (
-            f"{prefix}_used_init{used_init_source.suffix}"
-        )
-        current_target = error_frames_dir / (
-            f"{prefix}_current{current_source.suffix}"
-        )
-        shutil.copy2(used_init_source, used_init_target)
-        shutil.copy2(current_source, current_target)
 
         error_record = dict(record)
         error_record.update(
@@ -165,12 +148,6 @@ def _export_errors(
                 ).name,
                 "used_init_frame_name": used_init_source.name,
                 "error_frame_name": current_source.name,
-                "saved_used_init_image": str(
-                    used_init_target.relative_to(errors_path.parent)
-                ),
-                "saved_error_image": str(
-                    current_target.relative_to(errors_path.parent)
-                ),
             }
         )
         errors.append(error_record)
@@ -316,7 +293,6 @@ def main() -> None:
     predictions_path = output_dir / "predictions.jsonl"
     episodes_path = output_dir / "episode_completion.jsonl"
     errors_path = output_dir / "errors.json"
-    error_frames_dir = output_dir / "error_frames"
     prediction_records: list[dict[str, Any]] = []
     engine = None
     try:
@@ -348,7 +324,6 @@ def main() -> None:
     error_report = _export_errors(
         prediction_records,
         errors_path,
-        error_frames_dir,
     )
     completion_report = score_reporter_completion(
         prediction_records,
@@ -417,7 +392,6 @@ def main() -> None:
     print(f"Per-episode completion details: {episodes_path}")
     print(f"Summary: {summary_path}")
     print(f"Errors: {errors_path} ({error_report['total_errors']} rows)")
-    print(f"Error frame pairs: {error_frames_dir}")
 
 
 if __name__ == "__main__":

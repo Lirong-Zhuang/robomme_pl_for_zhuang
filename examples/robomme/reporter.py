@@ -73,12 +73,12 @@ class QwenVLReporter(ReporterBase):
         self.frames_dir: Optional[Path] = None
         self.init_frames_dir: Optional[Path] = None
         self.log_path: Optional[Path] = None
-        self.previous_prediction_was_true = False
+        self.consecutive_true_count = 0
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
         self.observation_before_path = None
-        self.previous_prediction_was_true = False
+        self.consecutive_true_count = 0
         self.frames_dir = (
             self.save_dir
             / env_runner.env_id
@@ -171,9 +171,13 @@ class QwenVLReporter(ReporterBase):
         raw_reporter_success = self._parse_success(response)
         reporter_success = debounce_reporter_success(
             raw_reporter_success,
-            self.previous_prediction_was_true,
+            self.consecutive_true_count,
         )
-        self.previous_prediction_was_true = raw_reporter_success is True
+        self.consecutive_true_count = (
+            self.consecutive_true_count + 1
+            if raw_reporter_success is True
+            else 0
+        )
 
         next_init_path = None
         if reporter_success is True:
