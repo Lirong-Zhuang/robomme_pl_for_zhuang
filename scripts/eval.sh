@@ -50,10 +50,15 @@ OBS_HORIZON=16
 MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
-# Optional final directory name for this evaluation run. When set, results are
-# written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
-# Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.11"
+# The final directory name is composed as <FRAMEWORK_VERSION>.<RUN_NAME>.
+# Include the base framework in FRAMEWORK_VERSION so other frameworks can be
+# added later. For example, FRAMEWORK_VERSION="trinity_v0" and RUN_NAME="11"
+# preserve the former EVAL_RUN_NAME="trinity_v0.11" result path.
+# FRAMEWORK_VERSION also selects framework behavior: trinity_v0 disables
+# Reporter debounce (the original dev_trinity behavior), while trinity_v1
+# enables it.
+FRAMEWORK_VERSION="trinity_v1"
+RUN_NAME="1"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -84,8 +89,6 @@ REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-950"
-# Debounce consecutive Reporter successes before passing them to the Manager.
-REPORTER_DEBOUNCE=false
 
 # micromamba server 117
 MAMBA_ENV="robomme"
@@ -135,6 +138,25 @@ bool_arg() {
             ;;
     esac
 }
+
+case "$FRAMEWORK_VERSION" in
+    trinity_v0)
+        REPORTER_DEBOUNCE=false
+        ;;
+    trinity_v1)
+        REPORTER_DEBOUNCE=true
+        ;;
+    *)
+        echo "ERROR: unsupported FRAMEWORK_VERSION '$FRAMEWORK_VERSION'; expected trinity_v0 or trinity_v1." >&2
+        exit 1
+        ;;
+esac
+
+if [[ -z "$RUN_NAME" ]]; then
+    echo "ERROR: RUN_NAME must not be empty." >&2
+    exit 1
+fi
+EVAL_RUN_NAME="${FRAMEWORK_VERSION}.${RUN_NAME}"
 
 resolve_repo_path() {
     local path=$1
@@ -332,6 +354,7 @@ echo "Manager:         $MANAGER_TYPE"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
+echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
