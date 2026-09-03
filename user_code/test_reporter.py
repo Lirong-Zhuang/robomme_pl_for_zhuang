@@ -32,6 +32,8 @@ DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_2"
 DEFAULT_SUBGOAL_TYPE = "simple"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
 DEFAULT_RESULT_NAME = "reporter_qwen_v4.1_ckpt900"
+# False exactly matches dev_trinity: every parsed result is applied directly.
+REPORTER_DEBOUNCE = True
 # ======================================================================
 
 # This must be set before swift/torch loads the model. If "1" is selected,
@@ -253,6 +255,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--progress-every", type=int, default=50)
     parser.add_argument(
+        "--reporter-debounce",
+        action=argparse.BooleanOptionalAction,
+        default=REPORTER_DEBOUNCE,
+        help=(
+            "Enable periodic true-output debouncing. Use --no-reporter-debounce "
+            "to apply every raw Reporter true directly, matching dev_trinity."
+        ),
+    )
+    parser.add_argument(
         "--early-tolerance-calls",
         type=int,
         default=2,
@@ -312,6 +323,7 @@ def main() -> None:
             image_root=args.image_root,
             max_samples=args.max_samples,
             progress_every=args.progress_every,
+            reporter_debounce=args.reporter_debounce,
             prediction_records_out=prediction_records,
         )
     finally:
@@ -330,6 +342,7 @@ def main() -> None:
         early_tolerance_calls=args.early_tolerance_calls,
         full_credit_delay_calls=args.full_credit_delay_calls,
         maximum_delay_calls=args.maximum_delay_calls,
+        reporter_debounce=args.reporter_debounce,
     )
     with episodes_path.open("w", encoding="utf-8") as episodes_file:
         for episode in completion_report["episodes"]:

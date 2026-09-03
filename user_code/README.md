@@ -62,7 +62,9 @@ uv run python user_code/test_reporter.py
 Set `CUDA_VISIBLE_DEVICES`, the Reporter checkpoint, the test-set path, and the
 output directory in the `USER CONFIG` block at the top of
 `user_code/test_reporter.py`. Command-line options remain available when a
-one-off override is useful. The script evaluates one Reporter sequentially. The first
+one-off override is useful. `REPORTER_DEBOUNCE=True` enables periodic debounce;
+set it to `False` or pass `--no-reporter-debounce` to use every raw Reporter
+result directly, matching `dev_trinity`. The script evaluates one Reporter sequentially. The first
 sample in each episode supplies the initial frame; later init frames are
 updated only on a debounced, effective `{"success": true}`. The first `true`
 in a continuous run is effective, the next two are suppressed,

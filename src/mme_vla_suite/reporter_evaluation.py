@@ -211,13 +211,15 @@ def score_reporter_completion(
     early_tolerance_calls: int = 2,
     full_credit_delay_calls: int = 2,
     maximum_delay_calls: int = 4,
+    reporter_debounce: bool = True,
 ) -> dict[str, Any]:
     """Score causal, prefix-safe subgoal completion for every episode.
 
-    A ground-truth ``true`` marks a transition to the next subgoal. Predicted
-    ``true`` runs keep their first event and periodically retrigger after three
-    more uninterrupted true calls. Predictions are consumed in order: an event
-    earlier than ``early_tolerance_calls``, a missing
+    A ground-truth ``true`` marks a transition to the next subgoal. With
+    ``reporter_debounce`` enabled, predicted true runs keep their first event
+    and periodically retrigger after three more uninterrupted true calls. With
+    it disabled, every predicted true is effective. Events are consumed in
+    order: an event earlier than ``early_tolerance_calls``, a missing
     event, or an event later than ``maximum_delay_calls`` stops progress for
     that episode. Delays beyond ``full_credit_delay_calls`` remain completed
     but are reported as warnings.
@@ -276,10 +278,12 @@ def score_reporter_completion(
             # The fallback keeps this utility usable with minimal hand-built rows.
             effective_true = record.get("effective_true")
             if effective_true is None:
-                effective_true = (
-                    debounce_reporter_success(predicted, consecutive_true_count)
-                    is True
-                )
+                effective_true = predicted_true
+                if reporter_debounce:
+                    effective_true = (
+                        debounce_reporter_success(predicted, consecutive_true_count)
+                        is True
+                    )
             if effective_true is True:
                 predicted_events.append(event)
             consecutive_true_count = (
@@ -431,9 +435,16 @@ def score_reporter_completion(
             "full_credit_delay_calls": full_credit_delay_calls,
             "maximum_delay_calls": maximum_delay_calls,
             "early_trigger_policy": "fatal_beyond_tolerance",
-            "consecutive_true_policy": "first_then_periodic_retrigger",
+            "reporter_debounce": reporter_debounce,
+            "consecutive_true_policy": (
+                "first_then_periodic_retrigger"
+                if reporter_debounce
+                else "disabled_raw_predictions"
+            ),
             "consecutive_true_retrigger_interval_calls": (
                 CONSECUTIVE_TRUE_RETRIGGER_INTERVAL_CALLS
+                if reporter_debounce
+                else None
             ),
         },
         "episode_count": len(episodes),
@@ -670,15 +681,16 @@ def evaluate_reporter_sequence(
     image_root: str | Path | None = None,
     max_samples: int | None = None,
     progress_every: int = 50,
+    reporter_debounce: bool = True,
     prediction_records_out: list[dict[str, Any]] | None = None,
 ) -> ReporterMetrics:
     """Evaluate with prediction-driven init frames and subgoal prompts.
 
     The first row of each episode supplies the initial frame and subgoal prompt.
     An effective ``success=true`` promotes the current frame and advances the
-    active subgoal. The first true in a run is effective, the next two are
-    suppressed, and the fourth is effective again. False and invalid outputs
-    reset that run, matching the completion scorer's debounce policy.
+    active subgoal. With debounce enabled, the first true in a run is effective,
+    the next two are suppressed, and the fourth is effective again. With it
+    disabled, every parsed true takes effect immediately, matching dev_trinity.
     """
     samples = load_reporter_samples(dataset_path, image_root=image_root)
     frames, duplicates_skipped = prepare_reporter_sequence(samples)
@@ -748,13 +760,18 @@ def evaluate_reporter_sequence(
                 if label_comparable
                 else None
             )
-            effective_true = (
-                debounce_reporter_success(predicted, consecutive_true_count)
-                is True
-            )
-            consecutive_true_count = (
-                consecutive_true_count + 1 if predicted is True else 0
-            )
+            if reporter_debounce:
+                effective_true = (
+                    debounce_reporter_success(predicted, consecutive_true_count)
+                    is True
+                )
+                consecutive_true_count = (
+                    consecutive_true_count + 1 if predicted is True else 0
+                )
+            else:
+                # Match dev_trinity: every parsed true immediately takes effect.
+                effective_true = predicted is True
+                consecutive_true_count = 0
             init_updated = effective_true
             subgoal_advanced = False
             if init_updated:
@@ -774,6 +791,7 @@ def evaluate_reporter_sequence(
                 "current_image": current_path,
                 "init_updated": init_updated,
                 "effective_true": effective_true,
+                "reporter_debounce": reporter_debounce,
                 "subgoal_advanced": subgoal_advanced,
                 "active_subgoal_number": request_subgoal_index + 1,
                 "next_active_subgoal_number": active_subgoal_index + 1,

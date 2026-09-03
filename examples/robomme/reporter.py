@@ -73,6 +73,7 @@ class QwenVLReporter(ReporterBase):
         self.frames_dir: Optional[Path] = None
         self.init_frames_dir: Optional[Path] = None
         self.log_path: Optional[Path] = None
+        self.reporter_debounce = bool(getattr(args, "reporter_debounce", True))
         self.consecutive_true_count = 0
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
@@ -169,15 +170,20 @@ class QwenVLReporter(ReporterBase):
             request_config=RequestConfig(max_tokens=64, temperature=0),
         )[0].choices[0].message.content
         raw_reporter_success = self._parse_success(response)
-        reporter_success = debounce_reporter_success(
-            raw_reporter_success,
-            self.consecutive_true_count,
-        )
-        self.consecutive_true_count = (
-            self.consecutive_true_count + 1
-            if raw_reporter_success is True
-            else 0
-        )
+        if self.reporter_debounce:
+            reporter_success = debounce_reporter_success(
+                raw_reporter_success,
+                self.consecutive_true_count,
+            )
+            self.consecutive_true_count = (
+                self.consecutive_true_count + 1
+                if raw_reporter_success is True
+                else 0
+            )
+        else:
+            # dev_trinity behavior: no filtering between Reporter and Manager.
+            reporter_success = raw_reporter_success
+            self.consecutive_true_count = 0
 
         next_init_path = None
         if reporter_success is True:
@@ -195,7 +201,8 @@ class QwenVLReporter(ReporterBase):
                 f"{pprint.pformat(request, width=100, sort_dicts=False)}\n"
                 f"Response: {response}\n"
                 f"Parsed success: {raw_reporter_success}\n"
-                f"Effective debounced success: {reporter_success}\n"
+                f"Debounce enabled: {self.reporter_debounce}\n"
+                f"Effective success: {reporter_success}\n"
             )
             if next_init_path is not None:
                 log_file.write(f"Next init frame: {next_init_path}\n")
