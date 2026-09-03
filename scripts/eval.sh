@@ -77,7 +77,7 @@ MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_
 
 # Executer configuration
 EXECUTER_CONFIG="mme_vla_suite_lora"
-EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/79999"
+EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v3/79999"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"

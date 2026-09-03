@@ -11,6 +11,7 @@ EXECUTER_TYPE="symbolic-simple-subgoal"
 EXECUTER_TRAIN_CONFIG="mme_vla_suite"
 EXECUTER_RUN_NAME="excuter_pi0.5_v3"
 EXECUTER_CHECKPOINT_NAMESPACE="executer"
+NUM_TRAIN_STEPS=5000
 
 # Authenticate outside this tracked script, for example:
 # export WANDB_API_KEY="<your-personal-wandb-api-key>"
@@ -21,6 +22,7 @@ XLA_PYTHON_CLIENT_ALLOCATOR=platform \
 uv run scripts/train.py "$EXECUTER_TRAIN_CONFIG" \
 --exp-name="$EXECUTER_RUN_NAME" \
 --checkpoint-namespace="$EXECUTER_CHECKPOINT_NAMESPACE" \
+--num-train-steps="$NUM_TRAIN_STEPS" \
 --batch-size=64 \
 --num-workers=4 \
 --fsdp-devices=1 \
