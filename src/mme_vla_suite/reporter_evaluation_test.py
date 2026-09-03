@@ -339,26 +339,17 @@ def test_completion_scoring_uses_episode_macro_average_and_delay_boundaries():
     assert report["episodes"][1]["warnings"][0]["delay_calls"] == 4
 
 
-def test_completion_scoring_allows_two_early_frames_but_not_three():
+def test_completion_scoring_allows_two_early_calls_but_not_three():
     allowed_records = [
-        {
-            **_completion_record(1, predicted=True),
-            "current_step": 98,
-        },
-        {
-            **_completion_record(2, expected=True),
-            "current_step": 100,
-        },
+        _completion_record(1, predicted=True),
+        _completion_record(2),
+        _completion_record(3, expected=True),
     ]
     rejected_records = [
-        {
-            **_completion_record(1, predicted=True),
-            "current_step": 97,
-        },
-        {
-            **_completion_record(2, expected=True),
-            "current_step": 100,
-        },
+        _completion_record(1, predicted=True),
+        _completion_record(2),
+        _completion_record(3),
+        _completion_record(4, expected=True),
     ]
 
     allowed = score_reporter_completion(allowed_records)["episodes"][0]
@@ -366,7 +357,7 @@ def test_completion_scoring_allows_two_early_frames_but_not_three():
 
     assert allowed["status"] == "completed"
     assert allowed["completion"] == 1.0
-    assert allowed["transitions"][0]["delay_frames"] == -2
+    assert allowed["transitions"][0]["delay_calls"] == -2
     assert rejected["status"] == "premature_trigger"
     assert rejected["completion"] == 0.0
-    assert rejected["failure"]["early_frames"] == 3
+    assert rejected["failure"]["early_calls"] == 3

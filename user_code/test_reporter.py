@@ -300,10 +300,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--progress-every", type=int, default=50)
     parser.add_argument(
-        "--early-tolerance-frames",
+        "--early-tolerance-calls",
         type=int,
         default=2,
-        help="Maximum frames that a true prediction may precede its expected event.",
+        help="Maximum Reporter calls that a true prediction may precede its expected event.",
     )
     parser.add_argument(
         "--full-credit-delay-calls",
@@ -322,8 +322,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.early_tolerance_frames < 0:
-        raise ValueError("--early-tolerance-frames must be non-negative")
+    if args.early_tolerance_calls < 0:
+        raise ValueError("--early-tolerance-calls must be non-negative")
     if args.full_credit_delay_calls < 0:
         raise ValueError("--full-credit-delay-calls must be non-negative")
     if args.maximum_delay_calls < args.full_credit_delay_calls:
@@ -374,7 +374,7 @@ def main() -> None:
     )
     completion_report = score_reporter_completion(
         _load_prediction_records(predictions_path),
-        early_tolerance_frames=args.early_tolerance_frames,
+        early_tolerance_calls=args.early_tolerance_calls,
         full_credit_delay_calls=args.full_credit_delay_calls,
         maximum_delay_calls=args.maximum_delay_calls,
     )

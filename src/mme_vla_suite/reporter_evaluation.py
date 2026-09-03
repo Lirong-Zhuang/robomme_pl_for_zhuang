@@ -169,7 +169,7 @@ class ReporterFrame:
 def score_reporter_completion(
     records: Sequence[dict[str, Any]],
     *,
-    early_tolerance_frames: int = 2,
+    early_tolerance_calls: int = 2,
     full_credit_delay_calls: int = 2,
     maximum_delay_calls: int = 4,
 ) -> dict[str, Any]:
@@ -177,7 +177,7 @@ def score_reporter_completion(
 
     A ground-truth ``true`` marks a transition to the next subgoal. Predicted
     ``true`` runs are debounced to their rising edge. Predictions are consumed
-    in order: an event earlier than ``early_tolerance_frames``, a missing
+    in order: an event earlier than ``early_tolerance_calls``, a missing
     event, or an event later than ``maximum_delay_calls`` stops progress for
     that episode. Delays beyond ``full_credit_delay_calls`` remain completed
     but are reported as warnings.
@@ -186,8 +186,8 @@ def score_reporter_completion(
     subgoal receives credit only when all transitions were safe and no extra
     rising-edge ``true`` occurs afterward.
     """
-    if early_tolerance_frames < 0:
-        raise ValueError("early_tolerance_frames must be non-negative")
+    if early_tolerance_calls < 0:
+        raise ValueError("early_tolerance_calls must be non-negative")
     if full_credit_delay_calls < 0:
         raise ValueError("full_credit_delay_calls must be non-negative")
     if maximum_delay_calls < full_credit_delay_calls:
@@ -275,7 +275,7 @@ def score_reporter_completion(
                 "delay_frames": delay_frames,
             }
 
-            if delay_frames < -early_tolerance_frames:
+            if delay_calls < -early_tolerance_calls:
                 status = "premature_trigger"
                 detail["status"] = status
                 transitions.append(detail)
@@ -360,7 +360,7 @@ def score_reporter_completion(
     )
     return {
         "scoring": {
-            "early_tolerance_frames": early_tolerance_frames,
+            "early_tolerance_calls": early_tolerance_calls,
             "full_credit_delay_calls": full_credit_delay_calls,
             "maximum_delay_calls": maximum_delay_calls,
             "early_trigger_policy": "fatal_beyond_tolerance",
