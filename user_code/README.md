@@ -71,6 +71,8 @@ check. Completion is scored as causal subgoal progress: consecutive `true`
 outputs are debounced, predictions up to two Reporter calls early are accepted,
 delays up to two Reporter calls receive full credit,
 delays of three or four calls are completed with a warning, and premature or
-later transitions stop progress for that episode. The command writes
+later transitions stop progress for that episode. During sequential inference,
+both the init frame and active subgoal advance only on a debounced predicted
+`true`; dataset labels never advance the prompt. The command writes
 `summary.json`, `episode_completion.jsonl`, `predictions.jsonl`, `errors.json`,
 and the corresponding `error_frames/` diagnostics.

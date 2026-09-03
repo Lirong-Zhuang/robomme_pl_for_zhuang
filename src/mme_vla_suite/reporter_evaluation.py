@@ -56,6 +56,31 @@ def parse_reporter_success(response: str) -> bool | None:
     return success if isinstance(success, bool) else None
 
 
+def debounce_reporter_success(
+    predicted: bool | None,
+    previous_prediction_was_true: bool,
+) -> bool | None:
+    """Return the effective result after suppressing consecutive true outputs."""
+    if predicted is None:
+        return None
+    return predicted and not previous_prediction_was_true
+
+
+def _reporter_task_from_messages(messages: Sequence[dict[str, Any]]) -> str:
+    """Extract only the subgoal text from a Reporter request."""
+    for message in reversed(messages):
+        if message.get("role") != "user" or not isinstance(message.get("content"), str):
+            continue
+        content = message["content"].strip()
+        match = re.search(
+            r"Current Subgoal:\s*(.*?)\nObservation before executing",
+            content,
+            flags=re.DOTALL,
+        )
+        return match.group(1).strip() if match else content
+    raise ValueError("Reporter request contains no textual user message")
+
+
 @dataclass(frozen=True)
 class ReporterSample:
     """One labelled Reporter request."""
@@ -226,11 +251,21 @@ def score_reporter_completion(
             if record.get("expected") is True:
                 expected_events.append(event)
 
-            predicted_true = record.get("predicted") is True
+            predicted = record.get("predicted")
+            predicted_true = predicted is True
             if predicted_true:
                 raw_predicted_true_count += 1
-                if not previous_was_true:
-                    predicted_events.append(event)
+            # Sequential inference records already contain the exact rising-edge
+            # decision that drove its init-image/subgoal state. Consume that same
+            # value so completion scoring cannot drift from the simulated episode.
+            # The fallback keeps this utility usable with minimal hand-built rows.
+            effective_true = record.get("effective_true")
+            if effective_true is None:
+                effective_true = (
+                    debounce_reporter_success(predicted, previous_was_true) is True
+                )
+            if effective_true is True:
+                predicted_events.append(event)
             previous_was_true = predicted_true
 
         transitions: list[dict[str, Any]] = []
@@ -239,6 +274,11 @@ def score_reporter_completion(
         completed_subgoals = 0
         status = "completed"
         failure: dict[str, Any] | None = None
+        termination_frame: int | None = None
+
+        def frame_at_call(call_number: int) -> int:
+            bounded_call = min(max(call_number, 1), len(ordered))
+            return int(ordered[bounded_call - 1]["current_step"])
 
         for transition_index, expected_event in enumerate(expected_events, start=1):
             if predicted_index >= len(predicted_events):
@@ -248,6 +288,9 @@ def score_reporter_completion(
                     "subgoal_number": transition_index,
                     "expected_event": expected_event,
                 }
+                termination_frame = frame_at_call(
+                    expected_event["call_number"] + maximum_delay_calls + 1
+                )
                 transitions.append(
                     {
                         "subgoal_number": transition_index,
@@ -287,6 +330,7 @@ def score_reporter_completion(
                     "early_calls": -delay_calls,
                     "early_frames": -delay_frames,
                 }
+                termination_frame = predicted_event["current_step"]
                 break
             if delay_calls > maximum_delay_calls:
                 status = "stalled_timeout"
@@ -300,6 +344,9 @@ def score_reporter_completion(
                     "delay_calls": delay_calls,
                     "delay_frames": delay_frames,
                 }
+                termination_frame = frame_at_call(
+                    expected_event["call_number"] + maximum_delay_calls + 1
+                )
                 break
 
             predicted_index += 1
@@ -326,6 +373,7 @@ def score_reporter_completion(
                     "subgoal_number": len(expected_events) + 1,
                     "predicted_event": predicted_event,
                 }
+                termination_frame = predicted_event["current_step"]
             else:
                 # The dataset terminates without another Reporter request, so a
                 # clean final segment is treated as the final completed subgoal.
@@ -341,6 +389,7 @@ def score_reporter_completion(
                 "completed_subgoals": completed_subgoals,
                 "total_subgoals": total_subgoals,
                 "status": status,
+                "termination_frame": termination_frame,
                 "total_reporter_calls": len(ordered),
                 "expected_true_count": len(expected_events),
                 "raw_predicted_true_count": raw_predicted_true_count,
@@ -560,6 +609,33 @@ def prepare_reporter_sequence(
     return frames, duplicates_skipped
 
 
+def _prepare_episode_prompt_stages(
+    frames: Sequence[ReporterFrame],
+) -> tuple[
+    dict[tuple[str, int], list[list[dict[str, Any]]]],
+    dict[tuple[str, int, int], int],
+]:
+    """Build ground-truth prompt stages without using them to advance state."""
+    grouped: dict[tuple[str, int], list[ReporterFrame]] = {}
+    for frame in frames:
+        grouped.setdefault((frame.task_name, frame.episode_id), []).append(frame)
+
+    prompt_stages: dict[tuple[str, int], list[list[dict[str, Any]]]] = {}
+    dataset_stage_indices: dict[tuple[str, int, int], int] = {}
+    for episode_key, episode_frames in grouped.items():
+        stages = [episode_frames[0].sample.messages]
+        stage_index = 0
+        for frame_index, frame in enumerate(episode_frames):
+            dataset_stage_indices[
+                (frame.task_name, frame.episode_id, frame.sample.line_number)
+            ] = stage_index
+            if frame.sample.expected and frame_index + 1 < len(episode_frames):
+                stage_index += 1
+                stages.append(episode_frames[frame_index + 1].sample.messages)
+        prompt_stages[episode_key] = stages
+    return prompt_stages, dataset_stage_indices
+
+
 def evaluate_reporter_sequence(
     *,
     name: str,
@@ -573,12 +649,14 @@ def evaluate_reporter_sequence(
     image_root: str | Path | None = None,
     max_samples: int | None = None,
     progress_every: int = 50,
+    prediction_records_out: list[dict[str, Any]] | None = None,
 ) -> ReporterMetrics:
-    """Evaluate sequentially while propagating Reporter-predicted init frames.
+    """Evaluate with prediction-driven init frames and subgoal prompts.
 
-    The first row of each episode uses its labelled dataset init frame. A
-    predicted ``success=true`` promotes the current frame to the init frame for
-    the next comparison. False or invalid predictions retain the previous init.
+    The first row of each episode supplies the initial frame and subgoal prompt.
+    Only a rising-edge ``success=true`` promotes the current frame and advances
+    the active subgoal. False, invalid, and consecutive true predictions retain
+    both states, matching the completion scorer's debounce policy.
     """
     samples = load_reporter_samples(dataset_path, image_root=image_root)
     frames, duplicates_skipped = prepare_reporter_sequence(samples)
@@ -588,6 +666,7 @@ def evaluate_reporter_sequence(
         frames = frames[:max_samples]
     if not frames:
         raise ValueError("Reporter test dataset contains no unique sequential samples")
+    prompt_stages, dataset_stage_indices = _prepare_episode_prompt_stages(frames)
 
     dataset = Path(dataset_path).expanduser().resolve()
     episode_keys = {(frame.task_name, frame.episode_id) for frame in frames}
@@ -604,21 +683,34 @@ def evaluate_reporter_sequence(
 
     active_episode: tuple[str, int] | None = None
     predicted_init_path: str | None = None
+    active_subgoal_index = 0
+    previous_prediction_was_true = False
+    invalid_outputs = 0
     with output_path.open("w", encoding="utf-8") as output_file:
-        for frame in frames:
+        for processed_calls, frame in enumerate(frames, start=1):
             sample = frame.sample
             episode_key = (frame.task_name, frame.episode_id)
             episode_started = episode_key != active_episode
             if episode_started:
                 active_episode = episode_key
                 predicted_init_path = sample.images[0]
+                active_subgoal_index = 0
+                previous_prediction_was_true = False
             if predicted_init_path is None:  # pragma: no cover - guarded above.
                 raise RuntimeError("Reporter sequence has no init frame")
 
             used_init_path = predicted_init_path
             current_path = sample.images[1]
+            dataset_subgoal_index = dataset_stage_indices[
+                (frame.task_name, frame.episode_id, sample.line_number)
+            ]
+            request_subgoal_index = active_subgoal_index
+            used_messages = prompt_stages[episode_key][request_subgoal_index]
+            label_task = _reporter_task_from_messages(sample.messages)
+            reporter_task = _reporter_task_from_messages(used_messages)
+            label_comparable = request_subgoal_index == dataset_subgoal_index
             request = infer_request_type(
-                messages=sample.messages,
+                messages=used_messages,
                 images=[used_init_path, current_path],
             )
             responses = engine.infer([request], request_config=request_config)
@@ -628,43 +720,75 @@ def evaluate_reporter_sequence(
                 )
             raw_response = _response_text(responses[0])
             predicted = parse_reporter_success(raw_response)
-            correct = metrics.update(expected=sample.expected, predicted=predicted)
-            init_updated = predicted is True
+            invalid_outputs += int(predicted is None)
+            correct = (
+                metrics.update(expected=sample.expected, predicted=predicted)
+                if label_comparable
+                else None
+            )
+            effective_true = (
+                debounce_reporter_success(predicted, previous_prediction_was_true)
+                is True
+            )
+            previous_prediction_was_true = predicted is True
+            init_updated = effective_true
+            subgoal_advanced = False
             if init_updated:
                 predicted_init_path = current_path
+                if active_subgoal_index + 1 < len(prompt_stages[episode_key]):
+                    active_subgoal_index += 1
+                    subgoal_advanced = True
 
-            output_file.write(
-                json.dumps(
-                    {
-                        "line_number": sample.line_number,
-                        "task": frame.task_name,
-                        "episode": frame.episode_id,
-                        "current_step": frame.current_step,
-                        "episode_started": episode_started,
-                        "dataset_init_image": sample.images[0],
-                        "used_init_image": used_init_path,
-                        "current_image": current_path,
-                        "init_updated": init_updated,
-                        "expected": sample.expected,
-                        "predicted": predicted,
-                        "parsed": predicted is not None,
-                        "correct": correct,
-                        "response": raw_response,
-                        "messages": sample.messages,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+            internal_record = {
+                "line_number": sample.line_number,
+                "task": frame.task_name,
+                "episode": frame.episode_id,
+                "current_step": frame.current_step,
+                "episode_started": episode_started,
+                "dataset_init_image": sample.images[0],
+                "used_init_image": used_init_path,
+                "current_image": current_path,
+                "init_updated": init_updated,
+                "effective_true": effective_true,
+                "subgoal_advanced": subgoal_advanced,
+                "active_subgoal_number": request_subgoal_index + 1,
+                "next_active_subgoal_number": active_subgoal_index + 1,
+                "dataset_subgoal_number": dataset_subgoal_index + 1,
+                "label_comparable": label_comparable,
+                "expected": sample.expected,
+                "predicted": predicted,
+                "parsed": predicted is not None,
+                "correct": correct,
+                "response": raw_response,
+                "messages": used_messages,
+                "dataset_messages": sample.messages,
+                "label_task": label_task,
+                "reporter_task": reporter_task,
+            }
+            if prediction_records_out is not None:
+                prediction_records_out.append(internal_record)
+
+            output_record = {
+                "task": frame.task_name,
+                "episode": frame.episode_id,
+                "current_frame": current_path,
+                "reporter_init_image": used_init_path,
+                "expected": sample.expected,
+                "predicted": predicted,
+                "reporter_init_updated": init_updated,
+                "correct": correct,
+                "label_task": label_task,
+                "reporter_task": reporter_task,
+            }
+            output_file.write(json.dumps(output_record, ensure_ascii=False) + "\n")
 
             if progress_every > 0 and (
-                metrics.total == len(frames) or metrics.total % progress_every == 0
+                processed_calls == len(frames) or processed_calls % progress_every == 0
             ):
-                accuracy = 100 * metrics.accuracy if metrics.accuracy is not None else 0.0
                 print(
-                    f"[{name}] {metrics.total}/{len(frames)} frames, "
-                    f"correct={metrics.correct}, accuracy={accuracy:.2f}%, "
-                    f"invalid={metrics.invalid}"
+                    f"[{name}] {processed_calls}/{len(frames)} Reporter calls processed, "
+                    f"invalid_outputs={invalid_outputs}; completion is scored "
+                    "per episode after inference"
                 )
 
     return metrics

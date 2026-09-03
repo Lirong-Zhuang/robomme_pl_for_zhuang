@@ -120,7 +120,7 @@ def _error_type(expected: bool, predicted: bool | None) -> str:
 
 
 def _export_errors(
-    predictions_path: Path,
+    prediction_records: list[dict[str, Any]],
     errors_path: Path,
     error_frames_dir: Path,
 ) -> dict[str, Any]:
@@ -130,51 +130,54 @@ def _export_errors(
     error_frames_dir.mkdir(parents=True)
 
     errors: list[dict[str, Any]] = []
-    with predictions_path.open(encoding="utf-8") as predictions_file:
-        for line in predictions_file:
-            record = json.loads(line)
-            if record["correct"]:
-                continue
+    incomparable_calls_skipped = 0
+    for record in prediction_records:
+        if not record.get("label_comparable", True):
+            incomparable_calls_skipped += 1
+            continue
+        if record["correct"]:
+            continue
 
-            error_index = len(errors) + 1
-            error_type = _error_type(record["expected"], record["predicted"])
-            prefix = (
-                f"error{error_index:04d}_{record['task']}_ep{record['episode']}_"
-                f"step{record['current_step']}_{error_type}"
-            )
-            used_init_source = Path(record["used_init_image"])
-            current_source = Path(record["current_image"])
-            used_init_target = error_frames_dir / (
-                f"{prefix}_used_init{used_init_source.suffix}"
-            )
-            current_target = error_frames_dir / (
-                f"{prefix}_current{current_source.suffix}"
-            )
-            shutil.copy2(used_init_source, used_init_target)
-            shutil.copy2(current_source, current_target)
+        error_index = len(errors) + 1
+        error_type = _error_type(record["expected"], record["predicted"])
+        prefix = (
+            f"error{error_index:04d}_{record['task']}_ep{record['episode']}_"
+            f"step{record['current_step']}_{error_type}"
+        )
+        used_init_source = Path(record["used_init_image"])
+        current_source = Path(record["current_image"])
+        used_init_target = error_frames_dir / (
+            f"{prefix}_used_init{used_init_source.suffix}"
+        )
+        current_target = error_frames_dir / (
+            f"{prefix}_current{current_source.suffix}"
+        )
+        shutil.copy2(used_init_source, used_init_target)
+        shutil.copy2(current_source, current_target)
 
-            error_record = dict(record)
-            error_record.update(
-                {
-                    "error_index": error_index,
-                    "error_type": error_type,
-                    "dataset_init_frame_name": Path(
-                        record["dataset_init_image"]
-                    ).name,
-                    "used_init_frame_name": used_init_source.name,
-                    "error_frame_name": current_source.name,
-                    "saved_used_init_image": str(
-                        used_init_target.relative_to(errors_path.parent)
-                    ),
-                    "saved_error_image": str(
-                        current_target.relative_to(errors_path.parent)
-                    ),
-                }
-            )
-            errors.append(error_record)
+        error_record = dict(record)
+        error_record.update(
+            {
+                "error_index": error_index,
+                "error_type": error_type,
+                "dataset_init_frame_name": Path(
+                    record["dataset_init_image"]
+                ).name,
+                "used_init_frame_name": used_init_source.name,
+                "error_frame_name": current_source.name,
+                "saved_used_init_image": str(
+                    used_init_target.relative_to(errors_path.parent)
+                ),
+                "saved_error_image": str(
+                    current_target.relative_to(errors_path.parent)
+                ),
+            }
+        )
+        errors.append(error_record)
 
     error_report = {
         "total_errors": len(errors),
+        "incomparable_calls_skipped": incomparable_calls_skipped,
         "false_positives": sum(
             error["error_type"] == "false_positive" for error in errors
         ),
@@ -191,33 +194,6 @@ def _export_errors(
         encoding="utf-8",
     )
     return error_report
-
-
-def _print_summary(result: ReporterMetrics) -> None:
-    print("\nSequential Reporter test summary")
-    print(f"Dataset: {result.dataset_path}")
-    print(f"Episodes: {result.episodes}")
-    print(f"Unique frames: {result.total}")
-    print(f"Duplicate rows skipped: {result.duplicates_skipped}")
-    print(f"Correct: {result.correct}/{result.total}")
-    print(f"Accuracy: {_format_rate(result.accuracy)}")
-    print(f"Parse rate: {_format_rate(result.parse_rate)}")
-    print(
-        "Expected=true accuracy (subgoal should change): "
-        f"{result.true_positive}/{result.completed_total} "
-        f"({_format_rate(result.completed_recall)})"
-    )
-    print(
-        "Expected=false accuracy (subgoal should not change): "
-        f"{result.true_negative}/{result.incomplete_total} "
-        f"({_format_rate(result.incomplete_recall)})"
-    )
-    print("Invalid/unparseable JSON outputs count as incorrect.")
-
-
-def _load_prediction_records(predictions_path: Path) -> list[dict[str, Any]]:
-    with predictions_path.open(encoding="utf-8") as predictions_file:
-        return [json.loads(line) for line in predictions_file if line.strip()]
 
 
 def _print_completion_summary(completion_report: dict[str, Any]) -> None:
@@ -341,6 +317,7 @@ def main() -> None:
     episodes_path = output_dir / "episode_completion.jsonl"
     errors_path = output_dir / "errors.json"
     error_frames_dir = output_dir / "error_frames"
+    prediction_records: list[dict[str, Any]] = []
     engine = None
     try:
         engine, infer_request_type, request_config = _build_engine(
@@ -359,6 +336,7 @@ def main() -> None:
             image_root=args.image_root,
             max_samples=args.max_samples,
             progress_every=args.progress_every,
+            prediction_records_out=prediction_records,
         )
     finally:
         if engine is not None:
@@ -368,21 +346,29 @@ def main() -> None:
             _clear_model_cache()
 
     error_report = _export_errors(
-        predictions_path,
+        prediction_records,
         errors_path,
         error_frames_dir,
     )
     completion_report = score_reporter_completion(
-        _load_prediction_records(predictions_path),
+        prediction_records,
         early_tolerance_calls=args.early_tolerance_calls,
         full_credit_delay_calls=args.full_credit_delay_calls,
         maximum_delay_calls=args.maximum_delay_calls,
     )
     with episodes_path.open("w", encoding="utf-8") as episodes_file:
         for episode in completion_report["episodes"]:
-            episodes_file.write(
-                json.dumps(episode, ensure_ascii=False) + "\n"
-            )
+            output_episode = {
+                "task": episode["task"],
+                "episode": episode["episode"],
+                "completion": episode["completion"],
+                "completed_subgoal": (
+                    f"{episode['completed_subgoals']}/{episode['total_subgoals']}"
+                ),
+                "status": episode["status"],
+                "termination_frame": episode["termination_frame"],
+            }
+            episodes_file.write(json.dumps(output_episode, ensure_ascii=False) + "\n")
     summary_path = output_dir / "summary.json"
     summary = {
         "name": result.name,
@@ -395,7 +381,15 @@ def main() -> None:
             if key != "episodes"
         },
         "frame_diagnostics": {
-            "total": result.total,
+            "note": "Only calls whose prediction-driven subgoal matches the dataset subgoal are comparable.",
+            "comparable_total": result.total,
+            "incomparable_calls": sum(
+                not record.get("label_comparable", True)
+                for record in prediction_records
+            ),
+            "all_invalid_outputs": sum(
+                record.get("predicted") is None for record in prediction_records
+            ),
             "correct": result.correct,
             "parsed": result.parsed,
             "invalid": result.invalid,
@@ -413,8 +407,11 @@ def main() -> None:
         encoding="utf-8",
     )
     _print_completion_summary(completion_report)
-    print("\nLegacy per-frame diagnostics (not used for completion scoring)")
-    _print_summary(result)
+    print(
+        "Comparable-frame parsing diagnostic: "
+        f"{result.parsed}/{result.total} valid outputs "
+        f"({_format_rate(result.parse_rate)}); frame accuracy is not used for scoring"
+    )
     print(f"Results directory: {output_dir}")
     print(f"Per-frame predictions: {predictions_path}")
     print(f"Per-episode completion details: {episodes_path}")
