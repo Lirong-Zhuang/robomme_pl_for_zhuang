@@ -2,7 +2,11 @@
 
 Build RoboMME preprocessed pickle data from raw HDF5 data.
 ```
-uv run python scripts/build_dataset.py --dataset_type robomme_pkl
+uv run python scripts/build_dataset.py \
+  --dataset_type robomme_pkl \
+  --raw_data_path /data/public/RoboMME \
+  --preprocessed_data_path data/robomme_preprocessed_dup_binfill_data \
+  --tasks BinFill
 ```
 
 Build only selected RoboMME tasks into a custom output directory.

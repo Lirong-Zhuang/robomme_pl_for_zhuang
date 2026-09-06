@@ -112,6 +112,7 @@ of `scripts/eval.sh`. In particular, check:
 
 - `MODEL_TYPE`
 - `CKPT_ID`
+- `SEEDS` and `NUM_REPEATS`
 - `ONLY_TASKS` and `NUM_EPISODES`
 - `QWENVL_SIMPLE_ADAPTER_PATH` or the adapter path for the selected predictor
 - `GPU_ID_SERVER` and `GPU_ID_CLIENT`
@@ -123,6 +124,8 @@ Run the evaluation from the repository root:
 bash scripts/eval.sh
 ```
 
-The script starts the policy server, runs the evaluation in the foreground,
-writes results under `SAVE_DIR`, and stops the server automatically when the
-evaluation ends.
+The script evaluates every configured seed/repeat pair sequentially. It starts
+a fresh symbolic policy server for each pair, writes each result under
+`<SAVE_DIR>/<policy>/<evaluation_run_name>/seed<seed>/repeat<repeat>/`, updates
+`summary.json` in the evaluation-run directory, and stops the server
+automatically. Re-running with `OVERWRITE=false` resumes incomplete episodes.
