@@ -53,7 +53,7 @@ SAVE_DIR="runs/evaluation"
 # Optional final directory name for this evaluation run. When set, results are
 # written under <SAVE_DIR>/<policy>/ckpt<id>/seed<seed>/<EVAL_RUN_NAME>/.
 # Leave empty to use the Manager name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="trinity_v0.11"
+EVAL_RUN_NAME="trinity_v0.12"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -76,14 +76,14 @@ MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
-EXECUTER_CONFIG="mme_vla_suite_lora"
-EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v3/79999"
+EXECUTER_CONFIG="mme_vla_suite"
+EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-950"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v4.1_simple_subgoal/v0-20260901-043235/checkpoint-900"
 
 # micromamba server 117
 MAMBA_ENV="robomme"

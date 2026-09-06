@@ -12,6 +12,7 @@ EXECUTER_TRAIN_CONFIG="mme_vla_suite"
 EXECUTER_RUN_NAME="excuter_pi0.5_v3"
 EXECUTER_CHECKPOINT_NAMESPACE="executer"
 NUM_TRAIN_STEPS=5000
+EXECUTER_DATASET_PATH="data/trinity_preprocessed_data/executer_binfill_data_0"
 
 # Authenticate outside this tracked script, for example:
 # export WANDB_API_KEY="<your-personal-wandb-api-key>"
@@ -26,6 +27,6 @@ uv run scripts/train.py "$EXECUTER_TRAIN_CONFIG" \
 --batch-size=64 \
 --num-workers=4 \
 --fsdp-devices=1 \
---dataset-path=data/robomme_preprocessed_data \
+--dataset-path="$EXECUTER_DATASET_PATH" \
 --model.use_history \
 --model.history_config="${EXECUTER_TYPE}.yaml"
