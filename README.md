@@ -250,6 +250,14 @@ bash scripts/finetune_mme_vla_suite.sh
 ```
 Set `MME_VLA_TYPE` to train a specific model variant. You can also change `--exp-name` to suit your own experiment naming.
 
+For the lower-memory LoRA variant, which applies LoRA to the 2B VLM expert
+while keeping the 300M action expert trainable and the remaining training
+hyperparameters aligned with the full-parameter baseline, run:
+
+```bash
+bash scripts/finetune_mme_vla_suite_lora.sh
+```
+
 We provide a sample training-curve description in [`docs/training_curve_sample.md`](docs/training_curve_sample.md).
 
 ### 🧭 Train VLM subgoal predictor
