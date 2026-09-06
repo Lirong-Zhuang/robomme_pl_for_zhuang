@@ -47,6 +47,9 @@ class Args:
     executer_name: str = "symbolic-grounded-subgoal"
     executer_seed: int = 7
     executer_ckpt_id: int = 79999
+    repeat_id: int = 1
+    eval_seeds: str = ""
+    num_repeats: int = 1
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
@@ -266,26 +269,35 @@ class EpisodeEvaluator:
         print(f"exec_start_idx: {epstate.exec_start_idx}")
         return task_goal, recorder
 
-def setup_save_directory(args: Args) -> Path:
-    """Set up and validate save directories."""
-    save_dir = (
-        Path(args.save_dir)
-        / args.executer_name
-        / f"ckpt{args.executer_ckpt_id}"
-        / f"seed{args.executer_seed}"
-    )
-
+def get_evaluation_run_name(args: Args) -> str:
     if args.run_name:
-        save_dir = save_dir / args.run_name
-    elif args.subgoal_type in SUBGOAL_TYPES:
+        return args.run_name
+    if args.subgoal_type in SUBGOAL_TYPES:
         if args.manager_use_gemini:
-            save_dir = save_dir / "gemini"
-        elif args.manager_use_qwenvl:
-            save_dir = save_dir / "qwenvl"
-        elif args.manager_use_memer:
-            save_dir = save_dir / "memer"
-        else:
-            save_dir = save_dir / "oracle"
+            return "gemini"
+        if args.manager_use_qwenvl:
+            return "qwenvl"
+        if args.manager_use_memer:
+            return "memer"
+        return "oracle"
+    return "default"
+
+
+def get_evaluation_run_directory(args: Args) -> Path:
+    """Return the directory shared by every seed and repeat in one run."""
+    return Path(args.save_dir) / args.executer_name / get_evaluation_run_name(args)
+
+
+def setup_save_directory(args: Args) -> Path:
+    """Set up one seed/repeat directory and validate overwrite behavior."""
+    if args.repeat_id < 1:
+        raise ValueError(f"repeat_id must be at least 1, got {args.repeat_id}")
+
+    save_dir = (
+        get_evaluation_run_directory(args)
+        / f"seed{args.executer_seed}"
+        / f"repeat{args.repeat_id}"
+    )
 
     if save_dir.exists():
         if args.overwrite:
@@ -296,6 +308,82 @@ def setup_save_directory(args: Args) -> Path:
 
     save_dir.mkdir(parents=True, exist_ok=True)
     return save_dir
+
+
+def update_run_summary(args: Args) -> Path:
+    """Aggregate all completed seed/repeat logs for the current run."""
+    run_dir = get_evaluation_run_directory(args)
+    seed_values = [
+        int(value.strip())
+        for value in (args.eval_seeds or str(args.executer_seed)).split(",")
+        if value.strip()
+    ]
+    if not seed_values:
+        raise ValueError("eval_seeds must contain at least one seed")
+    if args.num_repeats < 1:
+        raise ValueError(f"num_repeats must be at least 1, got {args.num_repeats}")
+
+    completed = []
+    missing = []
+    task_success_rates: dict[str, list[float]] = {}
+    for seed in seed_values:
+        for repeat_id in range(1, args.num_repeats + 1):
+            log_path = run_dir / f"seed{seed}" / f"repeat{repeat_id}" / "log.json"
+            if not log_path.exists():
+                missing.append({"seed": seed, "repeat": repeat_id})
+                continue
+            try:
+                with log_path.open("r", encoding="utf-8") as f:
+                    result = json.load(f)
+                total_success_rate = float(result["total_success_rate"])
+                per_task = result["success_rate"]
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+                print(f"Warning: cannot include {log_path} in summary: {e}")
+                missing.append({"seed": seed, "repeat": repeat_id})
+                continue
+
+            completed.append(
+                {
+                    "seed": seed,
+                    "repeat": repeat_id,
+                    "total_success_rate": total_success_rate,
+                }
+            )
+            for task_name, success_rate in per_task.items():
+                task_success_rates.setdefault(task_name, []).append(float(success_rate))
+
+    summary = {
+        "executer_name": args.executer_name,
+        "executer_ckpt_id": args.executer_ckpt_id,
+        "run_name": get_evaluation_run_name(args),
+        "seeds": seed_values,
+        "repeats_per_seed": args.num_repeats,
+        "expected_run_count": len(seed_values) * args.num_repeats,
+        "completed_run_count": len(completed),
+        "missing_runs": missing,
+        "total_average_success_rate": (
+            sum(item["total_success_rate"] for item in completed) / len(completed)
+            if completed
+            else None
+        ),
+        "per_task_average_success_rate": {
+            task_name: sum(values) / len(values)
+            for task_name, values in sorted(task_success_rates.items())
+        },
+        "runs": completed,
+    }
+
+    summary_path = run_dir / "summary.json"
+    temporary_path = run_dir / "summary.json.tmp"
+    with temporary_path.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    os.replace(temporary_path, summary_path)
+    print(
+        f"[robomme] Updated {summary_path}: "
+        f"{len(completed)}/{summary['expected_run_count']} runs completed, "
+        f"total average success rate={summary['total_average_success_rate']}"
+    )
+    return summary_path
 
 
 def setup_log_dict(save_dir: Path, args: Args) -> dict:
@@ -430,8 +518,12 @@ def evaluate(args: Args):
             final_results["total_success_rate"] = (
                 sum(final_results["success_rate"].values()) / len(final_results["success_rate"].values())
             )
+            final_results["executer_seed"] = args.executer_seed
+            final_results["repeat_id"] = args.repeat_id
+            final_results["executer_ckpt_id"] = args.executer_ckpt_id
             with open(save_dir / "log.json", "w") as f:
                 json.dump(final_results, f, indent=2)
+            update_run_summary(args)
         except Exception as e:
             print(f"Error saving final results: {e}")
             time.sleep(1)

@@ -74,9 +74,9 @@ CUDA_VISIBLE_DEVICES=0 uv run scripts/serve_policy.py --seed=7  --port=8000 poli
 
 # terminal 1 
 micromamba activate robomme
-CUDA_VISIBLE_DEVICES=1 python examples/robomme/eval.py --args.model_seed=7 --args.port=8000 --args.policy_name=<your_specify_policy_name> --args.model_ckpt_id=79999
+CUDA_VISIBLE_DEVICES=1 python examples/robomme/eval.py --args.executer-seed=7 --args.executer-port=8000 --args.executer-name=<your_specify_policy_name> --args.executer-ckpt-id=79999 --args.run-name=manual --args.repeat-id=1
 ```
-Then the evaluations results will be stored in `runs/evaluation/<your_specify_policy_name>/ckpt79999/seed7`
+Then the evaluation results will be stored in `runs/evaluation/<your_specify_policy_name>/manual/seed7/repeat1`.
 > Remember to manually set CUDA_VISIBLE_DEVICES using one card for serve_policy.py, as JAX will automatically use all GPUs by default.
 
 ### Training 
@@ -276,13 +276,15 @@ After downloading the fine-tuned checkpoints, run:
 ```
 bash scripts/eval.sh
 ```
-Set the `MODEL_TYPE` variable to one of the following:
+Set the `EVAL_PRESET` variable to one of the following:
 1. **Prior methods:** `pi05_baseline`, `MemER`
 2. **Symbolic MME-VLA:** `symbolic_simpleSG_oracle`, `symbolic_simpleSG_gemini`, `symbolic_simpleSG_qwenvl`, `symbolic_groundedSG_oracle`, `symbolic_groundedSG_gemini`, `symbolic_groundedSG_qwenvl`
 3. **Perceptual MME-VLA:** `perceptual-framesamp-context`, `perceptual-framesamp-modul`, `perceptual-framesamp-expert`, `perceptual-tokendrop-context`, `perceptual-tokendrop-modul`, `perceptual-tokendrop-expert`
 4. **Recurrent MME-VLA:** `recurrent-rmt-context`, `recurrent-rmt-modul`, `recurrent-rmt-expert`, `recurrent-ttt-context`, `recurrent-ttt-modul`, `recurrent-ttt-expert`
 
-Running `eval.sh` automatically starts two tmux windows: one for the policy server and one for RoboMME evaluation. If the evaluation is interrupted, you can rerun the script; it will automatically resume from the generated `progress.json`.
+Running `eval.sh` starts the policy server as a managed background process and runs RoboMME evaluation in the foreground. If evaluation is interrupted, rerun the script to resume from each generated `progress.json`.
+
+By default, the integrated script evaluates seeds `0`, `42`, and `7` three times each. Results are stored under `runs/evaluation/<executer_name>/<trinity_version>/seed<seed>/repeat<repeat>/`; `summary.json` in the `<trinity_version>` directory tracks completion and the average success rate across all completed runs.
 
 
 ### ✍️ Manual evaluation (per model)

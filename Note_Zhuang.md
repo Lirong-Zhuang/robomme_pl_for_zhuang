@@ -56,9 +56,10 @@ runs/
 └── evaluation/
     ├── server_logs/
     └── <executer_name>/
-        └── ckpt<checkpoint_id>/
+        └── <evaluation_run_name>/             # e.g. trinity_v1.1
+            ├── summary.json                   # aggregate of all seeds/repeats
             └── seed<seed>/
-                └── <evaluation_run_name>/
+                └── repeat<repeat_id>/
                     ├── progress.json
                     ├── log.json
                     └── <TaskName>/
@@ -211,12 +212,13 @@ tmux kill-session -t vlm_train
 Before evaluation, edit the **Evaluation configuration** section near the top
 of `scripts/eval.sh`. In particular, check:
 
-- `MODEL_TYPE`
-- `CKPT_ID`
+- `EVAL_PRESET`
+- `EXECUTER_CKPT_ID`
+- `EXECUTER_SEEDS` and `NUM_REPEATS`
 - `ONLY_TASKS` and `NUM_EPISODES`
-- `QWENVL_SIMPLE_ADAPTER_PATH` or the adapter path for the selected predictor
-- `GPU_ID_SERVER` and `GPU_ID_CLIENT`
-- `EVAL_RUN_NAME` and `SAVE_DIR`
+- the Manager and Reporter adapter paths
+- `EXECUTER_GPU_ID` and `MANAGER_REPORTER_GPU_ID`
+- `FRAMEWORK_VERSION`, `RUN_NAME`, and `SAVE_DIR`
 
 Run the evaluation from the repository root:
 
@@ -224,6 +226,8 @@ Run the evaluation from the repository root:
 bash scripts/eval.sh
 ```
 
-The script starts the policy server, runs the evaluation in the foreground,
-writes results under `SAVE_DIR`, and stops the server automatically when the
-evaluation ends.
+The script evaluates every configured seed/repeat pair sequentially. It starts
+a fresh policy server for each pair, writes the individual result under
+`<SAVE_DIR>/<executer_name>/<evaluation_run_name>/seed<seed>/repeat<repeat>/`,
+updates `summary.json` in the evaluation-run directory, and stops the server
+automatically. Re-running with `OVERWRITE=false` resumes incomplete episodes.

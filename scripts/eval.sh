@@ -26,7 +26,10 @@ cd "$REPO_ROOT"
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
 EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
-EXECUTER_SEED=7
+# Run the full evaluation matrix sequentially. Each seed/repeat has an
+# independent result directory and a freshly started Executer server.
+EXECUTER_SEEDS=(0 42 7)
+NUM_REPEATS=3
 EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
@@ -272,10 +275,6 @@ if [[ -n "$REPORTER_ADAPTER_PATH" ]]; then
     require_local_dir "Reporter adapter" "$REPORTER_ADAPTER_PATH"
 fi
 
-if [[ "$EXECUTER_PORT" == "0" ]]; then
-    EXECUTER_PORT=$(find_free_port)
-fi
-
 if [[ "$EXECUTER_USE_HISTORY" == "auto" ]]; then
     if [[ "$REQUESTED_EVAL_PRESET" == "pi05_baseline" ]]; then
         EXECUTER_USE_HISTORY=false
@@ -284,67 +283,35 @@ if [[ "$EXECUTER_USE_HISTORY" == "auto" ]]; then
     fi
 fi
 
-EVAL_ARGS=(
-    --args.executer-host "$EXECUTER_HOST"
-    --args.executer-port "$EXECUTER_PORT"
-    --args.obs-horizon "$OBS_HORIZON"
-    --args.max-steps "$MAX_STEPS"
-    --args.save-dir "$SAVE_DIR"
-    --args.run-name "$EVAL_RUN_NAME"
-    --args.executer-name "$EXECUTER_NAME"
-    --args.executer-seed "$EXECUTER_SEED"
-    --args.executer-ckpt-id "$EXECUTER_CKPT_ID"
-    --args.only-tasks "$ONLY_TASKS"
-    --args.exclude-tasks "$EXCLUDE_TASKS"
-    --args.re-eval-tasks "$RE_EVAL_TASKS"
-    --args.num-episodes "$NUM_EPISODES"
-    --args.episode-ids "$EPISODE_IDS"
-    --args.subgoal-type "$SUBGOAL_TYPE"
-    --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
-    --args.manager-simple-adapter-path "$MANAGER_SIMPLE_ADAPTER_PATH"
-    --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
-    --args.reporter-type "$REPORTER_TYPE"
-    --args.reporter-model-path "$REPORTER_MODEL_PATH"
-    --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
-)
+if ((${#EXECUTER_SEEDS[@]} == 0)); then
+    echo "ERROR: EXECUTER_SEEDS must contain at least one seed." >&2
+    exit 1
+fi
+if ((NUM_REPEATS < 1)); then
+    echo "ERROR: NUM_REPEATS must be at least 1." >&2
+    exit 1
+fi
 
-EVAL_ARGS+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
-EVAL_ARGS+=("$(bool_arg "$SAVE_MANAGER_LOGS" --args.save-manager-logs --args.no-save-manager-logs)")
-EVAL_ARGS+=("$(bool_arg "$EXECUTER_USE_HISTORY" --args.executer-use-history --args.no-executer-use-history)")
-EVAL_ARGS+=("$(bool_arg "$MANAGER_SAVE_MEMER_KF" --args.manager-save-memer-kf --args.no-manager-save-memer-kf)")
-EVAL_ARGS+=("$(bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce)")
+EVAL_SEEDS_CSV=$(IFS=,; printf '%s' "${EXECUTER_SEEDS[*]}")
 
-case "$MANAGER_TYPE" in
-    oracle)
-        EVAL_ARGS+=(--args.manager-use-oracle --args.no-manager-use-qwenvl --args.no-manager-use-memer --args.no-manager-use-gemini)
-        ;;
-    qwenvl)
-        EVAL_ARGS+=(--args.no-manager-use-oracle --args.manager-use-qwenvl --args.no-manager-use-memer --args.no-manager-use-gemini)
-        ;;
-    memer)
-        EVAL_ARGS+=(--args.no-manager-use-oracle --args.no-manager-use-qwenvl --args.manager-use-memer --args.no-manager-use-gemini)
-        ;;
-    gemini)
-        EVAL_ARGS+=(--args.no-manager-use-oracle --args.no-manager-use-qwenvl --args.no-manager-use-memer --args.manager-use-gemini)
-        ;;
-    none)
-        EVAL_ARGS+=(--args.no-manager-use-oracle --args.no-manager-use-qwenvl --args.no-manager-use-memer --args.no-manager-use-gemini)
-        ;;
-esac
-
-mkdir -p "$SERVER_LOG_DIR"
-SERVER_LOG="$SERVER_LOG_DIR/${EXECUTER_NAME}_ckpt${EXECUTER_CKPT_ID}_seed${EXECUTER_SEED}_port${EXECUTER_PORT}.log"
 SERVER_PID=""
+
+stop_server() {
+    if [[ -n "$SERVER_PID" ]]; then
+        if kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo
+            echo "Stopping Executer server (PID $SERVER_PID)..."
+            kill "$SERVER_PID" 2>/dev/null || true
+        fi
+        wait "$SERVER_PID" 2>/dev/null || true
+    fi
+    SERVER_PID=""
+}
 
 cleanup() {
     local exit_code=$?
     trap - EXIT INT TERM
-    if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo
-        echo "Stopping Executer server (PID $SERVER_PID)..."
-        kill "$SERVER_PID" 2>/dev/null || true
-        wait "$SERVER_PID" 2>/dev/null || true
-    fi
+    stop_server
     exit "$exit_code"
 }
 trap cleanup EXIT INT TERM
@@ -360,60 +327,140 @@ echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
 echo "Executer ckpt:   $EXECUTER_DIR"
 echo "Evaluation run:  ${EVAL_RUN_NAME:-default}"
+echo "Seeds:           $EVAL_SEEDS_CSV"
+echo "Repeats/seed:    $NUM_REPEATS"
 echo "Task(s):         ${ONLY_TASKS:-all}"
 echo "Episode ID(s):   ${EPISODE_IDS:-0..$((NUM_EPISODES - 1))}"
 echo "Executer GPU:    $EXECUTER_GPU_ID"
 echo "Manager/Reporter GPU: $MANAGER_REPORTER_GPU_ID"
-echo "Executer endpoint: $EXECUTER_HOST:$EXECUTER_PORT"
-echo "Server log:      $SERVER_LOG"
 echo
-echo "Starting Executer server..."
 
-SERVER_ENV=(
-    CUDA_VISIBLE_DEVICES="$EXECUTER_GPU_ID"
-    XLA_PYTHON_CLIENT_PREALLOCATE=false
-    XLA_PYTHON_CLIENT_ALLOCATOR=platform
-)
+run_evaluation() {
+    local executer_seed=$1
+    local repeat_id=$2
+    local executer_port=$EXECUTER_PORT
+    local server_log
+    local start_time
+    local -a eval_args
+    local -a server_env
 
-env "${SERVER_ENV[@]}" uv run scripts/serve_policy.py \
-    --seed "$EXECUTER_SEED" \
-    --port "$EXECUTER_PORT" \
-    --policy.dir "$EXECUTER_DIR" \
-    --policy.config "$EXECUTER_CONFIG" \
-    >"$SERVER_LOG" 2>&1 &
-SERVER_PID=$!
-
-START_TIME=$SECONDS
-until lsof -iTCP:"$EXECUTER_PORT" -sTCP:LISTEN &>/dev/null; do
-    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo "ERROR: Executer server exited before it started listening." >&2
-        tail -n 100 "$SERVER_LOG" >&2
-        exit 1
+    if [[ "$executer_port" == "0" ]]; then
+        executer_port=$(find_free_port)
     fi
-    if ((SECONDS - START_TIME >= SERVER_STARTUP_TIMEOUT)); then
-        echo "ERROR: Executer server did not start within ${SERVER_STARTUP_TIMEOUT}s." >&2
-        tail -n 100 "$SERVER_LOG" >&2
-        exit 1
-    fi
-    sleep 1
+
+    eval_args=(
+        --args.executer-host "$EXECUTER_HOST"
+        --args.executer-port "$executer_port"
+        --args.obs-horizon "$OBS_HORIZON"
+        --args.max-steps "$MAX_STEPS"
+        --args.save-dir "$SAVE_DIR"
+        --args.run-name "$EVAL_RUN_NAME"
+        --args.executer-name "$EXECUTER_NAME"
+        --args.executer-seed "$executer_seed"
+        --args.executer-ckpt-id "$EXECUTER_CKPT_ID"
+        --args.repeat-id "$repeat_id"
+        --args.eval-seeds "$EVAL_SEEDS_CSV"
+        --args.num-repeats "$NUM_REPEATS"
+        --args.only-tasks "$ONLY_TASKS"
+        --args.exclude-tasks "$EXCLUDE_TASKS"
+        --args.re-eval-tasks "$RE_EVAL_TASKS"
+        --args.num-episodes "$NUM_EPISODES"
+        --args.episode-ids "$EPISODE_IDS"
+        --args.subgoal-type "$SUBGOAL_TYPE"
+        --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
+        --args.manager-simple-adapter-path "$MANAGER_SIMPLE_ADAPTER_PATH"
+        --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
+        --args.reporter-type "$REPORTER_TYPE"
+        --args.reporter-model-path "$REPORTER_MODEL_PATH"
+        --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
+    )
+
+    eval_args+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
+    eval_args+=("$(bool_arg "$SAVE_MANAGER_LOGS" --args.save-manager-logs --args.no-save-manager-logs)")
+    eval_args+=("$(bool_arg "$EXECUTER_USE_HISTORY" --args.executer-use-history --args.no-executer-use-history)")
+    eval_args+=("$(bool_arg "$MANAGER_SAVE_MEMER_KF" --args.manager-save-memer-kf --args.no-manager-save-memer-kf)")
+    eval_args+=("$(bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce)")
+
+    case "$MANAGER_TYPE" in
+        oracle)
+            eval_args+=(--args.manager-use-oracle --args.no-manager-use-qwenvl --args.no-manager-use-memer --args.no-manager-use-gemini)
+            ;;
+        qwenvl)
+            eval_args+=(--args.no-manager-use-oracle --args.manager-use-qwenvl --args.no-manager-use-memer --args.no-manager-use-gemini)
+            ;;
+        memer)
+            eval_args+=(--args.no-manager-use-oracle --args.no-manager-use-qwenvl --args.manager-use-memer --args.no-manager-use-gemini)
+            ;;
+        gemini)
+            eval_args+=(--args.no-manager-use-oracle --args.no-manager-use-qwenvl --args.no-manager-use-memer --args.manager-use-gemini)
+            ;;
+        none)
+            eval_args+=(--args.no-manager-use-oracle --args.no-manager-use-qwenvl --args.no-manager-use-memer --args.no-manager-use-gemini)
+            ;;
+    esac
+
+    mkdir -p "$SERVER_LOG_DIR"
+    server_log="$SERVER_LOG_DIR/${EXECUTER_NAME}_ckpt${EXECUTER_CKPT_ID}_seed${executer_seed}_repeat${repeat_id}_port${executer_port}.log"
+
+    echo "======================================================================"
+    echo "Starting seed $executer_seed, repeat $repeat_id/$NUM_REPEATS"
+    echo "Result directory: $SAVE_DIR/$EXECUTER_NAME/$EVAL_RUN_NAME/seed$executer_seed/repeat$repeat_id"
+    echo "Executer endpoint: $EXECUTER_HOST:$executer_port"
+    echo "Server log: $server_log"
+    echo "======================================================================"
+
+    server_env=(
+        CUDA_VISIBLE_DEVICES="$EXECUTER_GPU_ID"
+        XLA_PYTHON_CLIENT_PREALLOCATE=false
+        XLA_PYTHON_CLIENT_ALLOCATOR=platform
+    )
+
+    env "${server_env[@]}" uv run scripts/serve_policy.py \
+        --seed "$executer_seed" \
+        --port "$executer_port" \
+        --policy.dir "$EXECUTER_DIR" \
+        --policy.config "$EXECUTER_CONFIG" \
+        >"$server_log" 2>&1 &
+    SERVER_PID=$!
+
+    start_time=$SECONDS
+    until lsof -iTCP:"$executer_port" -sTCP:LISTEN &>/dev/null; do
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "ERROR: Executer server exited before it started listening." >&2
+            tail -n 100 "$server_log" >&2
+            return 1
+        fi
+        if ((SECONDS - start_time >= SERVER_STARTUP_TIMEOUT)); then
+            echo "ERROR: Executer server did not start within ${SERVER_STARTUP_TIMEOUT}s." >&2
+            tail -n 100 "$server_log" >&2
+            return 1
+        fi
+        sleep 1
+    done
+
+    echo "Executer server is ready. Starting evaluation in the foreground..."
+    echo "Press Ctrl+C to stop the full evaluation matrix."
+    echo
+    printf 'Evaluation command:\n  CUDA_VISIBLE_DEVICES=%q python examples/robomme/eval.py' "$MANAGER_REPORTER_GPU_ID"
+    printf ' %q' "${eval_args[@]}"
+    printf '\n\n'
+
+    CUDA_VISIBLE_DEVICES="$MANAGER_REPORTER_GPU_ID" \
+    PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
+    PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
+    MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \
+    "$MAMBA_EXE" run -n "$MAMBA_ENV" \
+    python examples/robomme/eval.py "${eval_args[@]}"
+
+    stop_server
+}
+
+for executer_seed in "${EXECUTER_SEEDS[@]}"; do
+    for ((repeat_id = 1; repeat_id <= NUM_REPEATS; repeat_id++)); do
+        run_evaluation "$executer_seed" "$repeat_id"
+    done
 done
 
-echo "Executer server is ready. Starting evaluation in the foreground..."
-echo "Press Ctrl+C to stop evaluation and the Executer server."
 echo
-
-# Launching the server first keeps it in the uv/openpi environment. The client
-# then runs in the separate RoboMME conda environment in this foreground shell.
-# source "$CONDA_INIT"
-# conda activate "$CONDA_ENV"
-
-printf 'Evaluation command:\n  CUDA_VISIBLE_DEVICES=%q python examples/robomme/eval.py' "$MANAGER_REPORTER_GPU_ID"
-printf ' %q' "${EVAL_ARGS[@]}"
-printf '\n\n'
-
-CUDA_VISIBLE_DEVICES="$MANAGER_REPORTER_GPU_ID" \
-PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
-PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
-MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \
-"$MAMBA_EXE" run -n "$MAMBA_ENV" \
-python examples/robomme/eval.py "${EVAL_ARGS[@]}"
+echo "All evaluations completed."
+echo "Aggregate summary: $SAVE_DIR/$EXECUTER_NAME/$EVAL_RUN_NAME/summary.json"
