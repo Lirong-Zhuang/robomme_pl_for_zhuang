@@ -34,6 +34,11 @@ DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
 DEFAULT_RESULT_NAME = "reporter_qwen_v4.1_ckpt900"
 # False exactly matches dev_trinity: every parsed result is applied directly.
 REPORTER_DEBOUNCE = True
+
+# Completion-scoring tolerance, measured in Reporter calls.
+EARLY_TOLERANCE_CALLS = 1
+FULL_CREDIT_DELAY_CALLS = 1
+MAXIMUM_DELAY_CALLS = 2
 # ======================================================================
 
 # This must be set before swift/torch loads the model. If "1" is selected,
@@ -266,19 +271,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--early-tolerance-calls",
         type=int,
-        default=2,
+        default=EARLY_TOLERANCE_CALLS,
         help="Maximum Reporter calls that a true prediction may precede its expected event.",
     )
     parser.add_argument(
         "--full-credit-delay-calls",
         type=int,
-        default=2,
+        default=FULL_CREDIT_DELAY_CALLS,
         help="Maximum delayed Reporter calls that receive full completion credit.",
     )
     parser.add_argument(
         "--maximum-delay-calls",
         type=int,
-        default=4,
+        default=MAXIMUM_DELAY_CALLS,
         help="Maximum delayed Reporter calls before the episode is considered stalled.",
     )
     return parser.parse_args()

@@ -61,7 +61,7 @@ SAVE_DIR="runs/evaluation"
 # Reporter debounce (the original dev_trinity behavior), while trinity_v1
 # enables it.
 FRAMEWORK_VERSION="trinity_v1"
-RUN_NAME="1"
+RUN_NAME="0"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -84,8 +84,8 @@ MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
-EXECUTER_CONFIG="mme_vla_suite_lora"
-EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/79999"
+EXECUTER_CONFIG="mme_vla_suite"
+EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"

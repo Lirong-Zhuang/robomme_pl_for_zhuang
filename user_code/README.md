@@ -73,10 +73,10 @@ and the fourth becomes effective again; this repeats every three calls while
 are disabled when `build_trainset_testset.py` creates the test set;
 the evaluator also skips any duplicates found in older test sets as a safety
 check. Completion is scored as causal subgoal progress: consecutive `true`
-outputs are debounced, predictions up to two Reporter calls early are accepted,
-delays up to two Reporter calls receive full credit,
-delays of three or four calls are completed with a warning, and premature or
-later transitions stop progress for that episode. During sequential inference,
+outputs are debounced, predictions up to one Reporter call early are accepted,
+delays up to one Reporter call receive full credit,
+a delay of two calls is completed with a warning, and premature or later
+transitions stop progress for that episode. During sequential inference,
 both the init frame and active subgoal advance only on a debounced predicted
 `true`; dataset labels never advance the prompt. The command writes
 `summary.json`, `episode_completion.jsonl`, `predictions.jsonl`, and `errors.json`.
