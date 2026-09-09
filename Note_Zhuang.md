@@ -1,5 +1,7 @@
 # Trinity
 
+> **Branch note:** The current `trinity_v1_backup` branch is a backup of Trinity v1.
+
 This branch develops a benchmark with three separated parts to do the memory-based tasks.
 
 ## 1. Build the dataset
