@@ -30,9 +30,13 @@ MODEL_TYPE="symbolic_simpleSG_qwenvl"
 # independent result directory and a freshly started symbolic policy server.
 SEEDS=(0 42 7)
 NUM_REPEATS=3
-CKPT_ID=79999
+CKPT_ID=30000
 GPU_ID_SERVER=0
 GPU_ID_CLIENT=1
+
+# VLA configuration for the LoRA baseline trained on this branch.
+POLICY_CONFIG="mme_vla_suite_lora"
+POLICY_DIR="runs/ckpts/mme_vla_suite_lora/symbolic-simple-subgoal_baseline_v0_lora/$CKPT_ID"
 
 # Set PORT=0 to choose a free port automatically.
 HOST="0.0.0.0"
@@ -102,10 +106,6 @@ SERVER_LOG_DIR="runs/evaluation/server_logs"
 # Leave empty to use JAX's default. For a dedicated policy GPU, values such as
 # 0.90 or 0.95 can be useful.
 XLA_MEM_FRACTION=""
-
-# Optional overrides. Leave empty to use paths derived from MODEL_TYPE.
-POLICY_DIR=""
-POLICY_CONFIG=""
 
 # =============================================================================
 # Implementation

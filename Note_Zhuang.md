@@ -112,6 +112,7 @@ of `scripts/eval.sh`. In particular, check:
 
 - `MODEL_TYPE`
 - `CKPT_ID`
+- `POLICY_CONFIG` and `POLICY_DIR`
 - `SEEDS` and `NUM_REPEATS`
 - `ONLY_TASKS` and `NUM_EPISODES`
 - `QWENVL_SIMPLE_ADAPTER_PATH` or the adapter path for the selected predictor
