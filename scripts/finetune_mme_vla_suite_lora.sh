@@ -26,6 +26,7 @@ uv run scripts/train.py "$TRAIN_CONFIG" \
     --batch-size="$BATCH_SIZE" \
     --num-workers=4 \
     --resume \
+    --resum-ckpt-id=20000 \
     --fsdp-devices="$FSDP_DEVICES" \
     --dataset-path="$DATASET_PATH" \
     --model.use-history \
