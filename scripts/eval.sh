@@ -30,7 +30,7 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 # independent result directory and a freshly started Executer server.
 EXECUTER_SEEDS=(0 42 7)
 NUM_REPEATS=3
-EXECUTER_CKPT_ID=79999
+EXECUTER_CKPT_ID=30000
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
 
@@ -60,8 +60,8 @@ SAVE_DIR="runs/evaluation"
 # FRAMEWORK_VERSION also selects framework behavior: trinity_v0 disables
 # Reporter debounce (the original dev_trinity behavior), while trinity_v1
 # enables it.
-FRAMEWORK_VERSION="trinity_v1"
-RUN_NAME="0"
+FRAMEWORK_VERSION="trinity_v0"
+RUN_NAME="14"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -84,14 +84,14 @@ MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
-EXECUTER_CONFIG="mme_vla_suite"
-EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/79999"
+EXECUTER_CONFIG="mme_vla_suite_lora"
+EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/$EXECUTER_CKPT_ID"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v1_simple_subgoal/v1-20260821-142554/checkpoint-950"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v4_simple_subgoal/v1-20260821-142554/checkpoint-950"
 
 # micromamba server 117
 MAMBA_ENV="robomme"
