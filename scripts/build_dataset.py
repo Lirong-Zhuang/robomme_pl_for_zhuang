@@ -38,7 +38,8 @@ Build Reporter completion-classification data for QwenVL.
 uv run python scripts/build_dataset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_1 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_2 \
+  --reporter_history_size 7 \
   --tasks BinFill
 ```
 
@@ -63,6 +64,7 @@ from mme_vla_suite.dataset_builder.build_manager_dataset_qwenvl import (
 from mme_vla_suite.dataset_builder.build_reporter_dataset import (
     DatasetBuilder as ReporterDatasetBuilder,
 )
+from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
 
 
 def _parse_args() -> argparse.Namespace:
@@ -110,6 +112,15 @@ def _parse_args() -> argparse.Namespace:
         "--visualize",
         action="store_true",
         help="Write visualization MP4s",
+    )
+    parser.add_argument(
+        "--reporter_history_size",
+        type=int,
+        default=DEFAULT_REPORTER_HISTORY_SIZE,
+        help=(
+            "Number of recent Reporter-call observations per Reporter sample "
+            f"(default: {DEFAULT_REPORTER_HISTORY_SIZE}; Reporter datasets only)"
+        ),
     )
     return parser.parse_args()
 
@@ -165,6 +176,7 @@ if __name__ == "__main__":
             visualize=args.visualize,
             reporter_dir_name="reporter_qwenvl",
             task_names=args.tasks,
+            reporter_history_size=args.reporter_history_size,
         )
         builder.run()
     else:

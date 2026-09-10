@@ -1,14 +1,16 @@
 """Build QwenVL Reporter completion-classification datasets.
 
 The frame selection and positive-sample duplication rules intentionally reuse
-the Manager QwenVL builder.  Each row compares the observation where a
-subgoal began with a later selected observation from the same subgoal span.
+the Manager QwenVL builder.  Each row contains the observation where a
+subgoal began followed by a capacity-limited sliding window of observations from
+Reporter calls in that subgoal. The window is not padded while it fills.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from collections import deque
 from collections.abc import Collection, Mapping
 from typing import Literal
 
@@ -25,8 +27,11 @@ from mme_vla_suite.dataset_builder.robomme_h5_utils import (
     resolve_subgoal,
 )
 from mme_vla_suite.reporter_prompts import (
+    DEFAULT_REPORTER_HISTORY_SIZE,
     REPORTER_SYSTEM_PROMPT,
+    build_reporter_image_window,
     format_reporter_user_prompt,
+    validate_reporter_history_size,
 )
 
 
@@ -44,7 +49,11 @@ class DatasetBuilder(ManagerDatasetBuilder):
         episode_indices_by_task: Mapping[str, Collection[int]] | None = None,
         duplicate_samples: bool = True,
         data_split: Literal["train", "test"] = "train",
+        reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
     ) -> None:
+        reporter_history_size = validate_reporter_history_size(
+            reporter_history_size
+        )
         super().__init__(
             raw_data_path=raw_data_path,
             preprocessed_data_path=preprocessed_data_path,
@@ -56,28 +65,35 @@ class DatasetBuilder(ManagerDatasetBuilder):
             duplicate_samples=duplicate_samples,
             data_split=data_split,
         )
+        self.reporter_history_size = reporter_history_size
 
     @staticmethod
     def make_reporter_data(
         subgoal: str,
-        observation_before_path: str,
-        observation_after_path: str,
+        image_paths: list[str],
         success: bool,
+        history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
     ) -> dict:
         """Format one row exactly like the live Reporter request and response."""
+        expected_image_count = validate_reporter_history_size(history_size) + 1
+        if len(image_paths) != expected_image_count:
+            raise ValueError(
+                f"Reporter row requires {expected_image_count} images "
+                f"(init + {history_size} observations), got {len(image_paths)}"
+            )
         return {
             "messages": [
                 {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": format_reporter_user_prompt(subgoal),
+                    "content": format_reporter_user_prompt(subgoal, history_size),
                 },
                 {
                     "role": "assistant",
                     "content": json.dumps({"success": success}),
                 },
             ],
-            "images": [observation_before_path, observation_after_path],
+            "images": image_paths,
         }
 
     def _append_reporter_rows(
@@ -171,7 +187,6 @@ class DatasetBuilder(ManagerDatasetBuilder):
         last_simple_subgoal = None
         last_grounded_subgoal = None
         visualization_frames = []
-
         for start_idx, end_idx in zip(transition_idxs[:-1], transition_idxs[1:]):
             simple_subgoal, grounded_subgoal = self._subgoals_at_step(
                 episode_data,
@@ -187,7 +202,9 @@ class DatasetBuilder(ManagerDatasetBuilder):
                 episode_idx,
                 start_idx,
             )
-
+            reporter_observation_paths: deque[str] = deque(
+                maxlen=self.reporter_history_size
+            )
             # Reporter is called after execution chunks, never on the initial
             # frame. RoboMME terminates at the final frame before another call.
             current_idxs = sorted(
@@ -203,17 +220,25 @@ class DatasetBuilder(ManagerDatasetBuilder):
                     episode_idx,
                     idx,
                 )
+                # ``selected`` mirrors online Reporter invocation points. The
+                # queue starts empty for every subgoal and is never padded.
+                reporter_observation_paths.append(after_path)
+                image_paths = build_reporter_image_window(
+                    before_path,
+                    reporter_observation_paths,
+                    self.reporter_history_size,
+                )
                 simple_data = self.make_reporter_data(
                     simple_subgoal,
-                    before_path,
-                    after_path,
+                    image_paths,
                     success,
+                    len(reporter_observation_paths),
                 )
                 grounded_data = self.make_reporter_data(
                     grounded_subgoal,
-                    before_path,
-                    after_path,
+                    image_paths,
                     success,
+                    len(reporter_observation_paths),
                 )
                 self._append_reporter_rows(simple_data, grounded_data)
 
@@ -237,13 +262,17 @@ class DatasetBuilder(ManagerDatasetBuilder):
                     duplicate_rows += dup_count
 
                 if self.visualize:
-                    before = cv2.imread(before_path)
-                    after = cv2.imread(after_path)
-                    combined = cv2.hconcat([before, after])
+                    combined = cv2.hconcat(
+                        [cv2.imread(image_path) for image_path in image_paths]
+                    )
                     label = "true" if success else "false"
                     cv2.putText(
                         combined,
-                        f"Step {start_idx}->{idx}; success={label}",
+                        (
+                            f"Step {start_idx}->{idx}; "
+                            f"window={len(reporter_observation_paths)}/"
+                            f"{self.reporter_history_size}; success={label}"
+                        ),
                         (10, 20),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,

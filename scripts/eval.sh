@@ -91,7 +91,12 @@ EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/$EXECUTER_CKPT_ID"
 REPORTER_TYPE="qwenvl"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v4_simple_subgoal/v1-20260821-142554/checkpoint-950"
+# Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
+# two-image Reporter adapters must not be reused for the new temporal input.
+REPORTER_ADAPTER_PATH=""
+# Maximum recent Reporter calls retained for one subgoal; the newest entry is
+# current. The init is separate, and an unfilled window is not padded.
+REPORTER_HISTORY_SIZE=7
 
 # micromamba server 117
 MAMBA_ENV="robomme"
@@ -321,6 +326,7 @@ echo "Manager:         $MANAGER_TYPE"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
+echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
 echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
 echo "Subgoal type:    $SUBGOAL_TYPE"
@@ -373,6 +379,7 @@ run_evaluation() {
         --args.reporter-type "$REPORTER_TYPE"
         --args.reporter-model-path "$REPORTER_MODEL_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
+        --args.reporter-history-size "$REPORTER_HISTORY_SIZE"
     )
 
     eval_args+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")

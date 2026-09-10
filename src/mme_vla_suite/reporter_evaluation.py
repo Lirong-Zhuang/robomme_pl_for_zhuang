@@ -7,6 +7,7 @@ ground-truth label and is removed before the request is sent to the model.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -15,6 +16,11 @@ from pathlib import Path
 import re
 from typing import Any
 from typing import Protocol
+
+from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
+from mme_vla_suite.reporter_prompts import build_reporter_image_window
+from mme_vla_suite.reporter_prompts import format_reporter_user_prompt
+from mme_vla_suite.reporter_prompts import validate_reporter_history_size
 
 
 def resolve_reporter_test_dataset(testset_path: Path, subgoal_type: str) -> Path:
@@ -521,8 +527,11 @@ def load_reporter_samples(
             images = row.get("images")
             if not isinstance(messages, list) or not messages:
                 raise ValueError(f"Missing messages list at {path}:{line_number}")
-            if not isinstance(images, list) or len(images) != 2:
-                raise ValueError(f"Expected exactly two images at {path}:{line_number}")
+            if not isinstance(images, list) or len(images) < 2:
+                raise ValueError(
+                    f"Expected an init image and at least one Reporter-call "
+                    f"observation at {path}:{line_number}"
+                )
 
             label_message = messages[-1]
             if not isinstance(label_message, dict) or label_message.get("role") != "assistant":
@@ -537,6 +546,16 @@ def load_reporter_samples(
             request_messages = messages[:-1]
             if not request_messages:
                 raise ValueError(f"No request messages remain at {path}:{line_number}")
+            image_placeholders = sum(
+                str(message.get("content", "")).count("<image>")
+                for message in request_messages
+                if isinstance(message, dict)
+            )
+            if image_placeholders != len(images):
+                raise ValueError(
+                    f"Reporter prompt/image mismatch at {path}:{line_number}: "
+                    f"{image_placeholders} placeholders for {len(images)} images"
+                )
             resolved_images = [
                 str(_resolve_image_path(str(image), path, resolved_image_root)) for image in images
             ]
@@ -583,7 +602,7 @@ def prepare_reporter_sequence(
 ) -> tuple[list[ReporterFrame], int]:
     """Deduplicate and order Reporter rows by task, episode, and current step."""
     frames: list[ReporterFrame] = []
-    seen_rows: set[tuple[str, str, str, bool]] = set()
+    seen_rows: set[tuple[str, tuple[str, ...], bool]] = set()
     duplicates_skipped = 0
     for sample in samples:
         message_signature = json.dumps(
@@ -593,8 +612,7 @@ def prepare_reporter_sequence(
         )
         signature = (
             message_signature,
-            sample.images[0],
-            sample.images[1],
+            tuple(sample.images),
             sample.expected,
         )
         if signature in seen_rows:
@@ -606,14 +624,32 @@ def prepare_reporter_sequence(
             sample.images[0],
             line_number=sample.line_number,
         )
-        current_task, current_episode, current_step = _parse_reporter_frame_path(
-            sample.images[1],
-            line_number=sample.line_number,
-        )
-        if (before_task, before_episode) != (current_task, current_episode):
+        history_frames = [
+            _parse_reporter_frame_path(
+                image_path,
+                line_number=sample.line_number,
+            )
+            for image_path in sample.images[1:]
+        ]
+        current_task, current_episode, current_step = history_frames[-1]
+        if any(
+            (task, episode) != (before_task, before_episode)
+            for task, episode, _ in history_frames
+        ):
             raise ValueError(
                 "Reporter images must come from the same task and episode at "
                 f"line {sample.line_number}: {sample.images}"
+            )
+        history_steps = [step for _, _, step in history_frames]
+        if history_steps != sorted(history_steps):
+            raise ValueError(
+                "Reporter-call observations must be ordered oldest to newest at "
+                f"line {sample.line_number}: {history_steps}"
+            )
+        if any(step < before_step for step in history_steps):
+            raise ValueError(
+                "Reporter-call observations cannot precede the subgoal init frame at "
+                f"line {sample.line_number}: {before_step} -> {history_steps}"
             )
         if current_step <= before_step:
             raise ValueError(
@@ -668,6 +704,23 @@ def _prepare_episode_prompt_stages(
     return prompt_stages, dataset_stage_indices
 
 
+def _format_messages_for_history(
+    messages: Sequence[dict[str, Any]],
+    subgoal: str,
+    observation_count: int,
+) -> list[dict[str, Any]]:
+    """Copy a request and resize its user prompt to the actual window length."""
+    result = [dict(message) for message in messages]
+    for message in reversed(result):
+        if message.get("role") == "user":
+            message["content"] = format_reporter_user_prompt(
+                subgoal,
+                observation_count,
+            )
+            return result
+    raise ValueError("Reporter request contains no user message")
+
+
 def evaluate_reporter_sequence(
     *,
     name: str,
@@ -682,18 +735,31 @@ def evaluate_reporter_sequence(
     max_samples: int | None = None,
     progress_every: int = 50,
     reporter_debounce: bool = True,
+    reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
     prediction_records_out: list[dict[str, Any]] | None = None,
 ) -> ReporterMetrics:
-    """Evaluate with prediction-driven init frames and subgoal prompts.
+    """Evaluate with prediction-driven init frames, history, and prompts.
 
     The first row of each episode supplies the initial frame and subgoal prompt.
     An effective ``success=true`` promotes the current frame and advances the
-    active subgoal. With debounce enabled, the first true in a run is effective,
-    the next two are suppressed, and the fourth is effective again. With it
-    disabled, every parsed true takes effect immediately, matching dev_trinity.
+    active subgoal, immediately clearing the observation window. The window is
+    not padded before reaching capacity. With debounce enabled, the first true
+    in a run is effective, the next two are suppressed, and the fourth is
+    effective again. With it disabled, every parsed true takes effect
+    immediately, matching dev_trinity.
     """
+    reporter_history_size = validate_reporter_history_size(
+        reporter_history_size
+    )
     samples = load_reporter_samples(dataset_path, image_root=image_root)
     frames, duplicates_skipped = prepare_reporter_sequence(samples)
+    max_dataset_history = max(len(frame.sample.images) - 1 for frame in frames)
+    if max_dataset_history > reporter_history_size:
+        raise ValueError(
+            "Reporter dataset contains a history window of "
+            f"{max_dataset_history}, exceeding configured capacity "
+            f"{reporter_history_size}"
+        )
     if max_samples is not None:
         if max_samples < 1:
             raise ValueError("max_samples must be at least 1")
@@ -717,6 +783,7 @@ def evaluate_reporter_sequence(
 
     active_episode: tuple[str, int] | None = None
     predicted_init_path: str | None = None
+    observation_history: deque[str] = deque()
     active_subgoal_index = 0
     consecutive_true_count = 0
     invalid_outputs = 0
@@ -728,24 +795,36 @@ def evaluate_reporter_sequence(
             if episode_started:
                 active_episode = episode_key
                 predicted_init_path = sample.images[0]
+                observation_history = deque(maxlen=reporter_history_size)
                 active_subgoal_index = 0
                 consecutive_true_count = 0
             if predicted_init_path is None:  # pragma: no cover - guarded above.
                 raise RuntimeError("Reporter sequence has no init frame")
 
             used_init_path = predicted_init_path
-            current_path = sample.images[1]
+            current_path = sample.images[-1]
+            observation_history.append(current_path)
+            used_image_paths = build_reporter_image_window(
+                used_init_path,
+                observation_history,
+                reporter_history_size,
+            )
             dataset_subgoal_index = dataset_stage_indices[
                 (frame.task_name, frame.episode_id, sample.line_number)
             ]
             request_subgoal_index = active_subgoal_index
-            used_messages = prompt_stages[episode_key][request_subgoal_index]
+            stage_messages = prompt_stages[episode_key][request_subgoal_index]
             label_task = _reporter_task_from_messages(sample.messages)
-            reporter_task = _reporter_task_from_messages(used_messages)
+            reporter_task = _reporter_task_from_messages(stage_messages)
+            used_messages = _format_messages_for_history(
+                stage_messages,
+                reporter_task,
+                len(observation_history),
+            )
             label_comparable = request_subgoal_index == dataset_subgoal_index
             request = infer_request_type(
                 messages=used_messages,
-                images=[used_init_path, current_path],
+                images=used_image_paths,
             )
             responses = engine.infer([request], request_config=request_config)
             if len(responses) != 1:
@@ -776,6 +855,7 @@ def evaluate_reporter_sequence(
             subgoal_advanced = False
             if init_updated:
                 predicted_init_path = current_path
+                observation_history.clear()
                 if active_subgoal_index + 1 < len(prompt_stages[episode_key]):
                     active_subgoal_index += 1
                     subgoal_advanced = True
@@ -789,6 +869,9 @@ def evaluate_reporter_sequence(
                 "dataset_init_image": sample.images[0],
                 "used_init_image": used_init_path,
                 "current_image": current_path,
+                "reporter_history_images": used_image_paths[1:],
+                "reporter_history_size": reporter_history_size,
+                "reporter_history_count": len(used_image_paths) - 1,
                 "init_updated": init_updated,
                 "effective_true": effective_true,
                 "reporter_debounce": reporter_debounce,
@@ -816,6 +899,7 @@ def evaluate_reporter_sequence(
                 "frame": frame.current_step,
                 "current_frame": current_path,
                 "reporter_init_image": used_init_path,
+                "reporter_history_images": used_image_paths[1:],
                 "expected": sample.expected,
                 "predicted": predicted,
                 "reporter_init_updated": init_updated,

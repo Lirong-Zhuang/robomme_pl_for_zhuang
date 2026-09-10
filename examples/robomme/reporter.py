@@ -2,6 +2,7 @@
 
 import pprint
 import shutil
+from collections import deque
 from pathlib import Path
 from typing import Optional
 
@@ -13,8 +14,11 @@ from env_runner import EnvRunner
 from mme_vla_suite.reporter_evaluation import debounce_reporter_success
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
 from mme_vla_suite.reporter_prompts import (
+    DEFAULT_REPORTER_HISTORY_SIZE,
     REPORTER_SYSTEM_PROMPT,
+    build_reporter_image_window,
     format_reporter_user_prompt,
+    validate_reporter_history_size,
 )
 from utils import EpisodeState
 
@@ -74,11 +78,24 @@ class QwenVLReporter(ReporterBase):
         self.init_frames_dir: Optional[Path] = None
         self.log_path: Optional[Path] = None
         self.reporter_debounce = bool(getattr(args, "reporter_debounce", True))
+        self.reporter_history_size = validate_reporter_history_size(
+            int(
+                getattr(
+                    args,
+                    "reporter_history_size",
+                    DEFAULT_REPORTER_HISTORY_SIZE,
+                )
+            )
+        )
+        self.observation_history: deque[Path] = deque(
+            maxlen=self.reporter_history_size
+        )
         self.consecutive_true_count = 0
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
         self.observation_before_path = None
+        self.observation_history.clear()
         self.consecutive_true_count = 0
         self.frames_dir = (
             self.save_dir
@@ -121,6 +138,10 @@ class QwenVLReporter(ReporterBase):
             return
 
         self.current_subgoal = subgoal
+        # Every subgoal owns an independent observation window. This branch is
+        # reached for the initial subgoal, a changed subgoal, or immediately
+        # after the previous subgoal completed.
+        self.observation_history.clear()
         frame_path = self.frames_dir / f"step_{step_idx}_image.png"
         if not frame_path.exists():
             imageio.imwrite(frame_path, observation_before_subgoal)
@@ -153,15 +174,27 @@ class QwenVLReporter(ReporterBase):
         current_path = self.frames_dir / f"step_{step_idx}_image.png"
         if not current_path.exists():
             imageio.imwrite(current_path, current_observation)
+        # This is a Reporter-call history. Environment observations between
+        # two calls are intentionally not inserted into the window.
+        self.observation_history.append(current_path)
+        image_paths = build_reporter_image_window(
+            self.observation_before_path,
+            self.observation_history,
+            self.reporter_history_size,
+        )
 
         request = {
-            # The order matches the two <image> placeholders in the user prompt.
-            "images": [str(self.observation_before_path), str(current_path)],
+            # The order matches the init placeholder followed by the k history
+            # placeholders in the user prompt.
+            "images": [str(image_path) for image_path in image_paths],
             "messages": [
                 {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": format_reporter_user_prompt(subgoal),
+                    "content": format_reporter_user_prompt(
+                        subgoal,
+                        len(self.observation_history),
+                    ),
                 },
             ],
         }
@@ -194,6 +227,9 @@ class QwenVLReporter(ReporterBase):
             if not next_init_path.exists():
                 shutil.copy2(current_path, next_init_path)
             self.observation_before_path = next_init_path
+            # The completed subgoal must not leak temporal context into the
+            # next one. Clear immediately, before Manager consumes the result.
+            self.observation_history.clear()
 
         with self.log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(
@@ -203,6 +239,7 @@ class QwenVLReporter(ReporterBase):
                 f"Parsed success: {raw_reporter_success}\n"
                 f"Debounce enabled: {self.reporter_debounce}\n"
                 f"Effective success: {reporter_success}\n"
+                f"Reporter history size: {self.reporter_history_size}\n"
             )
             if next_init_path is not None:
                 log_file.write(f"Next init frame: {next_init_path}\n")

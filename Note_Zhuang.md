@@ -118,13 +118,17 @@ as the QwenVL Manager builder. Within each subgoal span, the first observation
 is the subgoal start frame. Selected intermediate observations are labelled
 `{"success": false}` and the subgoal transition observation is labelled
 `{"success": true}`. The terminal episode frame is excluded because the live
-Reporter is not called after the environment terminates.
+Reporter is not called after the environment terminates. Each subgoal owns a
+capacity-`k` sliding window containing only Reporter-call observations, not
+adjacent raw timesteps. The default is `k=7`. The window starts empty, is not
+padded while filling, and is cleared immediately when the subgoal completes.
 
 ```bash
 uv run python scripts/build_dataset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data
+  --preprocessed_data_path /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data \
+  --reporter_history_size 7
 ```
 
 The builder writes:
@@ -135,20 +139,24 @@ reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 ```
 
-Each JSONL row contains `system`, `user`, and `assistant` messages plus two
-images. The prompt is imported from the same shared module as live Reporter
-inference, preventing training/inference prompt drift.
+Each JSONL row contains `system`, `user`, and `assistant` messages plus 2–8
+images by default: one current-subgoal init observation followed by the 1–7
+Reporter-call observations currently available, ordered oldest to newest with
+the current observation last. The prompt is imported from the same shared
+module as live Reporter inference, preventing training/inference prompt drift.
 
 Before training, select the simple or grounded JSONL and GPU settings near the
-top of `scripts/finetune_reporter.sh`, then run:
+top of `scripts/finetune_reporter.sh`. `REPORTER_HISTORY_SIZE` must match data
+generation; the script validates the first row before starting training.
+Then run:
 
 ```bash
 bash scripts/finetune_reporter.sh
 ```
 
-To evaluate a trained LoRA, set `reporter_adapter_path` in
-`examples/robomme/eval.py` to the generated checkpoint directory. Leave it
-empty to continue using the original Qwen3-VL model.
+To evaluate a trained LoRA, set `REPORTER_ADAPTER_PATH` in `scripts/eval.sh`
+to the generated checkpoint directory and keep `REPORTER_HISTORY_SIZE` equal
+to the training value. Old two-image Reporter adapters should not be reused.
 
 ## 2. Train the VLM subgoal predictor with tmux
 

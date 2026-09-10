@@ -1,29 +1,45 @@
 #!/usr/bin/env bash
 
 # Fine-tune the Trinity Reporter. The selected JSONL uses the same prompt and
-# two-image ordering as examples/robomme/reporter.py.
+# image ordering as examples/robomme/reporter.py: one subgoal-init image,
+# followed by 1..7 actual Reporter-call observations.
 #
 # Choose one of:
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 
 REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_2/trainset/reporter_qwenvl/simple_subgoal_train.jsonl'
-REPORTER_RUN_NAME='qwen_reporter_v4.1_simple_subgoal'
+REPORTER_RUN_NAME='qwen_reporter_v5_simple_subgoal'
 REPORTER_OUTPUT_DIR="/home/zhuanglr/robomme_pl_for_zhuang/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
+CUDA_DEVICE_IDS="0"
+TRAIN_GLOBAL_BATCH_SIZE=16
+EVAL_GLOBAL_BATCH_SIZE=32
+
+IFS=',' read -r -a CUDA_DEVICE_ID_LIST <<< "$CUDA_DEVICE_IDS"
+NUM_GPUS=${#CUDA_DEVICE_ID_LIST[@]}
+if ((
+    TRAIN_GLOBAL_BATCH_SIZE % NUM_GPUS != 0
+    || EVAL_GLOBAL_BATCH_SIZE % NUM_GPUS != 0
+)); then
+    echo "ERROR: train/eval global batch sizes must be divisible by NUM_GPUS=${NUM_GPUS}." >&2
+    exit 1
+fi
+PER_DEVICE_TRAIN_BATCH_SIZE=$((TRAIN_GLOBAL_BATCH_SIZE / NUM_GPUS))
+PER_DEVICE_EVAL_BATCH_SIZE=$((EVAL_GLOBAL_BATCH_SIZE / NUM_GPUS))
 
 PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
 IMAGE_MAX_TOKEN_NUM=256 \
 VIDEO_MAX_TOKEN_NUM=64 \
 FPS_MAX_FRAMES=10 \
-NPROC_PER_NODE=1 \
-CUDA_VISIBLE_DEVICES=0 \
+NPROC_PER_NODE="$NUM_GPUS" \
+CUDA_VISIBLE_DEVICES="$CUDA_DEVICE_IDS" \
 swift sft \
     --model 'Qwen/Qwen3-VL-4B-Instruct' \
     --dataset "$REPORTER_DATASET_PATH" \
     --split_dataset_ratio 0.1 \
     --eval_strategy steps \
     --eval_steps 50 \
-    --per_device_eval_batch_size 16 \
+    --per_device_eval_batch_size "$PER_DEVICE_EVAL_BATCH_SIZE" \
     --metric_for_best_model loss \
     --greater_is_better false \
     --load_best_model_at_end true \
@@ -32,7 +48,7 @@ swift sft \
     --train_type lora \
     --torch_dtype bfloat16 \
     --num_train_epochs 4 \
-    --per_device_train_batch_size 16 \
+    --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
     --gradient_accumulation_steps 1 \
     --attn_impl sdpa \
     --padding_free false \

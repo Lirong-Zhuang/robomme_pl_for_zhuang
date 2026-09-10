@@ -11,8 +11,9 @@ Example:
 uv run python scripts/build_trainset_testset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_2 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_3 \
   --tasks BinFill \
+  --reporter_history_size 7 \
   --test_ratio 0.1 \
   --seed 42
 ```
@@ -50,6 +51,7 @@ from mme_vla_suite.dataset_builder.robomme_h5_utils import (
     get_env_id_from_filename,
     get_episode_indices,
 )
+from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
 
 
 DATASET_TYPES = (
@@ -206,6 +208,15 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Write the same visualization outputs as the selected existing builder.",
     )
+    parser.add_argument(
+        "--reporter_history_size",
+        type=int,
+        default=DEFAULT_REPORTER_HISTORY_SIZE,
+        help=(
+            "Number of recent Reporter-call observations per Reporter sample "
+            f"(default: {DEFAULT_REPORTER_HISTORY_SIZE}; Reporter datasets only)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -241,6 +252,7 @@ def _build_one_split(
     visualize: bool,
     duplicate_samples: bool,
     data_split: Literal["train", "test"],
+    reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
 ) -> None:
     common_kwargs: dict[str, Any] = {
         "raw_data_path": str(raw_data_path),
@@ -278,6 +290,7 @@ def _build_one_split(
             reporter_dir_name="reporter_qwenvl",
             duplicate_samples=duplicate_samples,
             data_split=data_split,
+            reporter_history_size=reporter_history_size,
         )
     else:  # pragma: no cover - argparse prevents this branch.
         raise ValueError(f"Unknown dataset_type: {dataset_type}")
@@ -342,6 +355,8 @@ def main() -> None:
             for task_name in selected_tasks
         },
     }
+    if args.dataset_type == "reporter_qwenvl":
+        manifest["reporter_history_size"] = args.reporter_history_size
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -366,6 +381,7 @@ def main() -> None:
         visualize=args.visualize,
         duplicate_samples=True,
         data_split="train",
+        reporter_history_size=args.reporter_history_size,
     )
     print(f"\nBuilding testset at {test_output_path}")
     _build_one_split(
@@ -377,6 +393,7 @@ def main() -> None:
         visualize=args.visualize,
         duplicate_samples=False,
         data_split="test",
+        reporter_history_size=args.reporter_history_size,
     )
     print(f"Time taken: {(time.perf_counter() - started_at) / 60:.2f} minutes")
 

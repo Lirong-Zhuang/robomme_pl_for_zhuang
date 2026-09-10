@@ -75,6 +75,9 @@ class Args:
     # to evaluate the original, non-fine-tuned Qwen3-VL as Reporter.
     reporter_model_path: str = "Qwen/Qwen3-VL-4B-Instruct"
     reporter_adapter_path: str = ""
+    # Number of recent Reporter-call observations, including the current one.
+    # Together with init, the default model sees 2..8 images without padding.
+    reporter_history_size: int = 7
     # True: debounce continuous true runs (effective on calls 1, 4, 7, ...).
     # False: match dev_trinity and pass every parsed Reporter result directly.
     reporter_debounce: bool = True
@@ -154,10 +157,10 @@ class EpisodeEvaluator:
                 )
             )
             if should_predict_subgoal:
-                # Trinity v0 ordering: Reporter receives the current
-                # observation first and compares it against the latest init
-                # frame. A successful comparison promotes the current frame
-                # before its result is passed to Manager.
+                # Reporter first inserts the current observation into its
+                # call-level sliding window, then compares init + history. A
+                # successful result promotes the current frame to the next
+                # subgoal init before the result is passed to Manager.
                 reporter_result = reporter.step(epstate, subgoal)
 
             # Manager receives/buffers the same current observation only after

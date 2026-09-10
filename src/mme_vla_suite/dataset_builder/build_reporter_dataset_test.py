@@ -72,21 +72,35 @@ def test_reporter_rows_follow_manager_selection_and_duplication(tmp_path: Path):
     }
     assert first_row["messages"][1]["role"] == "user"
     assert "Current Subgoal: first subgoal" in first_row["messages"][1]["content"]
-    assert "Observation after execution: <image>" in first_row["messages"][1]["content"]
+    assert (
+        "Reporter-call observation 1/1 (current observation): <image>"
+        in first_row["messages"][1]["content"]
+    )
     assert "The episode may contain many subgoals" in first_row["messages"][1]["content"]
+    assert first_row["messages"][1]["content"].count("<image>") == 2
     assert first_row["messages"][2] == {
         "role": "assistant",
         "content": '{"success": false}',
     }
+    assert len(first_row["images"]) == 2
     assert first_row["images"][0].endswith("step0.png")
-    assert first_row["images"][1].endswith("step20.png")
+    assert first_row["images"][-1].endswith("step20.png")
+
+    # Only selected Reporter-call observations enter the sliding window. The
+    # raw HDF5 steps between 20 and 40 are not sampled as adjacent video frames.
+    assert len(simple_rows[1]["images"]) == 3
+    assert simple_rows[1]["images"][0].endswith("step0.png")
+    assert simple_rows[1]["images"][-2].endswith("step20.png")
+    assert simple_rows[1]["images"][-1].endswith("step40.png")
 
     # The transition at step 40 is duplicated exactly as in the Manager data.
     assert simple_rows[1] == simple_rows[2]
     assert grounded_rows[1] == grounded_rows[2]
     # The next Reporter span starts from the newly completed transition frame.
     assert simple_rows[3]["images"][0].endswith("step40.png")
-    assert simple_rows[3]["images"][1].endswith("step50.png")
+    # Its Reporter-call window was cleared at the subgoal boundary.
+    assert len(simple_rows[3]["images"]) == 2
+    assert simple_rows[3]["images"][-1].endswith("step50.png")
 
 
 def test_reporter_can_disable_duplicate_rows_for_test_data(tmp_path: Path):
@@ -112,3 +126,29 @@ def test_reporter_can_disable_duplicate_rows_for_test_data(tmp_path: Path):
     ]
     assert labels == [False, True, True, False, False]
     assert len(simple_rows) == len({json.dumps(row, sort_keys=True) for row in simple_rows})
+
+
+def test_reporter_history_size_is_configurable(tmp_path: Path):
+    raw_dir = tmp_path / "raw"
+    output_dir = tmp_path / "processed"
+    raw_dir.mkdir()
+    _write_episode(raw_dir / "data_BinFill.h5")
+
+    builder = DatasetBuilder(
+        raw_data_path=str(raw_dir),
+        preprocessed_data_path=str(output_dir),
+        duplicate_samples=False,
+        reporter_history_size=2,
+    )
+    builder.run()
+
+    rows = _read_jsonl(
+        output_dir / "reporter_qwenvl" / "simple_subgoal_train.jsonl"
+    )
+    assert [len(row["images"]) for row in rows] == [2, 3, 2, 2, 3]
+    assert rows[0]["images"][0].endswith("step0.png")
+    assert rows[0]["images"][1].endswith("step20.png")
+    assert rows[1]["images"][1].endswith("step20.png")
+    assert rows[1]["images"][2].endswith("step40.png")
+    assert rows[0]["messages"][1]["content"].count("<image>") == 2
+    assert rows[1]["messages"][1]["content"].count("<image>") == 3

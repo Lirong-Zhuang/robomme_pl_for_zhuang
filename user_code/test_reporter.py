@@ -34,6 +34,7 @@ DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
 DEFAULT_RESULT_NAME = "reporter_qwen_v4.1_ckpt900"
 # False exactly matches dev_trinity: every parsed result is applied directly.
 REPORTER_DEBOUNCE = True
+REPORTER_HISTORY_SIZE = 7
 
 # Completion-scoring tolerance, measured in Reporter calls.
 EARLY_TOLERANCE_CALLS = 1
@@ -269,6 +270,12 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--reporter-history-size",
+        type=int,
+        default=REPORTER_HISTORY_SIZE,
+        help="Maximum observations retained for the current subgoal (default: 7).",
+    )
+    parser.add_argument(
         "--early-tolerance-calls",
         type=int,
         default=EARLY_TOLERANCE_CALLS,
@@ -293,6 +300,8 @@ def main() -> None:
     args = parse_args()
     if args.early_tolerance_calls < 0:
         raise ValueError("--early-tolerance-calls must be non-negative")
+    if args.reporter_history_size < 1:
+        raise ValueError("--reporter-history-size must be at least 1")
     if args.full_credit_delay_calls < 0:
         raise ValueError("--full-credit-delay-calls must be non-negative")
     if args.maximum_delay_calls < args.full_credit_delay_calls:
@@ -329,6 +338,7 @@ def main() -> None:
             max_samples=args.max_samples,
             progress_every=args.progress_every,
             reporter_debounce=args.reporter_debounce,
+            reporter_history_size=args.reporter_history_size,
             prediction_records_out=prediction_records,
         )
     finally:
@@ -368,6 +378,11 @@ def main() -> None:
         "dataset_path": result.dataset_path,
         "model_path": result.model_path,
         "adapter_path": result.adapter_path,
+        "reporter_history_size": (
+            prediction_records[0]["reporter_history_size"]
+            if prediction_records
+            else None
+        ),
         "completion": {
             key: value
             for key, value in completion_report.items()
