@@ -60,8 +60,8 @@ SAVE_DIR="runs/evaluation"
 # FRAMEWORK_VERSION also selects framework behavior: trinity_v0 disables
 # Reporter debounce (the original dev_trinity behavior), while trinity_v1
 # enables it.
-FRAMEWORK_VERSION="trinity_v0"
-RUN_NAME="14"
+FRAMEWORK_VERSION="trinity_v2.1"
+RUN_NAME="1"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
