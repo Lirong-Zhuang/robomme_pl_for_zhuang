@@ -13,7 +13,7 @@ _ImageT = TypeVar("_ImageT")
 
 REPORTER_SYSTEM_PROMPT = (
     "You are a helpful assistant to determine whether the current robot subgoal "
-    "is complete by comparing its initial observation with a recent sequence "
+    "is complete by comparing observation before executing the current subgoal with a recent sequence "
     "of observations. "
     'Return only {"success": true} or {"success": false}. '
 )
@@ -52,7 +52,7 @@ def format_reporter_user_prompt(
     for index in range(1, history_size + 1):
         suffix = " (current observation)" if index == history_size else ""
         observation_lines.append(
-            f"Reporter-call observation {index}/{history_size}{suffix}: <image>"
+            f"Recent observation {index}/{history_size}{suffix}: <image>"
         )
     return (
         f"Current Subgoal: {subgoal}\n"
@@ -60,8 +60,8 @@ def format_reporter_user_prompt(
         "Recent observations after execution, from "
         "oldest to newest:\n"
         + "\n".join(observation_lines)
-        + "\nDetermine whether the current subgoal is complete from its initial "
-        "observation and the recent observation sequence. "
+        + "\nDetermine whether the current subgoal is complete from the "
+        "observation before executing the current subgoal and the recent observation sequence. "
     )
 
 
