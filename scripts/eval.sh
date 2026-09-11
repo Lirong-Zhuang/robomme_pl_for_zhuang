@@ -30,9 +30,9 @@ MODEL_TYPE="symbolic_simpleSG_qwenvl"
 # independent result directory and a freshly started symbolic policy server.
 SEEDS=(0 42 7)
 NUM_REPEATS=3
-CKPT_ID=30000
+CKPT_ID=10000
 GPU_ID_SERVER=0
-GPU_ID_CLIENT=1
+GPU_ID_CLIENT=0
 
 # VLA configuration for the LoRA baseline trained on this branch.
 POLICY_CONFIG="mme_vla_suite_lora"
@@ -60,7 +60,7 @@ SAVE_DIR="runs/evaluation"
 # Optional name shared by every seed/repeat in this evaluation run. Results are
 # written under <SAVE_DIR>/<policy>/<EVAL_RUN_NAME>/seed<seed>/repeat<repeat>/.
 # Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="Baseline_v0"
+EVAL_RUN_NAME="Baseline_v3"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -343,7 +343,10 @@ run_evaluation() {
     echo "Server log: $server_log"
     echo "======================================================================"
 
-    server_env=(CUDA_VISIBLE_DEVICES="$GPU_ID_SERVER")
+    server_env=(
+        CUDA_VISIBLE_DEVICES="$GPU_ID_SERVER"
+        XLA_PYTHON_CLIENT_PREALLOCATE=false
+    )
     if [[ -n "$XLA_MEM_FRACTION" ]]; then
         server_env+=(XLA_PYTHON_CLIENT_MEM_FRACTION="$XLA_MEM_FRACTION")
     fi
