@@ -12,7 +12,7 @@ CUDA_VISIBLE_DEVICES=0 \
 XLA_PYTHON_CLIENT_PREALLOCATE=false \
 XLA_PYTHON_CLIENT_ALLOCATOR=platform \
 uv run scripts/train.py mme_vla_suite \
---exp-name=${MME_VLA_TYPE}_baseline_v0 \
+--exp-name=${MME_VLA_TYPE}_baseline_v1 \
 --batch-size=64 \
 --num-workers=4 \
 --resume \
@@ -20,3 +20,6 @@ uv run scripts/train.py mme_vla_suite \
 --dataset-path=data/robomme_preprocessed_dup_binfill_data \
 --model.use_history \
 --model.history_config="${MME_VLA_TYPE}.yaml"
+--num-train-steps=30000 \
+--save-interval=2000 \
+--keep-period=2000

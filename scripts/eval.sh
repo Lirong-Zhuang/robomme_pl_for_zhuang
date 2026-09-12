@@ -30,13 +30,13 @@ MODEL_TYPE="symbolic_simpleSG_qwenvl"
 # independent result directory and a freshly started symbolic policy server.
 SEEDS=(0 42 7)
 NUM_REPEATS=3
-CKPT_ID=10000
+CKPT_ID=79999
 GPU_ID_SERVER=0
 GPU_ID_CLIENT=0
 
 # VLA configuration for the LoRA baseline trained on this branch.
-POLICY_CONFIG="mme_vla_suite_lora"
-POLICY_DIR="runs/ckpts/mme_vla_suite_lora/symbolic-simple-subgoal_baseline_v0_lora/$CKPT_ID"
+POLICY_CONFIG="mme_vla_suite"
+POLICY_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/$CKPT_ID"
 
 # Set PORT=0 to choose a free port automatically.
 HOST="0.0.0.0"
@@ -60,7 +60,7 @@ SAVE_DIR="runs/evaluation"
 # Optional name shared by every seed/repeat in this evaluation run. Results are
 # written under <SAVE_DIR>/<policy>/<EVAL_RUN_NAME>/seed<seed>/repeat<repeat>/.
 # Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="Baseline_v3"
+EVAL_RUN_NAME="Baseline_v4"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
