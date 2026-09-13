@@ -19,7 +19,7 @@ uv run scripts/train.py mme_vla_suite \
 --fsdp-devices=1 \
 --dataset-path=data/robomme_preprocessed_dup_binfill_data \
 --model.use_history \
---model.history_config="${MME_VLA_TYPE}.yaml"
+--model.history_config="${MME_VLA_TYPE}.yaml" \
 --num-train-steps=30000 \
 --save-interval=2000 \
 --keep-period=2000
