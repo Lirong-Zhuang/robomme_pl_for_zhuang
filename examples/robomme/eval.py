@@ -61,8 +61,9 @@ class Args:
     use_qwenvl: bool = True
     use_memer: bool = False
     use_gemini: bool = False
-    # subgoal_type: Optional[str] = "simple_subgoal"  # [simple_subgoal, grounded_subgoal]
-    subgoal_type: Optional[str] = "grounded_subgoal"
+    # Pure pi0.5 uses no subgoal. Symbolic evaluation explicitly supplies
+    # "simple_subgoal" or "grounded_subgoal" from scripts/eval.sh.
+    subgoal_type: Optional[str] = None
     gemini_model_name: str = "gemini-2.5-pro"
     qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
     qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"

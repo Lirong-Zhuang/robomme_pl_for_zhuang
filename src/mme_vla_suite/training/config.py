@@ -553,6 +553,19 @@ class TrainConfig:
 
 OPENPI_DATA_HOME = os.getenv("OPENPI_DATA_HOME", "~/.cache/openpi")
 
+# Pure pi0.5 LoRA baseline: no predictor, symbolic subgoal, or observation
+# history.  Keep this model definition coupled to its freeze filter so the
+# frozen 2B base weights cannot accidentally become trainable.
+_PI05_BASELINE_LORA_MODEL = history_pi0.HistoryPi0Config(
+    pi05=True,
+    paligemma_variant="gemma_2b_lora",
+    action_expert_variant="gemma_300m",
+    action_horizon=20,
+    use_history=False,
+    history_config=None,
+    discrete_state_input=False,
+)
+
 # Keep the LoRA model definition and its freeze filter coupled. Overriding only
 # the model variant from the CLI would leave TrainConfig.freeze_filter on the
 # full-tuning policy and unintentionally train the frozen 2B base weights.
@@ -593,6 +606,37 @@ _CONFIGS = [
             os.path.join(OPENPI_DATA_HOME, "openpi-assets/checkpoints/pi05_base/params"),
         ),
         num_train_steps=80_000, 
+        save_interval=10_000,
+        keep_period=10_000,
+        num_workers=4,
+        ema_decay=0.999,
+        fsdp_devices=4,
+    ),
+    TrainConfig(
+        name="pi05_baseline_lora",
+        model=_PI05_BASELINE_LORA_MODEL,
+        data=RoboMMEDataConfig(
+            repo_id="robomme",
+            # LoRA changes model parameterization only. Reuse the pure pi0.5
+            # state/action normalization statistics.
+            assets=AssetsConfig(assets_dir="runs/assets/pi05_baseline"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        # Keep every training default aligned with pi05_baseline. The launcher
+        # may override hardware/runtime values such as batch size and FSDP.
+        batch_size=128,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=100_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        freeze_filter=_PI05_BASELINE_LORA_MODEL.get_freeze_filter(),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            os.path.join(OPENPI_DATA_HOME, "openpi-assets/checkpoints/pi05_base/params"),
+        ),
+        num_train_steps=80_000,
         save_interval=10_000,
         keep_period=10_000,
         num_workers=4,

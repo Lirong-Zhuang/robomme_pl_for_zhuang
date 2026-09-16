@@ -17,27 +17,28 @@ cd "$REPO_ROOT"
 # =============================================================================
 
 # Supported values:
-#   pi05_baseline, MemER
+#   pi05_baseline, pi05_baseline_lora, MemER
 #   symbolic_simpleSG_oracle, symbolic_simpleSG_qwenvl, symbolic_simpleSG_gemini
 #   symbolic_groundedSG_oracle, symbolic_groundedSG_qwenvl, symbolic_groundedSG_gemini
 #   perceptual-framesamp-context, perceptual-framesamp-modul, perceptual-framesamp-expert
 #   perceptual-tokendrop-context, perceptual-tokendrop-modul, perceptual-tokendrop-expert
 #   recurrent-rmt-context, recurrent-rmt-modul, recurrent-rmt-expert
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
-MODEL_TYPE="symbolic_simpleSG_qwenvl"
+MODEL_TYPE="pi05_baseline_lora"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started symbolic policy server.
-# SEEDS=(0 42 7)
-SEEDS=(7)
-NUM_REPEATS=1
-CKPT_ID=40000
+SEEDS=(0 42 7)
+NUM_REPEATS=3
+# A 20,000-step run saves its final checkpoint at step 19,999 because training
+# steps are zero-indexed (0..19,999).
+CKPT_ID=20000
 GPU_ID_SERVER=0
 GPU_ID_CLIENT=0
 
-# VLA configuration for the LoRA baseline trained on this branch.
-POLICY_CONFIG="mme_vla_suite_lora"
-POLICY_DIR="runs/ckpts/mme_vla_suite_lora/symbolic-simple-subgoal_baseline_v0_lora/$CKPT_ID"
+# Pure pi0.5 LoRA policy: no predictor, subgoal, or observation history.
+POLICY_CONFIG="pi05_baseline_lora"
+POLICY_DIR="runs/ckpts/pi05_baseline_lora/vla_baseline_v2/$CKPT_ID"
 
 # Set PORT=0 to choose a free port automatically.
 HOST="0.0.0.0"
@@ -61,7 +62,7 @@ SAVE_DIR="runs/evaluation"
 # Optional name shared by every seed/repeat in this evaluation run. Results are
 # written under <SAVE_DIR>/<policy>/<EVAL_RUN_NAME>/seed<seed>/repeat<repeat>/.
 # Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="Baseline_v0.4"
+EVAL_RUN_NAME="baseline_v6"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -74,7 +75,7 @@ SAVE_EPISODE_LOGS=true
 # retaining the episode image directory. This is a no-op for non-MemER models.
 SAVE_MEMER_KF=true
 
-# "auto" disables history only for pi05_baseline and enables it otherwise.
+# "auto" disables history for both pure pi0.5 baselines and enables it otherwise.
 # It can also be set explicitly to "true" or "false".
 USE_HISTORY="auto"
 
@@ -164,9 +165,9 @@ PREDICTOR="none"
 SUBGOAL_TYPE="None"
 
 case "$MODEL_TYPE" in
-    pi05_baseline)
-        CONFIG_TYPE="pi05_baseline"
-        POLICY_NAME="pi05_baseline"
+    pi05_baseline|pi05_baseline_lora)
+        CONFIG_TYPE="$MODEL_TYPE"
+        POLICY_NAME="$MODEL_TYPE"
         ;;
     MemER)
         POLICY_NAME="symbolic-grounded-subgoal"
@@ -219,7 +220,7 @@ if [[ -z "$POLICY_DIR" ]]; then
     POLICY_DIR="runs/ckpts/$CONFIG_TYPE/$POLICY_NAME/$CKPT_ID"
 fi
 if [[ "$USE_HISTORY" == "auto" ]]; then
-    if [[ "$REQUESTED_MODEL_TYPE" == "pi05_baseline" ]]; then
+    if [[ "$REQUESTED_MODEL_TYPE" == "pi05_baseline" || "$REQUESTED_MODEL_TYPE" == "pi05_baseline_lora" ]]; then
         USE_HISTORY=false
     else
         USE_HISTORY=true
@@ -303,13 +304,18 @@ run_evaluation() {
         --args.re-eval-tasks "$RE_EVAL_TASKS"
         --args.num-episodes "$NUM_EPISODES"
         --args.episode-ids "$EPISODE_IDS"
-        --args.subgoal-type "$SUBGOAL_TYPE"
         --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
         --args.gemini-model-name "$GEMINI_MODEL_NAME"
         --args.qwenvl-simpleSG-adapter-path "$QWENVL_SIMPLE_ADAPTER_PATH"
         --args.qwenvl-groundSG-adapter-path "$QWENVL_GROUNDED_ADAPTER_PATH"
         --args.memer-adapter-path "$MEMER_ADAPTER_PATH"
     )
+
+    # For pure pi0.5, omit this option so eval.py keeps a real Python None.
+    # Symbolic policies receive their explicit subgoal type here.
+    if [[ "$SUBGOAL_TYPE" != "None" ]]; then
+        eval_args+=(--args.subgoal-type "$SUBGOAL_TYPE")
+    fi
 
     eval_args+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
     eval_args+=("$(bool_arg "$SAVE_EPISODE_LOGS" --args.save-episode-logs --args.no-save-episode-logs)")
