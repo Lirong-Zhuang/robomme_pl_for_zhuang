@@ -105,10 +105,6 @@ MAMBA_EXE="/data/zhuanglr/micromamba/bin/micromamba"
 SERVER_STARTUP_TIMEOUT=180
 SERVER_LOG_DIR="runs/evaluation/server_logs"
 
-# Leave empty to use JAX's default. For a dedicated policy GPU, values such as
-# 0.90 or 0.95 can be useful.
-XLA_MEM_FRACTION=""
-
 # =============================================================================
 # Implementation
 # =============================================================================
@@ -353,10 +349,8 @@ run_evaluation() {
     server_env=(
         CUDA_VISIBLE_DEVICES="$GPU_ID_SERVER"
         XLA_PYTHON_CLIENT_PREALLOCATE=false
+        XLA_PYTHON_CLIENT_ALLOCATOR=platform
     )
-    if [[ -n "$XLA_MEM_FRACTION" ]]; then
-        server_env+=(XLA_PYTHON_CLIENT_MEM_FRACTION="$XLA_MEM_FRACTION")
-    fi
 
     env "${server_env[@]}" uv run scripts/serve_policy.py \
         --seed "$model_seed" \

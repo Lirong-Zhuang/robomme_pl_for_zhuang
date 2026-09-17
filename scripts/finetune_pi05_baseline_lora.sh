@@ -114,12 +114,9 @@ echo "Global batch size:   $GLOBAL_BATCH_SIZE"
 echo "Total train steps:   $NUM_TRAIN_STEPS"
 echo "Checkpoint dir:      $CHECKPOINT_DIR"
 
-# Do not set XLA_PYTHON_CLIENT_PREALLOCATE, XLA_PYTHON_CLIENT_ALLOCATOR, or
-# XLA_PYTHON_CLIENT_MEM_FRACTION here. JAX still necessarily uses XLA as its
-# compiler/runtime, but this launcher does not request XLA memory preallocation
-# or a virtual/unified-memory configuration. num-workers=0 also avoids spawning
-# data-loader workers that set XLA allocator environment variables.
 CUDA_VISIBLE_DEVICES="$GPU_IDS" \
+XLA_PYTHON_CLIENT_PREALLOCATE=false \
+XLA_PYTHON_CLIENT_ALLOCATOR=platform \
 uv run scripts/train.py pi05_baseline_lora \
     --exp-name="$MODEL_NAME" \
     --batch-size="$GLOBAL_BATCH_SIZE" \

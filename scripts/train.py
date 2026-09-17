@@ -1,7 +1,16 @@
+# ruff: noqa: E402
+
 import dataclasses
 import functools
 import logging
+import os
 import platform
+
+# JAX otherwise preallocates most GPU memory when its backend is initialized.
+# Set these before importing JAX so memory is acquired and released on demand.
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
+
 import jax
 import jax.numpy as jnp
 import numpy as np
