@@ -30,7 +30,7 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 # independent result directory and a freshly started Executer server.
 EXECUTER_SEEDS=(0 42 7)
 NUM_REPEATS=3
-EXECUTER_CKPT_ID=30000
+EXECUTER_CKPT_ID=20000
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
 
