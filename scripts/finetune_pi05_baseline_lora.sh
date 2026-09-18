@@ -115,8 +115,9 @@ echo "Total train steps:   $NUM_TRAIN_STEPS"
 echo "Checkpoint dir:      $CHECKPOINT_DIR"
 
 CUDA_VISIBLE_DEVICES="$GPU_IDS" \
-XLA_PYTHON_CLIENT_PREALLOCATE=false \
-XLA_PYTHON_CLIENT_ALLOCATOR=platform \
+XLA_PYTHON_CLIENT_PREALLOCATE=true \
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 \
+XLA_PYTHON_CLIENT_ALLOCATOR=default \
 uv run scripts/train.py pi05_baseline_lora \
     --exp-name="$MODEL_NAME" \
     --batch-size="$GLOBAL_BATCH_SIZE" \
