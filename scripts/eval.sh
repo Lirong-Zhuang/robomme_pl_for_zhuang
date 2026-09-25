@@ -28,9 +28,9 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started Executer server.
-EXECUTER_SEEDS=(0 42 7)
-NUM_REPEATS=3
-EXECUTER_CKPT_ID=30000
+EXECUTER_SEEDS=(7)
+NUM_REPEATS=1
+EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
 
@@ -84,8 +84,8 @@ MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
-EXECUTER_CONFIG="mme_vla_suite_lora"
-EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/$EXECUTER_CKPT_ID"
+EXECUTER_CONFIG="mme_vla_suite"
+EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
@@ -93,7 +93,7 @@ REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
-REPORTER_ADAPTER_PATH=""
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v5_simple_subgoal/v3-20260925-032657/checkpoint-1150"
 # Maximum recent Reporter calls retained for one subgoal; the newest entry is
 # current. The init is separate, and an unfilled window is not padded.
 REPORTER_HISTORY_SIZE=7

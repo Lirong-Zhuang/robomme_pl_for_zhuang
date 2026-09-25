@@ -26,12 +26,12 @@ if str(SRC_ROOT) not in sys.path:
 CUDA_VISIBLE_DEVICES = "0"
 
 DEFAULT_REPORTER_MODEL_PATH = "Qwen/Qwen3-VL-4B-Instruct"
-DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v4.1_simple_subgoal/v0-20260901-043235/checkpoint-900"
+DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v5_simple_subgoal/v3-20260925-032657/checkpoint-1150"
 
-DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_2"
+DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_3"
 DEFAULT_SUBGOAL_TYPE = "simple"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
-DEFAULT_RESULT_NAME = "reporter_qwen_v4.1_ckpt900"
+DEFAULT_RESULT_NAME = "reporter_qwen_v5_ckpt1150"
 # False exactly matches dev_trinity: every parsed result is applied directly.
 REPORTER_DEBOUNCE = True
 REPORTER_HISTORY_SIZE = 7

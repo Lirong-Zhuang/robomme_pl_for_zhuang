@@ -69,4 +69,5 @@ swift sft \
     --run_name "$REPORTER_RUN_NAME" \
     --warmup_ratio 0.05 \
     --dataset_num_proc 8 \
-    --dataloader_num_workers 4
+    --dataloader_num_workers 4 \
+    --resume_from_checkpoint "runs/ckpts/reporter/qwen_reporter_v5_simple_subgoal/v2-20260924-105613/checkpoint-1100"
