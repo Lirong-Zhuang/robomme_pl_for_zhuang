@@ -227,6 +227,7 @@ of `scripts/eval.sh`. In particular, check:
 - the Manager and Reporter adapter paths
 - `EXECUTER_GPU_ID` and `MANAGER_REPORTER_GPU_ID`
 - `FRAMEWORK_VERSION`, `RUN_NAME`, and `SAVE_DIR`
+- `REPORTER_DEBOUNCE` (`true`/`false`, independent of `FRAMEWORK_VERSION`)
 
 Run the evaluation from the repository root:
 

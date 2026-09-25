@@ -54,12 +54,9 @@ MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
 # The final directory name is composed as <FRAMEWORK_VERSION>.<RUN_NAME>.
-# Include the base framework in FRAMEWORK_VERSION so other frameworks can be
-# added later. For example, FRAMEWORK_VERSION="trinity_v0" and RUN_NAME="11"
-# preserve the former EVAL_RUN_NAME="trinity_v0.11" result path.
-# FRAMEWORK_VERSION also selects framework behavior: trinity_v0 disables
-# Reporter debounce (the original dev_trinity behavior), while trinity_v1
-# enables it.
+# FRAMEWORK_VERSION is only a free-form result label; it does not select any
+# evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.1" and
+# RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.1.1".
 FRAMEWORK_VERSION="trinity_v2.1"
 RUN_NAME="1"
 # Preserve completed tasks/episodes and continue with anything still missing.
@@ -97,6 +94,9 @@ REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v5_simple_subgoal/v3-20
 # Maximum recent Reporter calls retained for one subgoal; the newest entry is
 # current. The init is separate, and an unfilled window is not padded.
 REPORTER_HISTORY_SIZE=7
+# Independently enable or disable filtering of continuous Reporter true runs.
+# true keeps calls 1, 4, 7, ... effective; false applies every parsed result.
+REPORTER_DEBOUNCE=false
 
 # micromamba server 117
 MAMBA_ENV="robomme"
@@ -147,23 +147,17 @@ bool_arg() {
     esac
 }
 
-case "$FRAMEWORK_VERSION" in
-    trinity_v0)
-        REPORTER_DEBOUNCE=false
-        ;;
-    trinity_v1)
-        REPORTER_DEBOUNCE=true
-        ;;
-    *)
-        echo "ERROR: unsupported FRAMEWORK_VERSION '$FRAMEWORK_VERSION'; expected trinity_v0 or trinity_v1." >&2
-        exit 1
-        ;;
-esac
-
+if [[ -z "$FRAMEWORK_VERSION" ]]; then
+    echo "ERROR: FRAMEWORK_VERSION must not be empty." >&2
+    exit 1
+fi
 if [[ -z "$RUN_NAME" ]]; then
     echo "ERROR: RUN_NAME must not be empty." >&2
     exit 1
 fi
+# Validate this independently from FRAMEWORK_VERSION before starting either
+# GPU process. bool_arg is also used below to emit the matching tyro flag.
+bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce >/dev/null
 EVAL_RUN_NAME="${FRAMEWORK_VERSION}.${RUN_NAME}"
 
 resolve_repo_path() {
