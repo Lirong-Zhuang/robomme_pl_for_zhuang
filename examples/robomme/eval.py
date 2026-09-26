@@ -6,7 +6,9 @@ import sys
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Optional, Any, TextIO, Tuple
+from typing import Optional, TextIO, Tuple
+
+from tqdm import tqdm
 
 # Do not retain unused CUDA allocations on the shared evaluation GPU.
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
@@ -87,37 +89,35 @@ class Args:
     episode_ids: str = "2" # exact episode IDs to evaluate, e.g. "7" or "2,7"; overrides num_episodes
 
 
-class TeeStream:
-    """Write output to both the original terminal stream and a log file."""
+class LogStream:
+    """Write captured episode output to its log without echoing to terminal."""
 
-    def __init__(self, terminal: TextIO, log_file: TextIO):
-        self.terminal = terminal
+    def __init__(self, log_file: TextIO):
         self.log_file = log_file
 
     def write(self, text: str) -> int:
-        self.terminal.write(text)
         self.log_file.write(text)
         return len(text)
 
     def flush(self) -> None:
-        self.terminal.flush()
         self.log_file.flush()
 
 
 @contextmanager
 def manager_log(save_dir: Path, task_name: str, episode_id: int, enabled: bool):
-    """Capture the per-episode Manager trace while preserving terminal output."""
+    """Capture episode output in the Manager log and keep it off the terminal."""
     if not enabled:
-        yield None
+        with open(os.devnull, "w", encoding="utf-8") as null_stream:
+            with redirect_stdout(null_stream), redirect_stderr(null_stream):
+                yield None
         return
 
     log_dir = save_dir / task_name / "manager_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{task_name}_ep{episode_id}.log"
     with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
-        stdout_tee = TeeStream(sys.stdout, log_file)
-        stderr_tee = TeeStream(sys.stderr, log_file)
-        with redirect_stdout(stdout_tee), redirect_stderr(stderr_tee):
+        log_stream = LogStream(log_file)
+        with redirect_stdout(log_stream), redirect_stderr(log_stream):
             print(f"[robomme] Manager log: {log_path}")
             yield log_path
 
@@ -442,10 +442,64 @@ def evaluate(args: Args):
         for task in args.exclude_tasks.split(","):
             log_dict[task] = {str(i): False for i in range(50)}
 
+    requested_episode_ids = (
+        [int(value.strip()) for value in args.episode_ids.split(",")]
+        if args.episode_ids
+        else None
+    )
+    episodes_per_task = (
+        len(requested_episode_ids)
+        if requested_episode_ids is not None
+        else args.num_episodes
+    )
+    episodes_per_run = len(task_names) * episodes_per_task
+    seed_values = [
+        int(value.strip())
+        for value in (args.eval_seeds or str(args.executer_seed)).split(",")
+        if value.strip()
+    ]
+    if args.executer_seed not in seed_values:
+        raise ValueError(
+            f"Current seed {args.executer_seed} is not present in eval_seeds "
+            f"{seed_values}"
+        )
+    run_index = (
+        seed_values.index(args.executer_seed) * args.num_repeats
+        + args.repeat_id
+        - 1
+    )
+    total_episodes = episodes_per_run * len(seed_values) * args.num_repeats
+    run_episode_offset = run_index * episodes_per_run
+    selected_episode_ids = (
+        requested_episode_ids
+        if requested_episode_ids is not None
+        else list(range(args.num_episodes))
+    )
+    completed_current_run = sum(
+        1
+        for task_name in task_names
+        for episode_id in selected_episode_ids
+        if str(episode_id) in log_dict.get(task_name, {})
+        or episode_id in log_dict.get(task_name, {})
+    )
+
     manager = build_manager(args, save_dir)
     executer = build_executer(args)
     reporter = build_reporter(args, save_dir)
     evaluator = EpisodeEvaluator(args, save_dir)
+    evaluation_progress = tqdm(
+        total=total_episodes,
+        initial=run_episode_offset + completed_current_run,
+        desc=f"seed={args.executer_seed} repeat={args.repeat_id}/{args.num_repeats}",
+        unit="episode",
+        dynamic_ncols=True,
+        leave=True,
+        file=sys.stderr,
+        bar_format=(
+            "{desc} |{bar}| {n_fmt}/{total_fmt} episodes "
+            "({percentage:3.0f}%) [elapsed={elapsed}, remaining={remaining}, {rate_fmt}]"
+        ),
+    )
 
     # log.json summarizes the latest completed run. Remove only this derived
     # summary so a new invocation can add tasks/episodes from progress.json.
@@ -461,8 +515,8 @@ def evaluate(args: Args):
 
             video_save_dir = save_dir / task_name / "videos"
             env_runner = EnvRunner(task_name, video_save_dir, max_steps=args.max_steps)
-            if args.episode_ids:
-                episode_ids = [int(value.strip()) for value in args.episode_ids.split(",")]
+            if requested_episode_ids is not None:
+                episode_ids = requested_episode_ids
                 invalid_ids = [
                     episode_id
                     for episode_id in episode_ids
@@ -480,7 +534,6 @@ def evaluate(args: Args):
 
             for episode_id in episode_ids:
                 if str(episode_id) in log_dict[task_name]:
-                    print(f"[robomme] episode {episode_id} already evaluated, skipping...")
                     continue
 
                 with manager_log(
@@ -502,11 +555,13 @@ def evaluate(args: Args):
                     finally:
                         env_runner.close_env()
 
+                evaluation_progress.update(1)
+
                 with open(save_dir / "progress.json", "w") as f:
                     json.dump(log_dict, f, indent=2)
 
                 if success_flag == "unknown":
-                    print("API calling error, aborting...")
+                    evaluation_progress.close()
                     return
 
             del env_runner
@@ -530,6 +585,8 @@ def evaluate(args: Args):
         except Exception as e:
             print(f"Error saving final results: {e}")
             time.sleep(1)
+
+    evaluation_progress.close()
 
 
 if __name__ == "__main__":

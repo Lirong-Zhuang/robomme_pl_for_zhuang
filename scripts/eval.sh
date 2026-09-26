@@ -63,8 +63,9 @@ RUN_NAME="2"
 OVERWRITE=false
 
 # Save the per-episode Manager trace under
-# <SAVE_DIR>/.../<TASK_NAME>/manager_logs/, while still displaying it in the
-# terminal. Reporter requests have their own reporter_logs directory.
+# <SAVE_DIR>/.../<TASK_NAME>/manager_logs/. Raw Manager output stays in that
+# file; the terminal shows only global episode progress plus the current seed
+# and repeat. Reporter requests keep their own reporter_logs directory.
 SAVE_MANAGER_LOGS=true
 
 # Keep MemER's per-step images after an episode finishes. MemER keyframes are
