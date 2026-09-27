@@ -12,9 +12,13 @@ _ImageT = TypeVar("_ImageT")
 
 
 REPORTER_SYSTEM_PROMPT = (
-    "You are a helpful assistant to determine whether the current robot subgoal "
-    "is complete by comparing observation before executing the current subgoal with a recent sequence "
-    "of observations. "
+    "Judge whether the current subgoal's required physical end state is "
+    "visibly achieved in the newest observation. Infer the expected result "
+    "from the subgoal. A completed motion sequence or robot pose alone is not "
+    "success. Use earlier observations only to identify the target and relevant "
+    "state change. Return success true only if the target or environment is in "
+    "the requested final state. If the result is absent or uncertain, return "
+    "success false. "
     'Return only {"success": true} or {"success": false}. '
 )
 
@@ -60,8 +64,9 @@ def format_reporter_user_prompt(
         "Recent observations after execution, from "
         "oldest to newest:\n"
         + "\n".join(observation_lines)
-        + "\nDetermine whether the current subgoal is complete from the "
-        "observation before executing the current subgoal and the recent observation sequence. "
+        + "\nJudge the newest observation by the required physical outcome, not "
+        "by motion completion. If the result is absent or uncertain, report "
+        "failure. "
     )
 
 

@@ -18,6 +18,7 @@ from typing import Any
 from typing import Protocol
 
 from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
+from mme_vla_suite.reporter_prompts import REPORTER_SYSTEM_PROMPT
 from mme_vla_suite.reporter_prompts import build_reporter_image_window
 from mme_vla_suite.reporter_prompts import format_reporter_user_prompt
 from mme_vla_suite.reporter_prompts import validate_reporter_history_size
@@ -709,16 +710,25 @@ def _format_messages_for_history(
     subgoal: str,
     observation_count: int,
 ) -> list[dict[str, Any]]:
-    """Copy a request and resize its user prompt to the actual window length."""
+    """Copy a request and apply the shared prompt at the actual window length."""
     result = [dict(message) for message in messages]
-    for message in reversed(result):
+    has_system_message = False
+    has_user_message = False
+    for message in result:
+        if message.get("role") == "system":
+            message["content"] = REPORTER_SYSTEM_PROMPT
+            has_system_message = True
         if message.get("role") == "user":
             message["content"] = format_reporter_user_prompt(
                 subgoal,
                 observation_count,
             )
-            return result
-    raise ValueError("Reporter request contains no user message")
+            has_user_message = True
+    if not has_system_message:
+        raise ValueError("Reporter request contains no system message")
+    if not has_user_message:
+        raise ValueError("Reporter request contains no user message")
+    return result
 
 
 def evaluate_reporter_sequence(

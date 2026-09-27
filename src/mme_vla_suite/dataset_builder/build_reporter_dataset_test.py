@@ -73,10 +73,10 @@ def test_reporter_rows_follow_manager_selection_and_duplication(tmp_path: Path):
     assert first_row["messages"][1]["role"] == "user"
     assert "Current Subgoal: first subgoal" in first_row["messages"][1]["content"]
     assert (
-        "Reporter-call observation 1/1 (current observation): <image>"
+        "Recent observation 1/1 (current observation): <image>"
         in first_row["messages"][1]["content"]
     )
-    assert "The episode may contain many subgoals" in first_row["messages"][1]["content"]
+    assert "required physical outcome" in first_row["messages"][1]["content"]
     assert first_row["messages"][1]["content"].count("<image>") == 2
     assert first_row["messages"][2] == {
         "role": "assistant",
