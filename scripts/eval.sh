@@ -92,6 +92,9 @@ REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
 REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v5_simple_subgoal/v2-20260924-105613/checkpoint-950"
+# Prompt ablation: "original" preserves the training prompt;
+# "physical_outcome" requires visible result evidence in the newest frame.
+REPORTER_PROMPT_VARIANT="physical_outcome"
 # Maximum recent Reporter calls retained for one subgoal; the newest entry is
 # current. The init is separate, and an unfilled window is not padded.
 REPORTER_HISTORY_SIZE=7
@@ -159,6 +162,14 @@ fi
 # Validate this independently from FRAMEWORK_VERSION before starting either
 # GPU process. bool_arg is also used below to emit the matching tyro flag.
 bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce >/dev/null
+case "$REPORTER_PROMPT_VARIANT" in
+    original|physical_outcome) ;;
+    *)
+        echo "Unsupported REPORTER_PROMPT_VARIANT: $REPORTER_PROMPT_VARIANT" >&2
+        echo "Expected original or physical_outcome." >&2
+        exit 1
+        ;;
+esac
 EVAL_RUN_NAME="${FRAMEWORK_VERSION}.${RUN_NAME}"
 
 resolve_repo_path() {
@@ -321,6 +332,7 @@ echo "Manager:         $MANAGER_TYPE"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
+echo "Reporter prompt: $REPORTER_PROMPT_VARIANT"
 echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
 echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
@@ -374,6 +386,7 @@ run_evaluation() {
         --args.reporter-type "$REPORTER_TYPE"
         --args.reporter-model-path "$REPORTER_MODEL_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
+        --args.reporter-prompt-variant "$REPORTER_PROMPT_VARIANT"
         --args.reporter-history-size "$REPORTER_HISTORY_SIZE"
     )
 

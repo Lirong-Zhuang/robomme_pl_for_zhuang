@@ -15,10 +15,10 @@ from mme_vla_suite.reporter_evaluation import debounce_reporter_success
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
 from mme_vla_suite.reporter_prompts import (
     DEFAULT_REPORTER_HISTORY_SIZE,
-    REPORTER_SYSTEM_PROMPT,
     build_reporter_image_window,
-    format_reporter_user_prompt,
+    format_reporter_eval_prompts,
     validate_reporter_history_size,
+    validate_reporter_prompt_variant,
 )
 from utils import EpisodeState
 
@@ -60,6 +60,9 @@ class QwenVLReporter(ReporterBase):
 
     def __init__(self, args, save_dir: Path):
         super().__init__(args, save_dir)
+        self.reporter_prompt_variant = validate_reporter_prompt_variant(
+            getattr(args, "reporter_prompt_variant", "original")
+        )
         adapter_path = getattr(args, "reporter_adapter_path", "")
         print(
             f"Loading Reporter model from {args.reporter_model_path}"
@@ -91,6 +94,7 @@ class QwenVLReporter(ReporterBase):
             maxlen=self.reporter_history_size
         )
         self.consecutive_true_count = 0
+        print(f"Reporter prompt variant: {self.reporter_prompt_variant}")
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
@@ -182,19 +186,21 @@ class QwenVLReporter(ReporterBase):
             self.observation_history,
             self.reporter_history_size,
         )
+        system_prompt, user_prompt = format_reporter_eval_prompts(
+            subgoal,
+            len(self.observation_history),
+            self.reporter_prompt_variant,
+        )
 
         request = {
             # The order matches the init placeholder followed by the k history
             # placeholders in the user prompt.
             "images": [str(image_path) for image_path in image_paths],
             "messages": [
-                {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
-                    "content": format_reporter_user_prompt(
-                        subgoal,
-                        len(self.observation_history),
-                    ),
+                    "content": user_prompt,
                 },
             ],
         }
@@ -239,6 +245,7 @@ class QwenVLReporter(ReporterBase):
                 f"Parsed success: {raw_reporter_success}\n"
                 f"Debounce enabled: {self.reporter_debounce}\n"
                 f"Effective success: {reporter_success}\n"
+                f"Reporter prompt variant: {self.reporter_prompt_variant}\n"
                 f"Reporter history size: {self.reporter_history_size}\n"
             )
             if next_init_path is not None:

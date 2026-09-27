@@ -77,6 +77,9 @@ class Args:
     # to evaluate the original, non-fine-tuned Qwen3-VL as Reporter.
     reporter_model_path: str = "Qwen/Qwen3-VL-4B-Instruct"
     reporter_adapter_path: str = ""
+    # "original" uses the unchanged training prompt. "physical_outcome" is
+    # an evaluation-only ablation that requires visible task-result evidence.
+    reporter_prompt_variant: str = "original"
     # Number of recent Reporter-call observations, including the current one.
     # Together with init, the default model sees 2..8 images without padding.
     reporter_history_size: int = 7
