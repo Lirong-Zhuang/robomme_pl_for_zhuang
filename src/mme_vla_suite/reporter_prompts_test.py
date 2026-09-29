@@ -5,18 +5,18 @@ from mme_vla_suite.reporter_prompts import (
 from mme_vla_suite.reporter_evaluation import _format_messages_for_history
 
 
-def test_reporter_prompt_requires_visible_physical_outcome() -> None:
+def test_reporter_prompt_uses_subgoal_relevant_state_evidence() -> None:
     user_prompt = format_reporter_user_prompt("place the object", history_size=3)
 
-    assert "required physical end state" in REPORTER_SYSTEM_PROMPT
-    assert "completed motion sequence or robot pose alone is not success" in (
+    assert "determine whether the current robot subgoal is complete" in (
         REPORTER_SYSTEM_PROMPT
     )
-    assert "requested final state" in REPORTER_SYSTEM_PROMPT
-    assert "absent or uncertain" in REPORTER_SYSTEM_PROMPT
-    assert "required physical outcome" in user_prompt
-    assert "not by motion completion" in user_prompt
-    assert "absent or uncertain" in user_prompt
+    assert "comparing observation before executing" in REPORTER_SYSTEM_PROMPT
+    assert "which state evidence is relevant" in user_prompt
+    assert "For robot-only subgoals" in user_prompt
+    assert "robot's state or pose may be sufficient" in user_prompt
+    assert "For subgoals involving an object or the environment" in user_prompt
+    assert "robot's motion has stopped" in user_prompt
 
 
 def test_reporter_prompt_preserves_image_order_and_count() -> None:

@@ -76,7 +76,11 @@ def test_reporter_rows_follow_manager_selection_and_duplication(tmp_path: Path):
         "Recent observation 1/1 (current observation): <image>"
         in first_row["messages"][1]["content"]
     )
-    assert "required physical outcome" in first_row["messages"][1]["content"]
+    assert "robot's state or pose may be sufficient" in first_row["messages"][1]["content"]
+    assert (
+        "subgoals involving an object or the environment"
+        in first_row["messages"][1]["content"]
+    )
     assert first_row["messages"][1]["content"].count("<image>") == 2
     assert first_row["messages"][2] == {
         "role": "assistant",
