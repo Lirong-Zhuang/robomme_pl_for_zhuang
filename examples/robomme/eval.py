@@ -80,8 +80,10 @@ class Args:
     # Number of recent Reporter-call observations, including the current one.
     # Together with init, the default model sees 2..8 images without padding.
     reporter_history_size: int = 7
-    # True: debounce continuous true runs (effective on calls 1, 4, 7, ...).
-    # False: match dev_trinity and pass every parsed Reporter result directly.
+    # Number of consecutive raw Reporter successes required before advancing.
+    reporter_success_confirmation_count: int = 2
+    # True: keep confirmed successes in one continuous raw-true run at least
+    # three Reporter calls apart. False: use only the confirmation threshold.
     reporter_debounce: bool = True
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
@@ -169,12 +171,19 @@ class EpisodeEvaluator:
 
             if not epstate.action_plan:
                 if should_predict_subgoal:
-                    subgoal, has_api_error = manager.get_subgoal(
-                        epstate.count,
-                        subgoal,
-                        last_subgoal,
-                        reporter_result,
-                    )
+                    if reporter.success_confirmation_pending:
+                        # A candidate success is not yet a real transition.
+                        # Freeze the exact subgoal and leave Reporter's init
+                        # frame and multi-image history untouched.
+                        subgoal = last_subgoal
+                        has_api_error = False
+                    else:
+                        subgoal, has_api_error = manager.get_subgoal(
+                            epstate.count,
+                            subgoal,
+                            last_subgoal,
+                            reporter_result,
+                        )
                 else:
                     subgoal = last_subgoal
                     has_api_error = False

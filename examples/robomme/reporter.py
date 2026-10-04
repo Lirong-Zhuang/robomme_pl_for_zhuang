@@ -11,6 +11,7 @@ import numpy as np
 from swift.llm import InferRequest, PtEngine, RequestConfig
 
 from env_runner import EnvRunner
+from mme_vla_suite.reporter_evaluation import confirm_reporter_success
 from mme_vla_suite.reporter_evaluation import debounce_reporter_success
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
 from mme_vla_suite.reporter_prompts import (
@@ -27,6 +28,7 @@ class ReporterBase:
     def __init__(self, args, save_dir: Path):
         self.args = args
         self.save_dir = save_dir
+        self.success_confirmation_pending = False
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         pass
@@ -78,6 +80,13 @@ class QwenVLReporter(ReporterBase):
         self.init_frames_dir: Optional[Path] = None
         self.log_path: Optional[Path] = None
         self.reporter_debounce = bool(getattr(args, "reporter_debounce", True))
+        self.reporter_success_confirmation_count = int(
+            getattr(args, "reporter_success_confirmation_count", 2)
+        )
+        if self.reporter_success_confirmation_count < 1:
+            raise ValueError(
+                "Reporter success confirmation count must be at least 1"
+            )
         self.reporter_history_size = validate_reporter_history_size(
             int(
                 getattr(
@@ -91,12 +100,15 @@ class QwenVLReporter(ReporterBase):
             maxlen=self.reporter_history_size
         )
         self.consecutive_true_count = 0
+        self.current_subgoal_consecutive_successes = 0
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
         self.observation_before_path = None
         self.observation_history.clear()
         self.consecutive_true_count = 0
+        self.current_subgoal_consecutive_successes = 0
+        self.success_confirmation_pending = False
         self.frames_dir = (
             self.save_dir
             / env_runner.env_id
@@ -138,6 +150,8 @@ class QwenVLReporter(ReporterBase):
             return
 
         self.current_subgoal = subgoal
+        self.current_subgoal_consecutive_successes = 0
+        self.success_confirmation_pending = False
         # Every subgoal owns an independent observation window. This branch is
         # reached for the initial subgoal, a changed subgoal, or immediately
         # after the previous subgoal completed.
@@ -203,10 +217,34 @@ class QwenVLReporter(ReporterBase):
             request_config=RequestConfig(max_tokens=64, temperature=0),
         )[0].choices[0].message.content
         raw_reporter_success = self._parse_success(response)
+        confirmation_success = confirm_reporter_success(
+            raw_reporter_success,
+            self.current_subgoal_consecutive_successes,
+            self.reporter_success_confirmation_count,
+        )
+        confirmation_streak = (
+            self.current_subgoal_consecutive_successes + 1
+            if raw_reporter_success is True
+            else 0
+        )
+        self.current_subgoal_consecutive_successes = confirmation_streak
+
         if self.reporter_debounce:
-            reporter_success = debounce_reporter_success(
-                raw_reporter_success,
-                self.consecutive_true_count,
+            # Shift the existing debounce phase by the confirmation threshold:
+            # the first accepted event remains the Nth raw true, and later
+            # accepted events in the same true run remain three calls apart.
+            debounce_preceding_count = max(
+                0,
+                self.consecutive_true_count
+                - (self.reporter_success_confirmation_count - 1),
+            )
+            reporter_success = (
+                debounce_reporter_success(
+                    raw_reporter_success,
+                    debounce_preceding_count,
+                )
+                if confirmation_success is True
+                else confirmation_success
             )
             self.consecutive_true_count = (
                 self.consecutive_true_count + 1
@@ -214,9 +252,14 @@ class QwenVLReporter(ReporterBase):
                 else 0
             )
         else:
-            # dev_trinity behavior: no filtering between Reporter and Manager.
-            reporter_success = raw_reporter_success
+            # Disable only the legacy close-transition debounce; the new
+            # confirmation threshold remains active.
+            reporter_success = confirmation_success
             self.consecutive_true_count = 0
+
+        self.success_confirmation_pending = (
+            raw_reporter_success is True and reporter_success is not True
+        )
 
         next_init_path = None
         if reporter_success is True:
@@ -230,6 +273,8 @@ class QwenVLReporter(ReporterBase):
             # The completed subgoal must not leak temporal context into the
             # next one. Clear immediately, before Manager consumes the result.
             self.observation_history.clear()
+            self.current_subgoal_consecutive_successes = 0
+            self.success_confirmation_pending = False
 
         with self.log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(
@@ -237,6 +282,8 @@ class QwenVLReporter(ReporterBase):
                 f"{pprint.pformat(request, width=100, sort_dicts=False)}\n"
                 f"Response: {response}\n"
                 f"Parsed success: {raw_reporter_success}\n"
+                f"Success confirmation: {confirmation_streak}/"
+                f"{self.reporter_success_confirmation_count}\n"
                 f"Debounce enabled: {self.reporter_debounce}\n"
                 f"Effective success: {reporter_success}\n"
                 f"Reporter history size: {self.reporter_history_size}\n"

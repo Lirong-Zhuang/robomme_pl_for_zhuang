@@ -53,6 +53,7 @@ def check_args(args):
     assert args.subgoal_type in ["simple_subgoal", "grounded_subgoal", None] and args.obs_horizon == 16
     assert args.reporter_type in ["none", "qwenvl"]
     assert getattr(args, "reporter_history_size", 7) >= 1
+    assert getattr(args, "reporter_success_confirmation_count", 2) >= 1
     if args.manager_use_memer:
         args.subgoal_type = "grounded_subgoal"
 

@@ -66,6 +66,21 @@ def parse_reporter_success(response: str) -> bool | None:
 CONSECUTIVE_TRUE_RETRIGGER_INTERVAL_CALLS = 3
 
 
+def confirm_reporter_success(
+    predicted: bool | None,
+    preceding_consecutive_true_count: int,
+    required_consecutive_successes: int,
+) -> bool | None:
+    """Require repeated raw successes before accepting a subgoal completion."""
+    if required_consecutive_successes < 1:
+        raise ValueError("Required consecutive Reporter successes must be at least 1")
+    if predicted is None:
+        return None
+    if not predicted:
+        return False
+    return preceding_consecutive_true_count + 1 >= required_consecutive_successes
+
+
 def debounce_reporter_success(
     predicted: bool | None,
     preceding_consecutive_true_count: int,

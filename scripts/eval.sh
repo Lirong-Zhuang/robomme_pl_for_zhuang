@@ -28,7 +28,7 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started Executer server.
-EXECUTER_SEEDS=(7)
+EXECUTER_SEEDS=(0)
 NUM_REPEATS=1
 EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
@@ -91,12 +91,16 @@ REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v5_simple_subgoal/v2-20260924-105613/checkpoint-950"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v2-20261002-000202/checkpoint-900"
 # Maximum recent Reporter calls retained for one subgoal; the newest entry is
 # current. The init is separate, and an unfilled window is not padded.
 REPORTER_HISTORY_SIZE=7
+# Number of consecutive raw Reporter successes required before the subgoal is
+# treated as complete. Pending successes keep the same init frame and window.
+REPORTER_SUCCESS_CONFIRMATION_COUNT=2
 # Independently enable or disable filtering of continuous Reporter true runs.
-# true keeps calls 1, 4, 7, ... effective; false applies every parsed result.
+# true keeps confirmed successes at least three Reporter calls apart; false
+# uses only REPORTER_SUCCESS_CONFIRMATION_COUNT.
 REPORTER_DEBOUNCE=false
 
 # micromamba server 117
@@ -322,6 +326,7 @@ echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
 echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
+echo "Reporter success confirmations: $REPORTER_SUCCESS_CONFIRMATION_COUNT"
 echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
 echo "Subgoal type:    $SUBGOAL_TYPE"
@@ -375,6 +380,7 @@ run_evaluation() {
         --args.reporter-model-path "$REPORTER_MODEL_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
         --args.reporter-history-size "$REPORTER_HISTORY_SIZE"
+        --args.reporter-success-confirmation-count "$REPORTER_SUCCESS_CONFIRMATION_COUNT"
     )
 
     eval_args+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
