@@ -38,7 +38,7 @@ Build Reporter completion-classification data for QwenVL.
 uv run python scripts/build_dataset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_2 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_4 \
   --reporter_history_size 7 \
   --tasks BinFill
 ```

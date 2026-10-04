@@ -8,12 +8,12 @@
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 
-REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_4/trainset/reporter_qwenvl/simple_subgoal_train.jsonl'
-REPORTER_RUN_NAME='qwen_reporter_v6_simple_subgoal'
+REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_4/reporter_qwenvl/simple_subgoal_train.jsonl'
+REPORTER_RUN_NAME='qwen_reporter_v6.1_simple_subgoal'
 REPORTER_OUTPUT_DIR="/home/zhuanglr/robomme_pl_for_zhuang/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 CUDA_DEVICE_IDS="0"
 TRAIN_GLOBAL_BATCH_SIZE=16
-EVAL_GLOBAL_BATCH_SIZE=32
+EVAL_GLOBAL_BATCH_SIZE=16
 
 IFS=',' read -r -a CUDA_DEVICE_ID_LIST <<< "$CUDA_DEVICE_IDS"
 NUM_GPUS=${#CUDA_DEVICE_ID_LIST[@]}
@@ -70,3 +70,4 @@ swift sft \
     --warmup_ratio 0.05 \
     --dataset_num_proc 8 \
     --dataloader_num_workers 4 \
+    --resume_from_checkpoint "runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v1-20261001-125026/checkpoint-400"
