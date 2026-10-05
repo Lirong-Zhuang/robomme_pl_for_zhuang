@@ -7,6 +7,7 @@ from typing import TypeVar
 
 
 DEFAULT_REPORTER_HISTORY_SIZE = 7
+REPORTER_PROMPT_VERSION = "trinity_v2.2-interaction-aware"
 
 _ImageT = TypeVar("_ImageT")
 

@@ -8,9 +8,15 @@ from mme_vla_suite.dataset_builder.build_reporter_dataset import DatasetBuilder
 from mme_vla_suite.reporter_prompts import REPORTER_SYSTEM_PROMPT
 
 
-def _write_episode(path: Path) -> None:
+def _write_episode(path: Path, *, failure_recovery: bool = False) -> None:
     with h5py.File(path, "w") as data:
+        data.attrs["task"] = "BinFill"
         episode = data.create_group("episode_0")
+        if failure_recovery:
+            episode.attrs["dataset_origin"] = "failure_recovery"
+            episode.attrs["failure_recovery"] = True
+            episode.attrs["failure_mode"] = "z"
+            episode.attrs["difficulty"] = "easy"
         setup = episode.create_group("setup")
         setup.create_dataset("task_goal", data=np.array([b"test task"]))
 
@@ -21,6 +27,32 @@ def _write_episode(path: Path) -> None:
                 "front_rgb",
                 data=np.full((8, 8, 3), idx % 255, dtype=np.uint8),
             )
+            if failure_recovery:
+                action = timestep.create_group("action")
+                ready = np.array([0.1, 0.2, 0.15, 0.0, 0.0, 0.0, 1.0])
+                failed = np.array([0.1, 0.2, 0.05, 0.0, 0.0, 0.0, -1.0])
+                retry_ready = np.array(
+                    [0.11, 0.2, 0.15, 0.0, 0.0, 0.0, 1.0]
+                )
+                retry_grasp = np.array(
+                    [0.11, 0.2, 0.05, 0.0, 0.0, 0.0, -1.0]
+                )
+                retry_lift = np.array(
+                    [0.11, 0.2, 0.15, 0.0, 0.0, 0.0, -1.0]
+                )
+                if idx < 5:
+                    waypoint = ready
+                elif idx < 10:
+                    waypoint = failed
+                elif idx < 15:
+                    waypoint = ready
+                elif idx < 20:
+                    waypoint = retry_ready
+                elif idx < 25:
+                    waypoint = retry_grasp
+                else:
+                    waypoint = retry_lift
+                action.create_dataset("waypoint_action", data=waypoint)
             info = timestep.create_group("info")
             info.create_dataset("is_video_demo", data=False)
             info.create_dataset("is_completed", data=idx == 100)
@@ -156,3 +188,43 @@ def test_reporter_history_size_is_configurable(tmp_path: Path):
     assert rows[1]["images"][2].endswith("step40.png")
     assert rows[0]["messages"][1]["content"].count("<image>") == 2
     assert rows[1]["messages"][1]["content"].count("<image>") == 3
+
+
+def test_failure_recovery_adds_verified_false_hard_negative(tmp_path: Path):
+    raw_dir = tmp_path / "raw"
+    output_dir = tmp_path / "processed"
+    raw_dir.mkdir()
+    h5_path = raw_dir / "record_dataset_BinFill_with_failure.h5"
+    _write_episode(h5_path, failure_recovery=True)
+
+    builder = DatasetBuilder(
+        raw_data_path=str(raw_dir),
+        preprocessed_data_path=str(output_dir),
+        duplicate_samples=False,
+    )
+    builder.run()
+
+    rows = _read_jsonl(
+        output_dir / "reporter_qwenvl" / "simple_subgoal_train.jsonl"
+    )
+    hard_negative_rows = [
+        row for row in rows if row["images"][-1].endswith("step14.png")
+    ]
+    assert len(hard_negative_rows) == 1
+    assert json.loads(
+        hard_negative_rows[0]["messages"][2]["content"]
+    ) == {"success": False}
+
+    audit = json.loads(
+        (
+            output_dir
+            / "reporter_qwenvl"
+            / "failure_hard_negative_audit.json"
+        ).read_text()
+    )
+    assert audit["failure_recovery_episode_count"] == 1
+    assert audit["failure_hard_negative_count"] == 1
+    assert audit["all_labels_are_false"] is True
+    assert audit["records"][0]["episode"] == 0
+    assert audit["records"][0]["step"] == 14
+    assert audit["records"][0]["success"] is False

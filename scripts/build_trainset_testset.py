@@ -1,22 +1,27 @@
 """Build episode-disjoint train and test datasets from RoboMME HDF5 files.
 
-This entry point uses the existing Executer, Manager, and Reporter builders
-unchanged after assigning complete episodes to one split.  By default, each
-selected task contributes 10% of its episodes to ``testset`` and all remaining
-episodes to ``trainset``.
+This entry point assigns complete episodes to one split before invoking the
+selected Executer, Manager, or Reporter builder. By default, each selected task
+contributes 10% of its episodes to ``testset`` and all remaining episodes to
+``trainset``.
 
-Example:
+Server command for the merged 100-original + 30-failure BinFill HDF5::
 
-```
-uv run python scripts/build_trainset_testset.py \
+  uv run python scripts/build_trainset_testset.py \
   --dataset_type reporter_qwenvl \
-  --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_3 \
+  --raw_data_path data/h5_data/merged \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_4 \
   --tasks BinFill \
   --reporter_history_size 7 \
   --test_ratio 0.1 \
   --seed 42
-```
+
+``--raw_data_path`` must be the directory containing
+``record_dataset_BinFill_with_failure.h5``, not the HDF5 file itself. The
+builder reads the task from the HDF5 root ``task`` attribute and verifies that
+every episode marked ``dataset_origin=failure_recovery`` contributes an
+explicit failed-grasp hard negative labelled ``{"success": false}``.
+Add ``--visualize`` only when per-episode audit videos are also wanted.
 """
 
 from __future__ import annotations
@@ -48,10 +53,13 @@ from mme_vla_suite.dataset_builder.build_reporter_dataset import (
     DatasetBuilder as ReporterDatasetBuilder,
 )
 from mme_vla_suite.dataset_builder.robomme_h5_utils import (
-    get_env_id_from_filename,
+    get_env_id,
     get_episode_indices,
 )
-from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
+from mme_vla_suite.reporter_prompts import (
+    DEFAULT_REPORTER_HISTORY_SIZE,
+    REPORTER_PROMPT_VERSION,
+)
 
 
 DATASET_TYPES = (
@@ -113,15 +121,15 @@ def discover_episode_indices(
     episode_indices_by_task: dict[str, list[int]] = {}
     source_files: dict[str, str] = {}
     for h5_path in sorted(raw_data_path.glob("*.h5")):
-        task_name = get_env_id_from_filename(h5_path.name)
-        if requested_tasks is not None and task_name not in requested_tasks:
-            continue
-        if task_name in episode_indices_by_task:
-            raise ValueError(
-                f"Multiple HDF5 files resolve to task {task_name!r}: "
-                f"{source_files[task_name]} and {h5_path}"
-            )
         with h5py.File(h5_path, "r") as data:
+            task_name = get_env_id(data, h5_path.name)
+            if requested_tasks is not None and task_name not in requested_tasks:
+                continue
+            if task_name in episode_indices_by_task:
+                raise ValueError(
+                    f"Multiple HDF5 files resolve to task {task_name!r}: "
+                    f"{source_files[task_name]} and {h5_path}"
+                )
             episode_indices_by_task[task_name] = get_episode_indices(
                 data, max_episodes
             )
@@ -357,6 +365,7 @@ def main() -> None:
     }
     if args.dataset_type == "reporter_qwenvl":
         manifest["reporter_history_size"] = args.reporter_history_size
+        manifest["reporter_prompt_version"] = REPORTER_PROMPT_VERSION
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
