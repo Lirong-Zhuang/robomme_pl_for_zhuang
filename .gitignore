@@ -212,8 +212,12 @@ __marimo__/
 .DS_Store
 
 # Local datasets, experiment outputs, caches, and checkpoints
-/data/
-/runs/
+/data
+/runs
+/run
 /output/
 /tmp/
 /wandb/
+data/
+runs/
+run/
