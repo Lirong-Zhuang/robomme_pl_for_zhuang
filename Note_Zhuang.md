@@ -198,17 +198,18 @@ and adds safety checks and manifests around the upstream primitives.
 ## Merge the accepted raw episodes
 
 After validating all 30 raw episodes, combine them with the downloaded BinFill
-HDF5, which already contains 50 normal episodes. This packaging step creates
-one 80-episode source pool and does not assign train/test membership. Original
-episode IDs 0-49 are retained; recovery episode IDs 0-29 are remapped to 50-79
-to prevent collisions. The generation mode, difficulty, seed, and attempt count
-are copied from the manifests into each recovery `episode_*` group's attributes:
+HDF5. The server copy currently contains 100 normal episodes, so this packaging
+step creates one 130-episode source pool and does not assign train/test
+membership. Original episode IDs 0-99 are retained; recovery episode IDs 0-29
+are remapped to 100-129 to prevent collisions. The generation mode, difficulty,
+seed, and attempt count are copied from the manifests into each recovery
+`episode_*` group's attributes:
 
 ```bash
 uv run --project third_party/robomme_benchmark \
   python scripts/merge_episode_h5.py \
   --base-h5 /data/public/RoboMME/record_dataset_BinFill.h5 \
-  --base-expected-count 50 \
+  --base-expected-count 100 \
   --input-dir data/h5_data/hdf5_files \
   --manifest-dir data/h5_data \
   --task BinFill \

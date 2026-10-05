@@ -11,7 +11,7 @@ Server example, run from the repository root::
     uv run --project third_party/robomme_benchmark \
       python scripts/merge_episode_h5.py \
       --base-h5 /data/public/RoboMME/record_dataset_BinFill.h5 \
-      --base-expected-count 50 \
+      --base-expected-count 100 \
       --input-dir data/h5_data/hdf5_files \
       --manifest-dir data/h5_data \
       --task BinFill \
