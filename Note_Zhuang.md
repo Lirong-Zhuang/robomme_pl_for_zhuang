@@ -18,9 +18,9 @@ original Hugging Face HDF5 (normal successful trajectories)
 new failure-recovery HDF5 (failed grasp followed by successful retry)
 ```
 
-The original Hugging Face HDF5 files remain unchanged. New simulator rollouts
-are stored separately and mixed with the original data only after episode-level
-train/test splitting.
+The original Hugging Face HDF5 files remain unchanged. All new simulator
+rollouts are stored in one raw HDF5 pool. Train/test membership is assigned
+later, when Reporter JSONL/index files are built, using an episode-level split.
 
 ## Branch scope
 
@@ -35,7 +35,8 @@ The planned work is:
    inference time.
 6. Guarantee that the completed-looking failed grasp is included as a hard
    negative (`{"success": false}`).
-7. Keep a failure-recovery test split that is never mixed into training.
+7. Keep raw HDF5 together; create an episode-disjoint failure-recovery test
+   split only in the derived Reporter JSONL/index.
 
 This branch should initially avoid unrelated changes to the Manager, Executer,
 and policy evaluation logic.
@@ -65,7 +66,8 @@ writes through pytest's temporary cache.
 
 ## Local directory layout
 
-Use the following layout on the training machine:
+Use the following layout on the training machine. The raw HDF5 pool itself has
+no train/test subdirectories:
 
 ```text
 data/
@@ -121,28 +123,83 @@ The current `main`-branch builder supports `robomme_pkl`,
 `vlm_subgoal_qwenvl`, and `vlm_subgoal_memer`. It does not yet support Reporter
 JSONL.
 
-## Planned production commands
+## Failure-recovery HDF5 generation
 
-The following commands describe the target workflow for this branch. They must
-only be used after the corresponding scripts/options have been implemented.
+Run the generator with the RoboMME simulator environment rather than the root
+policy-training environment. `uv --project` selects the submodule environment.
+First edit `SERVER_OUTPUT_DIR` near the top of
+`scripts/generate_failure_recovery_h5.py`, for example:
 
-Generate failed-grasp/recovery episodes for both failure modes:
+```python
+SERVER_OUTPUT_DIR = "/data/zhuang/binfill_failure_recovery"
+```
+
+First generate episode 0 as a smoke test and inspect its video:
 
 ```bash
-uv run python scripts/generate_failure_recovery_h5.py \
-  --task BinFill \
-  --failure-mode z \
-  --num-episodes 50 \
-  --output-dir data/failure_recovery_raw \
-  --save-video
-
-uv run python scripts/generate_failure_recovery_h5.py \
-  --task BinFill \
-  --failure-mode xy \
-  --num-episodes 50 \
-  --output-dir data/failure_recovery_raw \
-  --save-video
+uv run --project third_party/robomme_benchmark \
+  python scripts/generate_failure_recovery_h5.py \
+  --task BinFill --failure-mode z --difficulty easy \
+  --num-episodes 1 --start-episode 0 --base-seed 100000 --save-video
 ```
+
+The complete 30-episode batch commands, including the recommended mix of `z`,
+`xy`, and three difficulties, are documented at the very top of the generator.
+Every command uses a distinct episode range so all outputs can coexist in one
+directory.
+
+The path may still be overridden for a one-off run without editing the file:
+
+```bash
+uv run --project third_party/robomme_benchmark \
+  python scripts/generate_failure_recovery_h5.py \
+  --task BinFill --failure-mode z --num-episodes 1 \
+  --output-dir /absolute/temporary/server/path --save-video
+```
+
+The generator retries different simulator seeds until each logical episode
+finishes successfully. All modes and difficulties share one output pool:
+
+```text
+SERVER_OUTPUT_DIR/
+├── generation_manifest_z_easy_ep0_to_0.json
+├── generation_manifest_xy_hard_ep26_to_29.json
+├── hdf5_files/BinFill_ep0_seed100000.h5
+├── hdf5_files/BinFill_ep29_seed....h5
+├── videos/...FailRecoverZ....mp4
+└── videos/...FailRecoverXY....mp4
+```
+
+The generator removes empty HDF5 containers left by rejected attempts. It will
+not replace an existing task/episode/seed file unless `--overwrite` is passed.
+
+## Where the generation method comes from
+
+This command is a branch-level production wrapper assembled from code in the
+official `RoboMME/robomme_benchmark` submodule; it is not a command copied from
+the public README:
+
+- `src/robomme/robomme_env/utils/task4recovery.py` implements failed-grasp task
+  injection.
+- `src/robomme/robomme_env/utils/planner-ref.py` implements the `z` and `xy`
+  failed pickup followed by the normal pickup.
+- `src/robomme/env_record_wrapper/RecordWrapper.py` writes successful episodes
+  to per-episode HDF5 files and optional videos.
+- `tests/_shared/dataset_generation.py` shows how RoboMME's own tests create an
+  environment, enable recovery, run the oracle, retry seeds, and record data.
+
+The public README does not document a usable generation command. Its Data
+Generation section is inside an HTML comment and still contains the placeholder
+`uv run scripts/dev/xxxx`. The test README describes the existing helper as a
+pytest fixture/cache that writes temporary test data. Therefore this branch
+adds `scripts/generate_failure_recovery_h5.py` as a stable server entry point
+and adds safety checks and manifests around the upstream primitives.
+
+## Planned conversion commands
+
+The HDF5 merge and Reporter JSONL commands below describe the next stage of the
+branch. They must only be used after their scripts/options have been
+implemented.
 
 Merge successful per-episode files into the filename/layout expected by the
 dataset builders:
@@ -179,7 +236,8 @@ negative shows all of the following:
 
 ## Data-splitting rules
 
-- Split by complete episode before sampling or augmentation.
+- Keep raw HDF5 together; split by complete episode before sampling or
+  augmentation when constructing Reporter JSONL/index files.
 - Never train on the held-out failure-recovery episodes.
 - Do not infer a per-subgoal label from the final episode outcome alone.
 - Do not use samples after a false-positive Reporter transition unless they are
