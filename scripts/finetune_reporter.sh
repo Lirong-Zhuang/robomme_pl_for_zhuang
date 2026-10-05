@@ -8,8 +8,8 @@
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 # /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 
-REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_4/reporter_qwenvl/simple_subgoal_train.jsonl'
-REPORTER_RUN_NAME='qwen_reporter_v6.1_simple_subgoal'
+REPORTER_DATASET_PATH='data/trinity_preprocessed_data/reporter_binfill_data_5/reporter_qwenvl/simple_subgoal_train.jsonl'
+REPORTER_RUN_NAME='qwen_reporter_v7_simple_subgoal'
 REPORTER_OUTPUT_DIR="/home/zhuanglr/robomme_pl_for_zhuang/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 CUDA_DEVICE_IDS="0"
 TRAIN_GLOBAL_BATCH_SIZE=16

@@ -9,6 +9,7 @@ Reporter calls in that subgoal. The window is not padded while it fills.
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections import deque
 from collections.abc import Collection, Mapping
@@ -288,6 +289,44 @@ class DatasetBuilder(ManagerDatasetBuilder):
                 candidates.append(candidate)
         return sorted(set(candidates))
 
+    @staticmethod
+    def _compute_reporter_select_idxs(
+        sampling_anchor_idxs: list[int],
+        num_timesteps: int,
+        env_id: str,
+    ) -> list[int]:
+        """Uniformly sample each anchor span without exceeding the stride.
+
+        This intentionally differs from the original Manager sampler, which
+        floors the interval count and can therefore leave gaps substantially
+        larger than its nominal stride. Reporter uses ceiling division and
+        evenly redistributes each span so a failure anchor is included without
+        creating an oversized observation gap on either side.
+        """
+        stride = 32 if "StopCube" in env_id else 16
+        select_idxs: list[int] = []
+        for start_idx, end_idx in zip(
+            sampling_anchor_idxs[:-1],
+            sampling_anchor_idxs[1:],
+        ):
+            distance = end_idx - start_idx
+            if distance <= 0:
+                continue
+            interval_count = max(1, math.ceil(distance / stride))
+            select_idxs.extend(
+                np.linspace(
+                    start_idx,
+                    end_idx,
+                    interval_count + 1,
+                )
+                .astype(np.int32)
+                .tolist()
+            )
+
+        select_idxs.extend(sampling_anchor_idxs)
+        select_idxs.append(num_timesteps - 1)
+        return sorted(set(select_idxs))
+
     def process_per_episode(
         self,
         env_dataset: h5py.File,
@@ -340,7 +379,7 @@ class DatasetBuilder(ManagerDatasetBuilder):
         sampling_anchor_idxs = sorted(
             set(transition_idxs + failure_hard_negative_idxs)
         )
-        select_idxs, _ = self._compute_select_and_duplicate_idxs(
+        select_idxs = self._compute_reporter_select_idxs(
             sampling_anchor_idxs,
             num_timesteps,
             env_id,
