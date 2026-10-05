@@ -72,11 +72,11 @@ no train/test subdirectories:
 ```text
 data/
 ├── robomme_data_h5/                  # downloaded Hugging Face HDF5
-├── failure_recovery_raw/             # per-episode simulator outputs
+├── h5_data/                          # failure-recovery raw pool
 │   ├── hdf5_files/
-│   └── videos/
-├── failure_recovery_merged/          # one merged HDF5 per task
-│   └── data_BinFill.h5
+│   ├── videos/
+│   └── merged/                       # lossless packaging, still no split
+│       └── record_dataset_BinFill_with_failure.h5
 └── reporter_failure_recovery/        # generated train/test JSONL and images
 ```
 
@@ -195,28 +195,43 @@ pytest fixture/cache that writes temporary test data. Therefore this branch
 adds `scripts/generate_failure_recovery_h5.py` as a stable server entry point
 and adds safety checks and manifests around the upstream primitives.
 
-## Planned conversion commands
+## Merge the accepted raw episodes
 
-The HDF5 merge and Reporter JSONL commands below describe the next stage of the
-branch. They must only be used after their scripts/options have been
-implemented.
-
-Merge successful per-episode files into the filename/layout expected by the
-dataset builders:
+After validating all 30 raw episodes, combine them with the downloaded BinFill
+HDF5, which already contains 50 normal episodes. This packaging step creates
+one 80-episode source pool and does not assign train/test membership. Original
+episode IDs 0-49 are retained; recovery episode IDs 0-29 are remapped to 50-79
+to prevent collisions. The generation mode, difficulty, seed, and attempt count
+are copied from the manifests into each recovery `episode_*` group's attributes:
 
 ```bash
-uv run python scripts/merge_episode_h5.py \
-  --input-dir data/failure_recovery_raw/hdf5_files \
+uv run --project third_party/robomme_benchmark \
+  python scripts/merge_episode_h5.py \
+  --base-h5 /data/public/RoboMME/record_dataset_BinFill.h5 \
+  --base-expected-count 50 \
+  --input-dir data/h5_data/hdf5_files \
+  --manifest-dir data/h5_data \
   --task BinFill \
-  --output data/failure_recovery_merged/data_BinFill.h5
+  --expected-count 30 \
+  --expected-start-episode 0 \
+  --output data/h5_data/merged/record_dataset_BinFill_with_failure.h5
 ```
+
+The merger refuses incomplete episode ranges, duplicate episode IDs,
+manifest/HDF5 seed mismatches, unexpected base counts, and accidental
+overwrite. Both the downloaded HDF5 and raw per-episode files remain unchanged.
+
+## Planned Reporter conversion
+
+The Reporter JSONL command below describes the following stage of the branch.
+It must only be used after its dataset builder/options have been implemented.
 
 Build an episode-disjoint Reporter train/test split:
 
 ```bash
 uv run python scripts/build_trainset_testset.py \
   --dataset_type reporter_qwenvl \
-  --raw_data_path data/failure_recovery_merged \
+  --raw_data_path data/h5_data/merged \
   --preprocessed_data_path data/reporter_failure_recovery \
   --tasks BinFill \
   --reporter_history_size 7 \
