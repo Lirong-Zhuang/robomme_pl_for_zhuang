@@ -312,12 +312,6 @@ class DatasetBuilder(ManagerDatasetBuilder):
         if transition_idxs[-1] != num_timesteps - 1:
             transition_idxs.append(num_timesteps - 1)
 
-        select_idxs, duplicate_idxs = self._compute_select_and_duplicate_idxs(
-            transition_idxs,
-            num_timesteps,
-            env_id,
-        )
-        selected = set(idx for idx in select_idxs if idx >= exec_start_idx)
         failure_hard_negative_idxs: list[int] = []
         is_failure_recovery = self._is_failure_recovery_episode(episode_data)
         if is_failure_recovery:
@@ -338,8 +332,33 @@ class DatasetBuilder(ManagerDatasetBuilder):
                     f"failure_mode={failure_mode!r}. Refusing to build an "
                     "unverified Reporter label."
                 )
-            selected.update(failure_hard_negative_idxs)
+
+        # Semantic transitions and failure anchors intentionally have different
+        # meanings. Both split the approximately stride-sized sampling ranges,
+        # but only a semantic transition completes a subgoal, resets Reporter
+        # history, and may be duplicated as a positive training sample.
+        sampling_anchor_idxs = sorted(
+            set(transition_idxs + failure_hard_negative_idxs)
+        )
+        select_idxs, _ = self._compute_select_and_duplicate_idxs(
+            sampling_anchor_idxs,
+            num_timesteps,
+            env_id,
+        )
+        _, duplicate_idxs = self._compute_select_and_duplicate_idxs(
+            transition_idxs,
+            num_timesteps,
+            env_id,
+        )
+        selected = set(idx for idx in select_idxs if idx >= exec_start_idx)
+        missing_failure_anchors = set(failure_hard_negative_idxs) - selected
+        if missing_failure_anchors:
+            raise RuntimeError(
+                f"{env_id} episode_{episode_idx}: failure sampling anchors "
+                f"were not selected: {sorted(missing_failure_anchors)}"
+            )
         print("transition_idxs: ", transition_idxs)
+        print("sampling_anchor_idxs: ", sampling_anchor_idxs)
         print("select_idxs: ", sorted(selected))
         if failure_hard_negative_idxs:
             print(
@@ -392,8 +411,9 @@ class DatasetBuilder(ManagerDatasetBuilder):
                     episode_idx,
                     idx,
                 )
-                # ``selected`` mirrors online Reporter invocation points. The
-                # queue starts empty for every subgoal and is never padded.
+                # Selected observations follow the regular sampling schedule
+                # plus a failure anchor when present. The queue resets only at
+                # real subgoal transitions and is never padded.
                 reporter_observation_paths.append(after_path)
                 image_paths = build_reporter_image_window(
                     before_path,
@@ -425,6 +445,8 @@ class DatasetBuilder(ManagerDatasetBuilder):
                             "task": env_id,
                             "episode": episode_idx,
                             "step": idx,
+                            "failure_event_step": idx,
+                            "reporter_sample_step": idx,
                             "success": False,
                             "simple_subgoal": simple_subgoal,
                             "failure_mode": self._attribute_text(

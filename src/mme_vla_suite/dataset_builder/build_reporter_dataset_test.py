@@ -211,6 +211,10 @@ def test_failure_recovery_adds_verified_false_hard_negative(tmp_path: Path):
         row for row in rows if row["images"][-1].endswith("step14.png")
     ]
     assert len(hard_negative_rows) == 1
+    # The failure endpoint is a sampling anchor, not an extra point inserted
+    # into the old 0->40 schedule. Sampling is recomputed for 0->14 and 14->40,
+    # so the old step-20 observation is not retained next to the anchor.
+    assert not any(row["images"][-1].endswith("step20.png") for row in rows)
     assert json.loads(
         hard_negative_rows[0]["messages"][2]["content"]
     ) == {"success": False}
@@ -227,4 +231,6 @@ def test_failure_recovery_adds_verified_false_hard_negative(tmp_path: Path):
     assert audit["all_labels_are_false"] is True
     assert audit["records"][0]["episode"] == 0
     assert audit["records"][0]["step"] == 14
+    assert audit["records"][0]["failure_event_step"] == 14
+    assert audit["records"][0]["reporter_sample_step"] == 14
     assert audit["records"][0]["success"] is False

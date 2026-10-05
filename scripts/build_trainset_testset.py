@@ -10,7 +10,7 @@ Server command for the merged 100-original + 30-failure BinFill HDF5::
   uv run python scripts/build_trainset_testset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path data/h5_data/merged \
-  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_4 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_5 \
   --tasks BinFill \
   --reporter_history_size 7 \
   --test_ratio 0.1 \
