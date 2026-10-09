@@ -58,7 +58,7 @@ SAVE_DIR="runs/evaluation"
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
 FRAMEWORK_VERSION="trinity_v2.1"
-RUN_NAME="6"
+RUN_NAME="8"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -91,7 +91,7 @@ REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v2-20261002-000202/checkpoint-900"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v7_simple_subgoal/v2-20261006-102030/checkpoint-750"
 # Maximum recent Reporter calls retained for one subgoal; the newest entry is
 # current. The init is separate, and an unfilled window is not padded.
 REPORTER_HISTORY_SIZE=7
