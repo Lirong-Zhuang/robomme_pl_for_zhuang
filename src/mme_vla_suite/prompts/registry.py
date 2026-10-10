@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 from typing import Literal
 
+from mme_vla_suite.prompts.manager import qwenvl_interaction_verify_v2
 from mme_vla_suite.prompts.manager import qwenvl_v1
 from mme_vla_suite.prompts.reporter import interaction_aware_v2
 from mme_vla_suite.prompts.reporter import temporal_v1
@@ -299,6 +300,26 @@ _MANAGER_PROMPTS = {
         reporter_completed_template=qwenvl_v1.REPORTER_COMPLETED_TEMPLATE,
         reporter_incomplete_template=qwenvl_v1.REPORTER_INCOMPLETE_TEMPLATE,
         reporter_missing_template=qwenvl_v1.REPORTER_MISSING_TEMPLATE,
+    ),
+    qwenvl_interaction_verify_v2.VERSION: ManagerPromptSpec(
+        version=qwenvl_interaction_verify_v2.VERSION,
+        simple_system_prompt=qwenvl_interaction_verify_v2.SIMPLE_SYSTEM_PROMPT,
+        grounded_system_prompt=qwenvl_interaction_verify_v2.GROUNDED_SYSTEM_PROMPT,
+        initial_user_prompt_template=(
+            qwenvl_interaction_verify_v2.INITIAL_USER_PROMPT_TEMPLATE
+        ),
+        followup_user_prompt_template=(
+            qwenvl_interaction_verify_v2.FOLLOWUP_USER_PROMPT_TEMPLATE
+        ),
+        reporter_completed_template=(
+            qwenvl_interaction_verify_v2.REPORTER_COMPLETED_TEMPLATE
+        ),
+        reporter_incomplete_template=(
+            qwenvl_interaction_verify_v2.REPORTER_INCOMPLETE_TEMPLATE
+        ),
+        reporter_missing_template=(
+            qwenvl_interaction_verify_v2.REPORTER_MISSING_TEMPLATE
+        ),
     ),
 }
 

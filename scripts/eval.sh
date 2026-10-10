@@ -78,7 +78,7 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
-MANAGER_PROMPT_VERSION="qwenvl_v1"
+MANAGER_PROMPT_VERSION="qwenvl_interaction_verify_v2"
 MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 

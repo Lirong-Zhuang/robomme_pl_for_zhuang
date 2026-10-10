@@ -22,6 +22,21 @@ Manager:
 
 - `qwenvl_v1`: the QwenVL Manager prompt shared by Trinity v2.1 and v2.2 and
   the current default.
+- `qwenvl_interaction_verify_v2`: a prompt-mismatch evaluation variant that
+  preserves the `qwenvl_v1` system and initial prompts, adds a short
+  Reporter-success verification gate to follow-up prompts, and injects the
+  detailed interaction rules only when Reporter returns `true`. It verifies
+  subgoal-specific relations for pick-up, put-into-bin, and button subgoals
+  before advancing. On that `true` branch, the Manager returns a compact JSON
+  record containing the checked interaction pairs, the verification result,
+  and the selected subgoal; evaluation logging records the JSON while passing
+  only its `subgoal` field to the Executer. Reporter advances its init frame
+  only after `verification_passed=true` and all required, correctly oriented
+  interaction records are present with `verified=true`; an empty pair list
+  cannot pass pick-up, put-into-bin, or button verification. Failed, missing,
+  or malformed verification keeps both the current subgoal and the existing init frame.
+  The `false` and missing-result branches retain the original plain-subgoal
+  output behavior.
 
 The Manager registry currently applies only to QwenVL. Gemini, MemER, and QPA
 retain their specialized prompt implementations.
@@ -65,6 +80,12 @@ For full environment evaluation, edit these values in `scripts/eval.sh`:
 ```bash
 MANAGER_PROMPT_VERSION="qwenvl_v1"
 REPORTER_PROMPT_VERSION="interaction_aware_v2"
+```
+
+To run the interaction-verification ablation without retraining, set:
+
+```bash
+MANAGER_PROMPT_VERSION="qwenvl_interaction_verify_v2"
 ```
 
 Then run `bash scripts/eval.sh`. The resolved prompt versions and hashes are

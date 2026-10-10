@@ -78,6 +78,17 @@ class ManagerBase:
     def end_episode(self, epstate: EpisodeState, success_flag: str) -> None:
         pass
 
+    def get_init_frame_update_confirmation(
+        self,
+        reporter_result: Optional[bool],
+    ) -> Optional[bool]:
+        """Return whether Reporter may advance its init frame after this call.
+
+        Managers without explicit visual verification retain the legacy
+        Reporter-success behavior.
+        """
+        return True if reporter_result is True else None
+
 
 class NullManager(ManagerBase):
     def get_subgoal(self, *args, **kwargs) -> Tuple[Optional[str], bool]:
@@ -198,6 +209,14 @@ class QwenVLManager(ManagerBase):
         )
         self.video_buffer.clear()
         return response, False
+
+    def get_init_frame_update_confirmation(
+        self,
+        reporter_result: Optional[bool],
+    ) -> Optional[bool]:
+        if self.api.interaction_verification_enabled:
+            return self.api.last_verification_passed is True
+        return super().get_init_frame_update_confirmation(reporter_result)
     
     def end_episode(self, epstate: EpisodeState, success_flag: str) -> None:
         # Keep QwenVL input images and the optional initial video under

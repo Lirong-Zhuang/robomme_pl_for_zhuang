@@ -13,6 +13,7 @@ from swift.llm import InferRequest, PtEngine, RequestConfig
 from env_runner import EnvRunner
 from mme_vla_suite.reporter_evaluation import debounce_reporter_success
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
+from mme_vla_suite.manager_response import should_update_init_frame
 from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
 from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.reporter_prompts import (
@@ -27,6 +28,8 @@ class ReporterBase:
     def __init__(self, args, save_dir: Path):
         self.args = args
         self.save_dir = save_dir
+        self.last_raw_response: Optional[str] = None
+        self.last_parsed_success: Optional[bool] = None
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         pass
@@ -36,7 +39,7 @@ class ReporterBase:
         subgoal: Optional[str],
         observation_before_subgoal: np.ndarray,
         step_idx: int,
-        previous_subgoal_completed: Optional[bool] = None,
+        init_frame_update_confirmation: Optional[bool] = None,
     ) -> None:
         pass
 
@@ -104,6 +107,8 @@ class QwenVLReporter(ReporterBase):
         self.observation_before_path = None
         self.observation_history.clear()
         self.consecutive_true_count = 0
+        self.last_raw_response = None
+        self.last_parsed_success = None
         self.frames_dir = (
             self.save_dir
             / env_runner.env_id
@@ -132,14 +137,25 @@ class QwenVLReporter(ReporterBase):
         subgoal: Optional[str],
         observation_before_subgoal: np.ndarray,
         step_idx: int,
-        previous_subgoal_completed: Optional[bool] = None,
+        init_frame_update_confirmation: Optional[bool] = None,
     ) -> None:
         if subgoal is None:
             return
-        if (
-            subgoal == self.current_subgoal
-            and previous_subgoal_completed is not True
+        has_current_subgoal = self.current_subgoal is not None
+        if not should_update_init_frame(
+            has_current_subgoal=has_current_subgoal,
+            subgoal_changed=subgoal != self.current_subgoal,
+            update_confirmation=init_frame_update_confirmation,
         ):
+            if (
+                init_frame_update_confirmation is False
+                and self.log_path is not None
+            ):
+                with self.log_path.open("a", encoding="utf-8") as log_file:
+                    log_file.write(
+                        "Manager-confirmed init frame update: False\n"
+                        f"Init frame unchanged: {self.observation_before_path}\n"
+                    )
             return
         if self.frames_dir is None or self.init_frames_dir is None:
             return
@@ -161,12 +177,27 @@ class QwenVLReporter(ReporterBase):
                 self.observation_before_path,
                 observation_before_subgoal,
             )
+        if self.log_path is not None:
+            with self.log_path.open("a", encoding="utf-8") as log_file:
+                if not has_current_subgoal:
+                    log_file.write("Init frame update source: initial subgoal\n")
+                else:
+                    log_file.write(
+                        "Init frame update source: confirmed transition\n"
+                        "Manager-confirmed init frame update: "
+                        f"{init_frame_update_confirmation}\n"
+                    )
+                log_file.write(
+                    f"Next init frame: {self.observation_before_path}\n"
+                )
 
     def step(
         self,
         epstate: EpisodeState,
         subgoal: Optional[str],
     ) -> Optional[bool]:
+        self.last_raw_response = None
+        self.last_parsed_success = None
         if (
             subgoal is None
             or self.observation_before_path is None
@@ -208,6 +239,8 @@ class QwenVLReporter(ReporterBase):
             request_config=RequestConfig(max_tokens=64, temperature=0),
         )[0].choices[0].message.content
         raw_reporter_success = self._parse_success(response)
+        self.last_raw_response = response
+        self.last_parsed_success = raw_reporter_success
         if self.reporter_debounce:
             reporter_success = debounce_reporter_success(
                 raw_reporter_success,
@@ -223,19 +256,6 @@ class QwenVLReporter(ReporterBase):
             reporter_success = raw_reporter_success
             self.consecutive_true_count = 0
 
-        next_init_path = None
-        if reporter_success is True:
-            # The completed subgoal ends at the current observation. Promote
-            # that exact frame before returning so the next Manager prediction
-            # and every later Reporter comparison use the newest init frame.
-            next_init_path = self.init_frames_dir / f"step_{step_idx}_image.png"
-            if not next_init_path.exists():
-                shutil.copy2(current_path, next_init_path)
-            self.observation_before_path = next_init_path
-            # The completed subgoal must not leak temporal context into the
-            # next one. Clear immediately, before Manager consumes the result.
-            self.observation_history.clear()
-
         with self.log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(
                 f"\nStep: {step_idx}\n"
@@ -248,10 +268,6 @@ class QwenVLReporter(ReporterBase):
                 f"Reporter prompt version: {self.reporter_prompt.version}\n"
                 f"Reporter prompt sha256: {self.reporter_prompt.content_hash}\n"
             )
-            if next_init_path is not None:
-                log_file.write(f"Next init frame: {next_init_path}\n")
-
-        print(f"[robomme] Reporter response: {response}")
         return reporter_success
 
     @staticmethod

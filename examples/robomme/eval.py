@@ -165,9 +165,9 @@ class EpisodeEvaluator:
             )
             if should_predict_subgoal:
                 # Reporter first inserts the current observation into its
-                # call-level sliding window, then compares init + history. A
-                # successful result promotes the current frame to the next
-                # subgoal init before the result is passed to Manager.
+                # call-level sliding window, then compares init + history.
+                # Reporter success is only a proposal; the init frame remains
+                # unchanged until Manager has completed visual verification.
                 reporter_result = reporter.step(epstate, subgoal)
 
             # Manager receives/buffers the same current observation only after
@@ -176,15 +176,40 @@ class EpisodeEvaluator:
 
             if not epstate.action_plan:
                 if should_predict_subgoal:
+                    print(
+                        f"\n[robomme] Manager call at step {epstate.count}\n"
+                        "[robomme] Reporter response used by this Manager call: "
+                        f"{reporter.last_raw_response}\n"
+                        "[robomme] Reporter parsed success: "
+                        f"{reporter.last_parsed_success}\n"
+                        "[robomme] Reporter effective result passed to Manager: "
+                        f"{reporter_result}"
+                    )
                     subgoal, has_api_error = manager.get_subgoal(
                         epstate.count,
                         subgoal,
                         last_subgoal,
                         reporter_result,
                     )
+                    init_frame_update_confirmation = (
+                        manager.get_init_frame_update_confirmation(
+                            reporter_result
+                        )
+                    )
+                    if last_subgoal is None:
+                        print(
+                            "[robomme] Init frame update: initial subgoal "
+                            "(Manager verification not required)"
+                        )
+                    else:
+                        print(
+                            "[robomme] Manager-confirmed init frame update: "
+                            f"{init_frame_update_confirmation}"
+                        )
                 else:
                     subgoal = last_subgoal
                     has_api_error = False
+                    init_frame_update_confirmation = None
 
                 if has_api_error:
                     break
@@ -193,7 +218,7 @@ class EpisodeEvaluator:
                     subgoal,
                     img,
                     epstate.count,
-                    reporter_result,
+                    init_frame_update_confirmation,
                 )
                 # Trinity's symbolic Executer receives only the current subgoal.
                 # Keep the task goal only for legacy non-symbolic policies, which
