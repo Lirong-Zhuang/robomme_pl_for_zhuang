@@ -166,6 +166,7 @@ class QwenVLManager(ManagerBase):
                 else self.args.manager_grounded_adapter_path
             ),
             subgoal_type=self.args.subgoal_type,
+            prompt_version=self.args.manager_prompt_version,
         )
         print(f"[robomme] QwenVL Manager for {self.args.subgoal_type} setup finished")
         

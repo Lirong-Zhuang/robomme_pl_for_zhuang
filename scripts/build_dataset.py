@@ -13,8 +13,8 @@ Build only selected Manager tasks into a custom output directory.
 ```
 uv run python scripts/build_dataset.py \
   --dataset_type manager_qwenvl \
-  --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_preprocessed_data/manager_binfill_data_1 \
+  --raw_data_path /home/zhuanglr/robomme_pl_for_zhuang/data/robomme_data_h5 \
+  --preprocessed_data_path data/trinity_preprocessed_data/manager_binfill_data_4 \
   --tasks BinFill
 ```
 
@@ -38,7 +38,7 @@ Build Reporter completion-classification data for QwenVL.
 uv run python scripts/build_dataset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_2 \
+  --preprocessed_data_path data/trinity_preprocessed_data/reporter_binfill_data_4 \
   --reporter_history_size 7 \
   --tasks BinFill
 ```
@@ -64,6 +64,10 @@ from mme_vla_suite.dataset_builder.build_manager_dataset_qwenvl import (
 from mme_vla_suite.dataset_builder.build_reporter_dataset import (
     DatasetBuilder as ReporterDatasetBuilder,
 )
+from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import available_manager_prompt_versions
+from mme_vla_suite.prompts import available_reporter_prompt_versions
 from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
 
 
@@ -114,6 +118,22 @@ def _parse_args() -> argparse.Namespace:
         help="Write visualization MP4s",
     )
     parser.add_argument(
+        "--manager_prompt_version",
+        default=DEFAULT_MANAGER_PROMPT_VERSION,
+        help=(
+            "QwenVL Manager prompt version; available: "
+            + ", ".join(available_manager_prompt_versions())
+        ),
+    )
+    parser.add_argument(
+        "--reporter_prompt_version",
+        default=DEFAULT_REPORTER_PROMPT_VERSION,
+        help=(
+            "Reporter prompt version; available: "
+            + ", ".join(available_reporter_prompt_versions())
+        ),
+    )
+    parser.add_argument(
         "--reporter_history_size",
         type=int,
         default=DEFAULT_REPORTER_HISTORY_SIZE,
@@ -146,6 +166,7 @@ if __name__ == "__main__":
             visualize=args.visualize,
             manager_dir_name="qwenvl",
             task_names=args.tasks,
+            manager_prompt_version=args.manager_prompt_version,
         )
         builder.run()
     elif args.dataset_type == "manager_memer":
@@ -177,6 +198,7 @@ if __name__ == "__main__":
             reporter_dir_name="reporter_qwenvl",
             task_names=args.tasks,
             reporter_history_size=args.reporter_history_size,
+            reporter_prompt_version=args.reporter_prompt_version,
         )
         builder.run()
     else:

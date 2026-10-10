@@ -13,11 +13,11 @@ from swift.llm import InferRequest, PtEngine, RequestConfig
 from env_runner import EnvRunner
 from mme_vla_suite.reporter_evaluation import debounce_reporter_success
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.reporter_prompts import (
     DEFAULT_REPORTER_HISTORY_SIZE,
-    REPORTER_SYSTEM_PROMPT,
     build_reporter_image_window,
-    format_reporter_user_prompt,
     validate_reporter_history_size,
 )
 from utils import EpisodeState
@@ -61,6 +61,13 @@ class QwenVLReporter(ReporterBase):
     def __init__(self, args, save_dir: Path):
         super().__init__(args, save_dir)
         adapter_path = getattr(args, "reporter_adapter_path", "")
+        self.reporter_prompt = get_reporter_prompt(
+            getattr(
+                args,
+                "reporter_prompt_version",
+                DEFAULT_REPORTER_PROMPT_VERSION,
+            )
+        )
         print(
             f"Loading Reporter model from {args.reporter_model_path}"
             + (f" with adapter {adapter_path}" if adapter_path else "")
@@ -187,17 +194,15 @@ class QwenVLReporter(ReporterBase):
             # The order matches the init placeholder followed by the k history
             # placeholders in the user prompt.
             "images": [str(image_path) for image_path in image_paths],
-            "messages": [
-                {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": format_reporter_user_prompt(
-                        subgoal,
-                        len(self.observation_history),
-                    ),
-                },
-            ],
+            "messages": self.reporter_prompt.build_messages(
+                subgoal,
+                len(self.observation_history),
+            ),
         }
+        self.reporter_prompt.validate_media_alignment(
+            request["messages"],
+            image_count=len(request["images"]),
+        )
         response = self.engine.infer(
             [InferRequest(**request)],
             request_config=RequestConfig(max_tokens=64, temperature=0),
@@ -240,6 +245,8 @@ class QwenVLReporter(ReporterBase):
                 f"Debounce enabled: {self.reporter_debounce}\n"
                 f"Effective success: {reporter_success}\n"
                 f"Reporter history size: {self.reporter_history_size}\n"
+                f"Reporter prompt version: {self.reporter_prompt.version}\n"
+                f"Reporter prompt sha256: {self.reporter_prompt.content_hash}\n"
             )
             if next_init_path is not None:
                 log_file.write(f"Next init frame: {next_init_path}\n")

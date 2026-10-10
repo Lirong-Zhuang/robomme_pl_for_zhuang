@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Optional, TextIO, Tuple
 
 from tqdm import tqdm
+from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_manager_prompt
+from mme_vla_suite.prompts import get_reporter_prompt
 
 # Do not retain unused CUDA allocations on the shared evaluation GPU.
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
@@ -68,6 +72,8 @@ class Args:
     manager_gemini_model_name: str = "gemini-2.5-pro"
     manager_simple_adapter_path: str = ""
     manager_grounded_adapter_path: str = ""
+    # Applies to the QwenVL Manager only.
+    manager_prompt_version: str = DEFAULT_MANAGER_PROMPT_VERSION
     manager_save_memer_kf: bool = False
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
 
@@ -77,6 +83,7 @@ class Args:
     # to evaluate the original, non-fine-tuned Qwen3-VL as Reporter.
     reporter_model_path: str = "Qwen/Qwen3-VL-4B-Instruct"
     reporter_adapter_path: str = ""
+    reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION
     # Number of recent Reporter-call observations, including the current one.
     # Together with init, the default model sees 2..8 images without padding.
     reporter_history_size: int = 7
@@ -313,6 +320,48 @@ def setup_save_directory(args: Args) -> Path:
     return save_dir
 
 
+def setup_prompt_metadata(args: Args, save_dir: Path) -> dict:
+    """Persist resolved prompt identities and prevent mixed-version resumes."""
+    metadata = {
+        "manager": (
+            get_manager_prompt(args.manager_prompt_version).metadata()
+            if args.manager_use_qwenvl
+            else None
+        ),
+        "reporter": (
+            get_reporter_prompt(args.reporter_prompt_version).metadata()
+            if args.reporter_type == "qwenvl"
+            else None
+        ),
+    }
+    metadata_path = save_dir / "prompt_metadata.json"
+    if metadata_path.exists():
+        existing = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if existing != metadata:
+            raise ValueError(
+                "Cannot resume an evaluation directory with different prompt "
+                f"versions: existing={existing}, requested={metadata}. Choose "
+                "a new run name or enable overwrite."
+            )
+    else:
+        legacy_artifacts = [
+            path.name
+            for path in (save_dir / "progress.json", save_dir / "log.json")
+            if path.exists()
+        ]
+        if legacy_artifacts:
+            raise ValueError(
+                "Cannot safely resume an evaluation created before prompt "
+                f"metadata was recorded ({legacy_artifacts}). Choose a new run "
+                "name or enable overwrite."
+            )
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    return metadata
+
+
 def update_run_summary(args: Args) -> Path:
     """Aggregate all completed seed/repeat logs for the current run."""
     run_dir = get_evaluation_run_directory(args)
@@ -359,6 +408,26 @@ def update_run_summary(args: Args) -> Path:
         "executer_name": args.executer_name,
         "executer_ckpt_id": args.executer_ckpt_id,
         "run_name": get_evaluation_run_name(args),
+        "manager_prompt_version": (
+            get_manager_prompt(args.manager_prompt_version).version
+            if args.manager_use_qwenvl
+            else None
+        ),
+        "manager_prompt_sha256": (
+            get_manager_prompt(args.manager_prompt_version).content_hash
+            if args.manager_use_qwenvl
+            else None
+        ),
+        "reporter_prompt_version": (
+            get_reporter_prompt(args.reporter_prompt_version).version
+            if args.reporter_type == "qwenvl"
+            else None
+        ),
+        "reporter_prompt_sha256": (
+            get_reporter_prompt(args.reporter_prompt_version).content_hash
+            if args.reporter_type == "qwenvl"
+            else None
+        ),
         "seeds": seed_values,
         "repeats_per_seed": args.num_repeats,
         "expected_run_count": len(seed_values) * args.num_repeats,
@@ -429,6 +498,7 @@ def evaluate(args: Args):
     check_args(args)
 
     save_dir = setup_save_directory(args)
+    prompt_metadata = setup_prompt_metadata(args, save_dir)
 
     log_dict = setup_log_dict(save_dir, args)
 
@@ -579,6 +649,7 @@ def evaluate(args: Args):
             final_results["executer_seed"] = args.executer_seed
             final_results["repeat_id"] = args.repeat_id
             final_results["executer_ckpt_id"] = args.executer_ckpt_id
+            final_results["prompts"] = prompt_metadata
             with open(save_dir / "log.json", "w") as f:
                 json.dump(final_results, f, indent=2)
             update_run_summary(args)

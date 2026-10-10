@@ -53,8 +53,29 @@ def get_task_goal(episode_data: "h5py.Group", lower: bool = False) -> str:
 
 
 def get_env_id_from_filename(filename: str) -> str:
-    """Extract env ID from H5 filename (e.g. 'data_ButtonUnmask.h5' -> 'ButtonUnmask')."""
-    return filename.split(".")[0].split("_")[-1]
+    """Extract an env ID from a conventional RoboMME HDF5 filename.
+
+    ``*_with_failure.h5`` is the name used for a merged original + recovery
+    dataset, so its packaging suffix is removed before extracting the task.
+    Prefer :func:`get_env_id` when an open HDF5 handle is available because
+    the root ``task`` attribute is authoritative.
+    """
+    stem = filename.rsplit(".", 1)[0]
+    if stem.endswith("_with_failure"):
+        stem = stem.removesuffix("_with_failure")
+    return stem.split("_")[-1]
+
+
+def get_env_id(data: "h5py.File", filename: str) -> str:
+    """Return the task stored in HDF5, falling back to the filename."""
+    task = data.attrs.get("task")
+    if isinstance(task, np.ndarray):
+        task = task.reshape(-1)[0] if task.size else None
+    if isinstance(task, (bytes, np.bytes_)):
+        task = task.decode("utf-8")
+    if task is not None and str(task).strip():
+        return str(task).strip()
+    return get_env_id_from_filename(filename)
 
 
 def resolve_subgoal(
