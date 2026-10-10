@@ -69,7 +69,7 @@ def _interaction_task_class(subgoal: str | None) -> str | None:
     return None
 
 
-def _has_verified_pair(
+def _has_required_pair(
     pairs: list[Any],
     *,
     relationship: str,
@@ -77,15 +77,26 @@ def _has_verified_pair(
     second_terms: tuple[str, ...],
 ) -> bool:
     for pair in pairs:
-        if not isinstance(pair, dict):
+        if (
+            isinstance(pair, list)
+            and len(pair) == 3
+            and all(isinstance(value, str) for value in pair)
+        ):
+            first_object, pair_relationship, second_object = pair
+            pair_is_verified = True
+        elif isinstance(pair, dict):
+            # Accept responses produced by the previous prompt format.
+            first_object = pair.get("first_object")
+            pair_relationship = pair.get("relationship")
+            second_object = pair.get("second_object")
+            pair_is_verified = pair.get("verified") is True
+        else:
             continue
-        first_object = pair.get("first_object")
-        second_object = pair.get("second_object")
         if not isinstance(first_object, str) or not isinstance(second_object, str):
             continue
         if (
-            pair.get("relationship") == relationship
-            and pair.get("verified") is True
+            pair_relationship == relationship
+            and pair_is_verified
             and any(term in first_object.lower() for term in first_terms)
             and any(term in second_object.lower() for term in second_terms)
         ):
@@ -97,11 +108,13 @@ def validate_interaction_pairs(
     payload: dict[str, Any] | None,
     current_subgoal: str | None,
 ) -> tuple[bool, str | None]:
-    """Validate the required verified interaction pairs for a subgoal class.
+    """Validate the required interaction triples for a subgoal class.
 
     The three interaction-aware classes require concrete, correctly oriented
-    records. Other subgoal classes retain the prompt's legacy behavior and may
-    use an empty pair list.
+    triples. The top-level ``verification_passed`` value separately represents
+    whether those required relations are visually true. Legacy object records
+    with ``verified=true`` remain accepted. Other subgoal classes retain the
+    prompt's legacy behavior and may use an empty pair list.
     """
     task_class = _interaction_task_class(current_subgoal)
     if task_class is None:
@@ -113,26 +126,26 @@ def validate_interaction_pairs(
         return False, task_class
 
     if task_class == "pick_up":
-        valid = _has_verified_pair(
+        valid = _has_required_pair(
             pairs,
             relationship="HOLDS",
             first_terms=("robot",),
             second_terms=("cube", "block"),
-        ) and _has_verified_pair(
+        ) and _has_required_pair(
             pairs,
             relationship="ABOVE",
             first_terms=("cube", "block"),
             second_terms=("table",),
         )
     elif task_class == "put_into_bin":
-        valid = _has_verified_pair(
+        valid = _has_required_pair(
             pairs,
             relationship="IN",
             first_terms=("cube", "block"),
             second_terms=("bin",),
         )
     else:
-        valid = _has_verified_pair(
+        valid = _has_required_pair(
             pairs,
             relationship="PRESSES",
             first_terms=("robot",),

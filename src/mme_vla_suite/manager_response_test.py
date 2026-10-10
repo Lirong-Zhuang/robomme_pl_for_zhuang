@@ -13,14 +13,7 @@ def test_plain_manager_response_is_unchanged():
 
 def test_structured_manager_response_extracts_subgoal():
     payload = {
-        "interaction_pairs": [
-            {
-                "first_object": "robot",
-                "relationship": "HOLDS",
-                "second_object": "green cube",
-                "verified": True,
-            }
-        ],
+        "interaction_pairs": [["robot", "HOLDS", "green cube"]],
         "verification_passed": True,
         "subgoal": "put it into the bin",
     }
@@ -96,8 +89,46 @@ def test_empty_pairs_cannot_verify_interaction_aware_subgoals():
     )
 
 
-def test_pick_up_requires_both_oriented_verified_pairs():
+def test_pick_up_requires_both_oriented_interaction_triples():
     valid_pairs = [
+        ["robot", "HOLDS", "green cube"],
+        ["green cube", "ABOVE", "table"],
+    ]
+
+    assert validate_interaction_pairs(
+        {"interaction_pairs": valid_pairs},
+        "pick up the green cube",
+    ) == (True, "pick_up")
+    assert validate_interaction_pairs(
+        {"interaction_pairs": valid_pairs[:1]},
+        "pick up the green cube",
+    ) == (False, "pick_up")
+
+
+def test_bin_and_button_require_their_oriented_interaction_triple():
+    assert validate_interaction_pairs(
+        {
+            "interaction_pairs": [["green cube", "IN", "target bin"]]
+        },
+        "put it into the bin",
+    ) == (True, "put_into_bin")
+    assert validate_interaction_pairs(
+        {
+            "interaction_pairs": [["robot", "PRESSES", "red button"]]
+        },
+        "press the button",
+    ) == (True, "button")
+
+
+def test_other_subgoal_classes_may_keep_empty_pairs():
+    assert validate_interaction_pairs(
+        {"interaction_pairs": []},
+        "move to the highlighted area",
+    ) == (True, None)
+
+
+def test_legacy_verified_object_pairs_remain_supported():
+    legacy_pairs = [
         {
             "first_object": "robot",
             "relationship": "HOLDS",
@@ -113,46 +144,6 @@ def test_pick_up_requires_both_oriented_verified_pairs():
     ]
 
     assert validate_interaction_pairs(
-        {"interaction_pairs": valid_pairs},
+        {"interaction_pairs": legacy_pairs},
         "pick up the green cube",
     ) == (True, "pick_up")
-    assert validate_interaction_pairs(
-        {"interaction_pairs": valid_pairs[:1]},
-        "pick up the green cube",
-    ) == (False, "pick_up")
-
-
-def test_bin_and_button_require_their_verified_oriented_pair():
-    assert validate_interaction_pairs(
-        {
-            "interaction_pairs": [
-                {
-                    "first_object": "green cube",
-                    "relationship": "IN",
-                    "second_object": "target bin",
-                    "verified": True,
-                }
-            ]
-        },
-        "put it into the bin",
-    ) == (True, "put_into_bin")
-    assert validate_interaction_pairs(
-        {
-            "interaction_pairs": [
-                {
-                    "first_object": "robot",
-                    "relationship": "PRESSES",
-                    "second_object": "red button",
-                    "verified": True,
-                }
-            ]
-        },
-        "press the button",
-    ) == (True, "button")
-
-
-def test_other_subgoal_classes_may_keep_empty_pairs():
-    assert validate_interaction_pairs(
-        {"interaction_pairs": []},
-        "move to the highlighted area",
-    ) == (True, None)

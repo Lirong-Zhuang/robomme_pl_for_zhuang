@@ -32,8 +32,9 @@ Manager:
   and the selected subgoal; evaluation logging records the JSON while passing
   only its `subgoal` field to the Executer. Reporter advances its init frame
   only after `verification_passed=true` and all required, correctly oriented
-  interaction records are present with `verified=true`; an empty pair list
-  cannot pass pick-up, put-into-bin, or button verification. Failed, missing,
+  interaction triples are present in `[first object, RELATIONSHIP, second object]`
+  form; an empty pair list cannot pass pick-up, put-into-bin, or button
+  verification. Failed, missing,
   or malformed verification keeps both the current subgoal and the existing init frame.
   The `false` and missing-result branches retain the original plain-subgoal
   output behavior.

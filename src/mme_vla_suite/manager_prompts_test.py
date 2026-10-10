@@ -25,10 +25,11 @@ def test_interaction_details_are_injected_only_for_reporter_true() -> None:
 def test_completed_prompt_contains_all_uppercase_relation_requirements() -> None:
     completed = _followup(True)
 
-    assert "{robot HOLDS <color> cube}" in completed
-    assert "{<color> cube ABOVE table}" in completed
-    assert "{<target block or cube> IN <target bin>}" in completed
-    assert "{robot PRESSES <target button>}" in completed
+    assert '["robot","HOLDS","<color> cube"]' in completed
+    assert '["<color> cube","ABOVE","table"]' in completed
+    assert '["<target block or cube>","IN","<target bin>"]' in completed
+    assert '["robot","PRESSES","<target button>"]' in completed
+    assert "even when the visual check fails" in completed
     assert '"verification_passed":true' in completed
     assert '"subgoal":"the selected language subgoal"' in completed
 

@@ -202,7 +202,6 @@ class Qwen3VLModel:
         if self.subgoal_type == "grounded_subgoal":
             infer_request_dict["objects"] = {"ref": [], "bbox": self.history_grounded_bboxes}
         
-        print("\n\n")
         pprint.pprint(infer_request_dict)
         
         return InferRequest(**infer_request_dict)

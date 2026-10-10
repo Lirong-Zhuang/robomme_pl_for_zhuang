@@ -28,8 +28,8 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started Executer server.
-EXECUTER_SEEDS=(0 42 7)
-NUM_REPEATS=3
+EXECUTER_SEEDS=(7)
+NUM_REPEATS=1
 EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
@@ -46,8 +46,8 @@ RE_EVAL_TASKS=""
 
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
-EPISODE_IDS=""
-NUM_EPISODES=50
+EPISODE_IDS="2"
+NUM_EPISODES=1
 
 OBS_HORIZON=16
 MAX_STEPS=1300
@@ -58,9 +58,9 @@ SAVE_DIR="runs/evaluation"
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
 FRAMEWORK_VERSION="trinity_v2.1"
-RUN_NAME="8"
+RUN_NAME="9.test"
 # Preserve completed tasks/episodes and continue with anything still missing.
-OVERWRITE=false
+OVERWRITE=true
 
 # Save the per-episode Manager trace under
 # <SAVE_DIR>/.../<TASK_NAME>/manager_logs/. Raw Manager output stays in that
@@ -93,7 +93,7 @@ REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v7_simple_subgoal/v2-20261006-102030/checkpoint-750"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v2-20261002-000202/checkpoint-900"
 # Maximum recent Reporter calls retained for one subgoal; the newest entry is
 # current. The init is separate, and an unfilled window is not padded.
 REPORTER_HISTORY_SIZE=7
