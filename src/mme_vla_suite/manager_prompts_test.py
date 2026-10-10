@@ -25,10 +25,12 @@ def test_interaction_details_are_injected_only_for_reporter_true() -> None:
 def test_completed_prompt_contains_all_uppercase_relation_requirements() -> None:
     completed = _followup(True)
 
-    assert "robot HOLDS target" in completed
-    assert "target ABOVE table" in completed
-    assert "target IN intended bin" in completed
-    assert "robot PRESSES intended button" in completed
+    assert '["robot","HOLDS","<target cube or block>"]' in completed
+    assert '["<target cube or block>","ABOVE","table"]' in completed
+    assert '["<target cube or block>","IN","<intended bin>"]' in completed
+    assert '["robot","PRESSES","<intended button>"]' in completed
+    assert "a relation to check, not a claim" in completed
+    assert "interaction_pairs must never be empty" in completed
     assert "Do not copy interaction pairs belonging to a different task class" in completed
     assert "verification_passed must be true or false" in completed
 

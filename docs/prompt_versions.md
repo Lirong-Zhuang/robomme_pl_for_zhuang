@@ -32,7 +32,9 @@ Manager:
   and the selected subgoal; evaluation logging records the JSON while passing
   only its `subgoal` field to the Executer. The Manager model itself infers the
   relevant interaction pairs and decides whether the visual success criteria
-  are satisfied; Python does not classify subgoals or validate relation names.
+  are satisfied. Interaction pairs describe the relations being checked, so
+  the Manager must still return the required pairs when its visual decision is
+  false; Python does not classify subgoals or validate relation names.
   Reporter advances its init frame only when the Manager explicitly returns
   `verification_passed=true`. A false, missing, or malformed Manager decision
   keeps both the current subgoal and the existing init frame.
