@@ -17,7 +17,6 @@ from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
 from mme_vla_suite.prompts import get_manager_prompt
 from mme_vla_suite.manager_response import parse_manager_response
 from mme_vla_suite.manager_response import parse_verification_passed
-from mme_vla_suite.manager_response import validate_interaction_pairs
 
 class Qwen3VLModel:
     
@@ -233,16 +232,10 @@ class Qwen3VLModel:
             reported_verification_passed = parse_verification_passed(
                 structured_response
             )
-            interaction_pairs_valid, interaction_task_class = (
-                validate_interaction_pairs(
-                    structured_response,
-                    self.last_response,
-                )
-            )
-            self.last_verification_passed = (
-                reported_verification_passed is True
-                and interaction_pairs_valid
-            )
+            # The Manager owns both semantic decisions: which interaction
+            # pairs are relevant and whether they are visually satisfied.
+            # Python only parses the Manager's explicit Boolean decision.
+            self.last_verification_passed = reported_verification_passed
             if structured_response is None:
                 verification_log = {
                     "interaction_pairs": [],
@@ -257,11 +250,6 @@ class Qwen3VLModel:
                     "verification_passed": reported_verification_passed,
                     "json_parse_success": True,
                 }
-            verification_log["interaction_task_class"] = interaction_task_class
-            verification_log["interaction_pairs_valid"] = interaction_pairs_valid
-            verification_log["verification_approved"] = (
-                self.last_verification_passed
-            )
             verification_log["init_frame_update_approved"] = (
                 self.last_verification_passed is True
             )

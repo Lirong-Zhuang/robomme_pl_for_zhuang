@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 
@@ -51,107 +50,6 @@ def parse_verification_passed(
         return None
     result = payload.get("verification_passed")
     return result if isinstance(result, bool) else None
-
-
-def _interaction_task_class(subgoal: str | None) -> str | None:
-    if not subgoal:
-        return None
-    normalized = subgoal.lower()
-    if re.search(r"\bpick[\s-]?up\b", normalized):
-        return "pick_up"
-    if "bin" in normalized and re.search(
-        r"\b(?:put(?:s|ting)?|plac(?:e|es|ed|ing)|drop(?:s|ped|ping)?)\b",
-        normalized,
-    ):
-        return "put_into_bin"
-    if "button" in normalized and re.search(r"\bpress(?:es|ed|ing)?\b", normalized):
-        return "button"
-    return None
-
-
-def _has_required_pair(
-    pairs: list[Any],
-    *,
-    relationship: str,
-    first_terms: tuple[str, ...],
-    second_terms: tuple[str, ...],
-) -> bool:
-    for pair in pairs:
-        if (
-            isinstance(pair, list)
-            and len(pair) == 3
-            and all(isinstance(value, str) for value in pair)
-        ):
-            first_object, pair_relationship, second_object = pair
-            pair_is_verified = True
-        elif isinstance(pair, dict):
-            # Accept responses produced by the previous prompt format.
-            first_object = pair.get("first_object")
-            pair_relationship = pair.get("relationship")
-            second_object = pair.get("second_object")
-            pair_is_verified = pair.get("verified") is True
-        else:
-            continue
-        if not isinstance(first_object, str) or not isinstance(second_object, str):
-            continue
-        if (
-            pair_relationship == relationship
-            and pair_is_verified
-            and any(term in first_object.lower() for term in first_terms)
-            and any(term in second_object.lower() for term in second_terms)
-        ):
-            return True
-    return False
-
-
-def validate_interaction_pairs(
-    payload: dict[str, Any] | None,
-    current_subgoal: str | None,
-) -> tuple[bool, str | None]:
-    """Validate the required interaction triples for a subgoal class.
-
-    The three interaction-aware classes require concrete, correctly oriented
-    triples. The top-level ``verification_passed`` value separately represents
-    whether those required relations are visually true. Legacy object records
-    with ``verified=true`` remain accepted. Other subgoal classes retain the
-    prompt's legacy behavior and may use an empty pair list.
-    """
-    task_class = _interaction_task_class(current_subgoal)
-    if task_class is None:
-        return True, None
-    if payload is None:
-        return False, task_class
-    pairs = payload.get("interaction_pairs")
-    if not isinstance(pairs, list) or not pairs:
-        return False, task_class
-
-    if task_class == "pick_up":
-        valid = _has_required_pair(
-            pairs,
-            relationship="HOLDS",
-            first_terms=("robot",),
-            second_terms=("cube", "block"),
-        ) and _has_required_pair(
-            pairs,
-            relationship="ABOVE",
-            first_terms=("cube", "block"),
-            second_terms=("table",),
-        )
-    elif task_class == "put_into_bin":
-        valid = _has_required_pair(
-            pairs,
-            relationship="IN",
-            first_terms=("cube", "block"),
-            second_terms=("bin",),
-        )
-    else:
-        valid = _has_required_pair(
-            pairs,
-            relationship="PRESSES",
-            first_terms=("robot",),
-            second_terms=("button",),
-        )
-    return valid, task_class
 
 
 def should_update_init_frame(

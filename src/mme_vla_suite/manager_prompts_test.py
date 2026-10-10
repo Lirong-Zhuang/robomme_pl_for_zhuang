@@ -25,13 +25,12 @@ def test_interaction_details_are_injected_only_for_reporter_true() -> None:
 def test_completed_prompt_contains_all_uppercase_relation_requirements() -> None:
     completed = _followup(True)
 
-    assert '["robot","HOLDS","<color> cube"]' in completed
-    assert '["<color> cube","ABOVE","table"]' in completed
-    assert '["<target block or cube>","IN","<target bin>"]' in completed
-    assert '["robot","PRESSES","<target button>"]' in completed
-    assert "even when the visual check fails" in completed
-    assert '"verification_passed":true' in completed
-    assert '"subgoal":"the selected language subgoal"' in completed
+    assert "robot HOLDS target" in completed
+    assert "target ABOVE table" in completed
+    assert "target IN intended bin" in completed
+    assert "robot PRESSES intended button" in completed
+    assert "Do not copy interaction pairs belonging to a different task class" in completed
+    assert "verification_passed must be true or false" in completed
 
 
 def test_all_followups_retain_single_image_placeholder() -> None:

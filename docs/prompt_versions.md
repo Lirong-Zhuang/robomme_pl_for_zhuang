@@ -30,12 +30,12 @@ Manager:
   before advancing. On that `true` branch, the Manager returns a compact JSON
   record containing the checked interaction pairs, the verification result,
   and the selected subgoal; evaluation logging records the JSON while passing
-  only its `subgoal` field to the Executer. Reporter advances its init frame
-  only after `verification_passed=true` and all required, correctly oriented
-  interaction triples are present in `[first object, RELATIONSHIP, second object]`
-  form; an empty pair list cannot pass pick-up, put-into-bin, or button
-  verification. Failed, missing,
-  or malformed verification keeps both the current subgoal and the existing init frame.
+  only its `subgoal` field to the Executer. The Manager model itself infers the
+  relevant interaction pairs and decides whether the visual success criteria
+  are satisfied; Python does not classify subgoals or validate relation names.
+  Reporter advances its init frame only when the Manager explicitly returns
+  `verification_passed=true`. A false, missing, or malformed Manager decision
+  keeps both the current subgoal and the existing init frame.
   The `false` and missing-result branches retain the original plain-subgoal
   output behavior.
 
