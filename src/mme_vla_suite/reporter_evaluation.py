@@ -17,10 +17,10 @@ import re
 from typing import Any
 from typing import Protocol
 
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
-from mme_vla_suite.reporter_prompts import REPORTER_SYSTEM_PROMPT
 from mme_vla_suite.reporter_prompts import build_reporter_image_window
-from mme_vla_suite.reporter_prompts import format_reporter_user_prompt
 from mme_vla_suite.reporter_prompts import validate_reporter_history_size
 
 
@@ -709,17 +709,19 @@ def _format_messages_for_history(
     messages: Sequence[dict[str, Any]],
     subgoal: str,
     observation_count: int,
+    reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION,
 ) -> list[dict[str, Any]]:
     """Copy a request and apply the shared prompt at the actual window length."""
+    reporter_prompt = get_reporter_prompt(reporter_prompt_version)
     result = [dict(message) for message in messages]
     has_system_message = False
     has_user_message = False
     for message in result:
         if message.get("role") == "system":
-            message["content"] = REPORTER_SYSTEM_PROMPT
+            message["content"] = reporter_prompt.system_prompt
             has_system_message = True
         if message.get("role") == "user":
-            message["content"] = format_reporter_user_prompt(
+            message["content"] = reporter_prompt.format_user_prompt(
                 subgoal,
                 observation_count,
             )
@@ -746,6 +748,7 @@ def evaluate_reporter_sequence(
     progress_every: int = 50,
     reporter_debounce: bool = True,
     reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
+    reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION,
     prediction_records_out: list[dict[str, Any]] | None = None,
 ) -> ReporterMetrics:
     """Evaluate with prediction-driven init frames, history, and prompts.
@@ -761,6 +764,7 @@ def evaluate_reporter_sequence(
     reporter_history_size = validate_reporter_history_size(
         reporter_history_size
     )
+    reporter_prompt = get_reporter_prompt(reporter_prompt_version)
     samples = load_reporter_samples(dataset_path, image_root=image_root)
     frames, duplicates_skipped = prepare_reporter_sequence(samples)
     max_dataset_history = max(len(frame.sample.images) - 1 for frame in frames)
@@ -830,6 +834,11 @@ def evaluate_reporter_sequence(
                 stage_messages,
                 reporter_task,
                 len(observation_history),
+                reporter_prompt.version,
+            )
+            reporter_prompt.validate_media_alignment(
+                used_messages,
+                image_count=len(used_image_paths),
             )
             label_comparable = request_subgoal_index == dataset_subgoal_index
             request = infer_request_type(
@@ -882,6 +891,8 @@ def evaluate_reporter_sequence(
                 "reporter_history_images": used_image_paths[1:],
                 "reporter_history_size": reporter_history_size,
                 "reporter_history_count": len(used_image_paths) - 1,
+                "reporter_prompt_version": reporter_prompt.version,
+                "reporter_prompt_sha256": reporter_prompt.content_hash,
                 "init_updated": init_updated,
                 "effective_true": effective_true,
                 "reporter_debounce": reporter_debounce,
@@ -910,6 +921,8 @@ def evaluate_reporter_sequence(
                 "current_frame": current_path,
                 "reporter_init_image": used_init_path,
                 "reporter_history_images": used_image_paths[1:],
+                "reporter_prompt_version": reporter_prompt.version,
+                "reporter_prompt_sha256": reporter_prompt.content_hash,
                 "expected": sample.expected,
                 "predicted": predicted,
                 "reporter_init_updated": init_updated,

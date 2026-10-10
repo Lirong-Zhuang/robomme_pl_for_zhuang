@@ -11,12 +11,15 @@ os.environ['VIDEO_MAX_TOKEN_NUM'] = '64'
 os.environ['FPS_MAX_FRAMES'] = '10'
 
 from swift.llm import PtEngine, InferRequest, RequestConfig
+from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_manager_prompt
 
 class Qwen3VLModel:
     
     def __init__(self, 
         adapter_path: str,
         subgoal_type: str = "simple_subgoal", 
+        prompt_version: str = DEFAULT_MANAGER_PROMPT_VERSION,
     ):
         self.model_name = "qwenvl"
         self.subgoal_type = subgoal_type
@@ -24,13 +27,8 @@ class Qwen3VLModel:
         
         assert subgoal_type in ["simple_subgoal", "grounded_subgoal"]
         
-        # Load appropriate prompt dictionary
-        if subgoal_type == "simple_subgoal":
-            self.system_prompt = "You are a helpful assistant to help guide the robot to complete the task by predicting a sequence of language subgoals"
-        elif subgoal_type == "grounded_subgoal":
-            self.system_prompt = "You are a helpful assistant to help guide the robot to complete the task by predicting a sequence of grounded language subgoals"
-        else:
-            raise ValueError(f"Invalid subgoal type: {subgoal_type}")
+        self.prompt = get_manager_prompt(prompt_version)
+        self.system_prompt = self.prompt.system_prompt(subgoal_type)
         
         print(f"Loading Qwen3-VL-4B-Instruct model Adapter from {adapter_path}")
         self.engine = PtEngine(
@@ -165,44 +163,31 @@ class Qwen3VLModel:
         image_path = os.path.join(self.save_dir, f"step_{step_idx}_image.png")
         if not os.path.exists(image_path):
             imageio.imwrite(image_path, image_query)
-        video_prefix = "<video>" if self.video_path else ""
-        
-        if self.subgoal_type == "simple_subgoal":            
-            if len(self.history_simple_subgoals) == 0:
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThis is the initial turn for prediction\n<image>What's the next language subgoal based on current observation?"
-            else:
-                reporter_text = self._format_reporter_result(
-                    reporter_result,
-                    "language subgoal",
-                )
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n{reporter_text}\n<image>What's the next language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
-                    
-        else:        
-            if len(self.history_grounded_subgoals) == 0:
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThis is the initial turn for prediction\n<image>What's the next grounded language subgoal based on current observation?"
-            else:            
-                reporter_text = self._format_reporter_result(
-                    reporter_result,
-                    "grounded language subgoal",
-                )
-                user_prompt = f"{video_prefix}The task goal is: {self.task_goal}\nThe history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n{reporter_text}\n<image>What's the next grounded language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
+        history_subgoals = (
+            self.history_simple_subgoals
+            if self.subgoal_type == "simple_subgoal"
+            else self.history_grounded_subgoals
+        )
+        messages = self.prompt.build_messages(
+            subgoal_type=self.subgoal_type,
+            task_goal=self.task_goal,
+            history_subgoals=history_subgoals,
+            reporter_result=reporter_result,
+            has_video=self.video_path is not None,
+        )
         
         infer_request_dict = {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": self.system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ],
+            "messages": messages,
             "images": [image_path]
         }
         
         if self.video_path is not None:
             infer_request_dict["videos"] = [self.video_path]
+        self.prompt.validate_media_alignment(
+            messages,
+            image_count=len(infer_request_dict["images"]),
+            video_count=len(infer_request_dict.get("videos", [])),
+        )
             
         if self.subgoal_type == "grounded_subgoal":
             infer_request_dict["objects"] = {"ref": [], "bbox": self.history_grounded_bboxes}
@@ -212,27 +197,6 @@ class Qwen3VLModel:
         
         return InferRequest(**infer_request_dict)
 
-    def _format_reporter_result(
-        self,
-        reporter_result: bool | None,
-        subgoal_name: str,
-    ) -> str:
-        if reporter_result is True:
-            return (
-                f"The Reporter determined that the last predicted {subgoal_name} "
-                "has been completed."
-            )
-        if reporter_result is False:
-            return (
-                f"The Reporter determined that the last predicted {subgoal_name} "
-                "has not been completed."
-            )
-        return (
-            f"The Reporter did not provide a result for the last predicted "
-            f"{subgoal_name}."
-        )
-    
-    
     def call(
         self,
         image_query: np.ndarray,

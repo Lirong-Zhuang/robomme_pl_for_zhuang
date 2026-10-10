@@ -56,10 +56,13 @@ from mme_vla_suite.dataset_builder.robomme_h5_utils import (
     get_env_id,
     get_episode_indices,
 )
-from mme_vla_suite.reporter_prompts import (
-    DEFAULT_REPORTER_HISTORY_SIZE,
-    REPORTER_PROMPT_VERSION,
-)
+from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import available_manager_prompt_versions
+from mme_vla_suite.prompts import available_reporter_prompt_versions
+from mme_vla_suite.prompts import get_manager_prompt
+from mme_vla_suite.prompts import get_reporter_prompt
+from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
 
 
 DATASET_TYPES = (
@@ -217,6 +220,22 @@ def _parse_args() -> argparse.Namespace:
         help="Write the same visualization outputs as the selected existing builder.",
     )
     parser.add_argument(
+        "--manager_prompt_version",
+        default=DEFAULT_MANAGER_PROMPT_VERSION,
+        help=(
+            "QwenVL Manager prompt version; available: "
+            + ", ".join(available_manager_prompt_versions())
+        ),
+    )
+    parser.add_argument(
+        "--reporter_prompt_version",
+        default=DEFAULT_REPORTER_PROMPT_VERSION,
+        help=(
+            "Reporter prompt version; available: "
+            + ", ".join(available_reporter_prompt_versions())
+        ),
+    )
+    parser.add_argument(
         "--reporter_history_size",
         type=int,
         default=DEFAULT_REPORTER_HISTORY_SIZE,
@@ -261,6 +280,8 @@ def _build_one_split(
     duplicate_samples: bool,
     data_split: Literal["train", "test"],
     reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
+    manager_prompt_version: str = DEFAULT_MANAGER_PROMPT_VERSION,
+    reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION,
 ) -> None:
     common_kwargs: dict[str, Any] = {
         "raw_data_path": str(raw_data_path),
@@ -277,6 +298,7 @@ def _build_one_split(
             manager_dir_name="qwenvl",
             duplicate_samples=duplicate_samples,
             data_split=data_split,
+            manager_prompt_version=manager_prompt_version,
         )
     elif dataset_type == "manager_memer":
         processor = MemerManagerDatasetBuilder(
@@ -299,6 +321,7 @@ def _build_one_split(
             duplicate_samples=duplicate_samples,
             data_split=data_split,
             reporter_history_size=reporter_history_size,
+            reporter_prompt_version=reporter_prompt_version,
         )
     else:  # pragma: no cover - argparse prevents this branch.
         raise ValueError(f"Unknown dataset_type: {dataset_type}")
@@ -364,8 +387,14 @@ def main() -> None:
         },
     }
     if args.dataset_type == "reporter_qwenvl":
+        reporter_prompt = get_reporter_prompt(args.reporter_prompt_version)
         manifest["reporter_history_size"] = args.reporter_history_size
-        manifest["reporter_prompt_version"] = REPORTER_PROMPT_VERSION
+        manifest["reporter_prompt_version"] = reporter_prompt.version
+        manifest["reporter_prompt_sha256"] = reporter_prompt.content_hash
+    if args.dataset_type == "manager_qwenvl":
+        manager_prompt = get_manager_prompt(args.manager_prompt_version)
+        manifest["manager_prompt_version"] = manager_prompt.version
+        manifest["manager_prompt_sha256"] = manager_prompt.content_hash
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -391,6 +420,8 @@ def main() -> None:
         duplicate_samples=True,
         data_split="train",
         reporter_history_size=args.reporter_history_size,
+        manager_prompt_version=args.manager_prompt_version,
+        reporter_prompt_version=args.reporter_prompt_version,
     )
     print(f"\nBuilding testset at {test_output_path}")
     _build_one_split(
@@ -403,6 +434,8 @@ def main() -> None:
         duplicate_samples=False,
         data_split="test",
         reporter_history_size=args.reporter_history_size,
+        manager_prompt_version=args.manager_prompt_version,
+        reporter_prompt_version=args.reporter_prompt_version,
     )
     print(f"Time taken: {(time.perf_counter() - started_at) / 60:.2f} minutes")
 

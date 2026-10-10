@@ -78,6 +78,7 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
+MANAGER_PROMPT_VERSION="qwenvl_v1"
 MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
@@ -87,6 +88,7 @@ EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
+REPORTER_PROMPT_VERSION="interaction_aware_v2"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
@@ -318,8 +320,10 @@ trap cleanup EXIT INT TERM
 
 echo "Evaluation:      $REQUESTED_EVAL_PRESET"
 echo "Manager:         $MANAGER_TYPE"
+echo "Manager prompt:  $MANAGER_PROMPT_VERSION"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
+echo "Reporter prompt: $REPORTER_PROMPT_VERSION"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
 echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
 echo "Framework version: $FRAMEWORK_VERSION"
@@ -371,7 +375,9 @@ run_evaluation() {
         --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
         --args.manager-simple-adapter-path "$MANAGER_SIMPLE_ADAPTER_PATH"
         --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
+        --args.manager-prompt-version "$MANAGER_PROMPT_VERSION"
         --args.reporter-type "$REPORTER_TYPE"
+        --args.reporter-prompt-version "$REPORTER_PROMPT_VERSION"
         --args.reporter-model-path "$REPORTER_MODEL_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
         --args.reporter-history-size "$REPORTER_HISTORY_SIZE"

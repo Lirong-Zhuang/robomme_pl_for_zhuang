@@ -28,12 +28,11 @@ from mme_vla_suite.dataset_builder.robomme_h5_utils import (
     get_timestep_indices,
     resolve_subgoal,
 )
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.reporter_prompts import (
     DEFAULT_REPORTER_HISTORY_SIZE,
-    REPORTER_PROMPT_VERSION,
-    REPORTER_SYSTEM_PROMPT,
     build_reporter_image_window,
-    format_reporter_user_prompt,
     validate_reporter_history_size,
 )
 
@@ -53,10 +52,12 @@ class DatasetBuilder(ManagerDatasetBuilder):
         duplicate_samples: bool = True,
         data_split: Literal["train", "test"] = "train",
         reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
+        reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION,
     ) -> None:
         reporter_history_size = validate_reporter_history_size(
             reporter_history_size
         )
+        reporter_prompt = get_reporter_prompt(reporter_prompt_version)
         super().__init__(
             raw_data_path=raw_data_path,
             preprocessed_data_path=preprocessed_data_path,
@@ -69,17 +70,26 @@ class DatasetBuilder(ManagerDatasetBuilder):
             data_split=data_split,
         )
         self.reporter_history_size = reporter_history_size
+        self.reporter_prompt = reporter_prompt
         self.failure_hard_negative_records: list[dict] = []
 
     def run(self) -> list:
         """Build rows and write a machine-readable failed-grasp label audit."""
         results = super().run()
+        prompt_metadata_path = os.path.join(
+            self.data_dir,
+            "prompt_metadata.json",
+        )
+        with open(prompt_metadata_path, "w", encoding="utf-8") as file:
+            json.dump(self.reporter_prompt.metadata(), file, indent=2)
+            file.write("\n")
         audit_path = os.path.join(
             self.data_dir,
             "failure_hard_negative_audit.json",
         )
         audit = {
-            "reporter_prompt_version": REPORTER_PROMPT_VERSION,
+            "reporter_prompt_version": self.reporter_prompt.version,
+            "reporter_prompt_sha256": self.reporter_prompt.content_hash,
             "data_split": self.data_split,
             "failure_recovery_episode_count": len(
                 self.failure_hard_negative_records
@@ -103,8 +113,8 @@ class DatasetBuilder(ManagerDatasetBuilder):
         )
         return results
 
-    @staticmethod
     def make_reporter_data(
+        self,
         subgoal: str,
         image_paths: list[str],
         success: bool,
@@ -119,11 +129,7 @@ class DatasetBuilder(ManagerDatasetBuilder):
             )
         return {
             "messages": [
-                {"role": "system", "content": REPORTER_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": format_reporter_user_prompt(subgoal, history_size),
-                },
+                *self.reporter_prompt.build_messages(subgoal, history_size),
                 {
                     "role": "assistant",
                     "content": json.dumps({"success": success}),

@@ -1,23 +1,24 @@
-"""Prompts and image-window helpers shared by Reporter training and inference."""
+"""Backward-compatible access to the default versioned Reporter prompt.
+
+New code should resolve an explicit version with
+``mme_vla_suite.prompts.get_reporter_prompt``. These names remain available so
+existing callers continue to use the Trinity v2.2 default.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import TypeVar
 
-
-DEFAULT_REPORTER_HISTORY_SIZE = 7
-REPORTER_PROMPT_VERSION = "trinity_v2.2-interaction-aware"
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_reporter_prompt
+from mme_vla_suite.prompts.registry import DEFAULT_REPORTER_HISTORY_SIZE
 
 _ImageT = TypeVar("_ImageT")
 
-
-REPORTER_SYSTEM_PROMPT = (
-    "You are a helpful assistant to determine whether the current robot subgoal "
-    "is complete by comparing observation before executing the current subgoal with a recent sequence "
-    "of observations. "
-    'Return only {"success": true} or {"success": false}. '
-)
+_DEFAULT_PROMPT = get_reporter_prompt(DEFAULT_REPORTER_PROMPT_VERSION)
+REPORTER_PROMPT_VERSION = _DEFAULT_PROMPT.version
+REPORTER_SYSTEM_PROMPT = _DEFAULT_PROMPT.system_prompt
 
 
 def validate_reporter_history_size(history_size: int) -> int:
@@ -32,12 +33,7 @@ def build_reporter_image_window(
     recent_observations: Iterable[_ImageT],
     history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
 ) -> list[_ImageT]:
-    """Return the init image followed by at most ``history_size`` observations.
-
-    ``recent_observations`` contains observations captured at Reporter calls,
-    rather than adjacent environment timesteps. An unfilled window remains at
-    its actual length; the init image is never copied into the history.
-    """
+    """Return the init image followed by at most ``history_size`` observations."""
     validate_reporter_history_size(history_size)
     history = list(recent_observations)[-history_size:]
     return [init_image, *history]
@@ -47,29 +43,9 @@ def format_reporter_user_prompt(
     subgoal: str,
     history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
 ) -> str:
-    """Format the exact multi-image prompt used for training and inference."""
+    """Format the default Reporter prompt retained for legacy callers."""
     validate_reporter_history_size(history_size)
-    observation_lines = []
-    for index in range(1, history_size + 1):
-        suffix = " (current observation)" if index == history_size else ""
-        observation_lines.append(
-            f"Recent observation {index}/{history_size}{suffix}: <image>"
-        )
-    return (
-        f"Current Subgoal: {subgoal}\n"
-        "Observation before executing the current subgoal: <image>\n"
-        "Recent observations after execution, from "
-        "oldest to newest:\n"
-        + "\n".join(observation_lines)
-        + "\nDetermine whether the current subgoal is complete by comparing the "
-        "pre-execution observation with the recent observation sequence. Use the "
-        "current subgoal to decide which state evidence is relevant. For robot-only "
-        "subgoals, the robot's state or pose may be sufficient. For subgoals involving "
-        "an object or the environment, verify the corresponding state change instead "
-        "of assuming success merely because the robot's motion has stopped. "
-    )
+    return _DEFAULT_PROMPT.format_user_prompt(subgoal, history_size)
 
 
-# Preserve the original public template name for callers that format the
-# default configuration with ``.replace("{subgoal}", ...)``.
 REPORTER_USER_PROMPT = format_reporter_user_prompt("{subgoal}")

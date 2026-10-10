@@ -23,6 +23,10 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import available_reporter_prompt_versions
+from mme_vla_suite.prompts import get_reporter_prompt
+
 CUDA_VISIBLE_DEVICES = "0"
 
 DEFAULT_REPORTER_MODEL_PATH = "Qwen/Qwen3-VL-4B-Instruct"
@@ -35,6 +39,7 @@ DEFAULT_RESULT_NAME = "reporter_qwen_v6.1_ckpt900"
 # False exactly matches dev_trinity: every parsed result is applied directly.
 REPORTER_DEBOUNCE = True
 REPORTER_HISTORY_SIZE = 7
+REPORTER_PROMPT_VERSION = DEFAULT_REPORTER_PROMPT_VERSION
 
 # Completion-scoring tolerance, measured in Reporter calls.
 EARLY_TOLERANCE_CALLS = 1
@@ -270,6 +275,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--reporter-prompt-version",
+        default=REPORTER_PROMPT_VERSION,
+        help=(
+            "Prompt applied to every offline request; available: "
+            + ", ".join(available_reporter_prompt_versions())
+        ),
+    )
+    parser.add_argument(
         "--reporter-history-size",
         type=int,
         default=REPORTER_HISTORY_SIZE,
@@ -309,6 +322,7 @@ def main() -> None:
             "--maximum-delay-calls must be at least --full-credit-delay-calls"
         )
     dataset_path = resolve_reporter_test_dataset(args.testset_path, args.subgoal_type)
+    reporter_prompt = get_reporter_prompt(args.reporter_prompt_version)
     adapter_path = "" if args.no_adapter else _resolve_repo_path(args.adapter_path)
     if adapter_path and not Path(adapter_path).is_dir():
         raise FileNotFoundError(f"Reporter adapter not found: {adapter_path}")
@@ -339,6 +353,7 @@ def main() -> None:
             progress_every=args.progress_every,
             reporter_debounce=args.reporter_debounce,
             reporter_history_size=args.reporter_history_size,
+            reporter_prompt_version=reporter_prompt.version,
             prediction_records_out=prediction_records,
         )
     finally:
@@ -383,6 +398,8 @@ def main() -> None:
             if prediction_records
             else None
         ),
+        "reporter_prompt_version": reporter_prompt.version,
+        "reporter_prompt_sha256": reporter_prompt.content_hash,
         "completion": {
             key: value
             for key, value in completion_report.items()
