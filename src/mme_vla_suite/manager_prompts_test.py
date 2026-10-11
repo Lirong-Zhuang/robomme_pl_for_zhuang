@@ -22,15 +22,16 @@ def test_interaction_details_are_injected_only_for_reporter_true() -> None:
     assert "interaction_pairs" not in missing
 
 
-def test_completed_prompt_contains_all_uppercase_relation_requirements() -> None:
+def test_completed_prompt_contains_model_driven_verification_steps() -> None:
     completed = _followup(True)
 
-    assert '["robot","HOLDS","<target>"]' in completed
-    assert '["<target>","ABOVE","table"]' in completed
-    assert '["<target>","IN","<bin>"]' in completed
-    assert '["robot","PRESSES","<button>"]' in completed
-    assert "include them even when false or unclear" in completed
-    assert "never use [] for these tasks" in completed
+    assert "Classify the current subgoal" in completed
+    assert '[["robot","HOLDS","<color> cube"]' in completed
+    assert '[["<color> cube","IN","bin"]]' in completed
+    assert '[["robot","PRESSES","button"]]' in completed
+    assert "infer each RELATIONSHIP from the current image" in completed
+    assert "Classification alone does not prove completion" in completed
+    assert "Always output the inferred pairs" in completed
     assert "exactly one minified JSON line" in completed
 
 
