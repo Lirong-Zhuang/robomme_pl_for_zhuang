@@ -52,6 +52,15 @@ def parse_verification_passed(
     return result if isinstance(result, bool) else None
 
 
+def parse_verification_response(response: str) -> bool | None:
+    """Return the strict Boolean from a verification-only Manager response."""
+    try:
+        payload = json.loads(_strip_code_fence(response))
+    except json.JSONDecodeError:
+        return None
+    return parse_verification_passed(payload if isinstance(payload, dict) else None)
+
+
 def should_update_init_frame(
     *,
     has_current_subgoal: bool,

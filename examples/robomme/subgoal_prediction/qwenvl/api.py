@@ -1,4 +1,3 @@
-import json
 import os
 import pprint
 import re
@@ -16,7 +15,7 @@ from swift.llm import PtEngine, InferRequest, RequestConfig
 from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
 from mme_vla_suite.prompts import get_manager_prompt
 from mme_vla_suite.manager_response import parse_manager_response
-from mme_vla_suite.manager_response import parse_verification_passed
+from mme_vla_suite.manager_response import parse_verification_response
 
 class Qwen3VLModel:
     
@@ -167,6 +166,7 @@ class Qwen3VLModel:
         image_query: np.ndarray,
         step_idx: int,
         reporter_result: bool | None = None,
+        verification_only: bool = False,
     ) -> dict:
         
         image_path = os.path.join(self.save_dir, f"step_{step_idx}_image.png")
@@ -177,13 +177,21 @@ class Qwen3VLModel:
             if self.subgoal_type == "simple_subgoal"
             else self.history_grounded_subgoals
         )
-        messages = self.prompt.build_messages(
-            subgoal_type=self.subgoal_type,
-            task_goal=self.task_goal,
-            history_subgoals=history_subgoals,
-            reporter_result=reporter_result,
-            has_video=self.video_path is not None,
-        )
+        if verification_only:
+            messages = self.prompt.build_verification_messages(
+                subgoal_type=self.subgoal_type,
+                task_goal=self.task_goal,
+                subgoal_to_verify=history_subgoals[-1],
+                has_video=self.video_path is not None,
+            )
+        else:
+            messages = self.prompt.build_messages(
+                subgoal_type=self.subgoal_type,
+                task_goal=self.task_goal,
+                history_subgoals=history_subgoals,
+                reporter_result=reporter_result,
+                has_video=self.video_path is not None,
+            )
         
         infer_request_dict = {
             "messages": messages,
@@ -212,7 +220,33 @@ class Qwen3VLModel:
         keep_period: int = 0,
         reporter_result: bool | None = None,
     ) -> str:
-        if step_idx <= keep_period and self.last_response is not None:
+        self.last_verification_passed = None
+        effective_reporter_result = reporter_result
+        if reporter_result is True and self.interaction_verification_enabled:
+            verification_request = self.prepare_infer_request(
+                image_query,
+                step_idx,
+                verification_only=True,
+            )
+            verification_response = self.engine.infer(
+                [verification_request],
+                request_config=RequestConfig(max_tokens=32, temperature=0),
+            )[0].choices[0].message.content
+            self.last_verification_passed = parse_verification_response(
+                verification_response
+            )
+            effective_reporter_result = self.last_verification_passed is True
+            print("Manager verification raw response: ", verification_response)
+            print(
+                "Manager verification signal for next call: ",
+                effective_reporter_result,
+            )
+
+        if (
+            step_idx <= keep_period
+            and self.last_response is not None
+            and reporter_result is not True
+        ):
             # some tasks that require press button, qwen models always skip
             # add some hard-coded rules to fix it
             response = self.last_response
@@ -220,50 +254,13 @@ class Qwen3VLModel:
             infer_request = self.prepare_infer_request(
                 image_query,
                 step_idx,
-                reporter_result,
+                effective_reporter_result,
             )
             response = self.engine.infer([infer_request], request_config=RequestConfig(max_tokens=128, temperature=0))
             response = response[0].choices[0].message.content
         
-        subgoal, structured_response = parse_manager_response(response)
-        self.last_verification_passed = None
+        subgoal, _ = parse_manager_response(response)
         print("Manager raw response: ", response)
-        if reporter_result is True and self.interaction_verification_enabled:
-            reported_verification_passed = parse_verification_passed(
-                structured_response
-            )
-            # The Manager owns both semantic decisions: which interaction
-            # pairs are relevant and whether they are visually satisfied.
-            # Python only parses the Manager's explicit Boolean decision.
-            self.last_verification_passed = reported_verification_passed
-            if structured_response is None:
-                verification_log = {
-                    "interaction_pairs": [],
-                    "verification_passed": reported_verification_passed,
-                    "json_parse_success": False,
-                }
-            else:
-                verification_log = {
-                    "interaction_pairs": structured_response.get(
-                        "interaction_pairs", []
-                    ),
-                    "verification_passed": reported_verification_passed,
-                    "json_parse_success": True,
-                }
-            verification_log["init_frame_update_approved"] = (
-                self.last_verification_passed is True
-            )
-            if (
-                self.last_verification_passed is not True
-                and self.last_response is not None
-            ):
-                # Failed, missing, or malformed verification cannot advance
-                # either the executable subgoal or Reporter's init frame.
-                subgoal = self.last_response
-            print(
-                "Manager interaction verification JSON: ",
-                json.dumps(verification_log, ensure_ascii=False),
-            )
         print("Manager executable subgoal: ", subgoal)
         self.last_response = subgoal
         self.update_history_subgoals(subgoal)

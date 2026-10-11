@@ -22,24 +22,15 @@ Manager:
 
 - `qwenvl_v1`: the QwenVL Manager prompt shared by Trinity v2.1 and v2.2 and
   the current default.
-- `qwenvl_interaction_verify_v2`: a prompt-mismatch evaluation variant that
-  preserves the `qwenvl_v1` system and initial prompts, adds a short
-  Reporter-success verification gate to follow-up prompts, and injects the
-  detailed interaction rules only when Reporter returns `true`. It verifies
-  subgoal-specific relations for pick-up, put-into-bin, and button subgoals
-  before advancing. On that `true` branch, the Manager returns a compact JSON
-  record containing the checked interaction pairs, the verification result,
-  and the selected subgoal; evaluation logging records the JSON while passing
-  only its `subgoal` field to the Executer. The Manager model itself infers the
-  relevant interaction pairs and decides whether the visual success criteria
-  are satisfied. Interaction pairs describe the relations being checked, so
-  the Manager must still return the required pairs when its visual decision is
-  false; Python does not classify subgoals or validate relation names.
-  Reporter advances its init frame only when the Manager explicitly returns
-  `verification_passed=true`. A false, missing, or malformed Manager decision
-  keeps both the current subgoal and the existing init frame.
-  The `false` and missing-result branches retain the original plain-subgoal
-  output behavior.
+- `qwenvl_interaction_verify_v2`: an evaluation variant that preserves the
+  `qwenvl_v1` Manager prompts. When Reporter returns `true`, the same Manager
+  first receives the current image and only the subgoal being checked, then
+  returns `{"verification_passed":true|false}`. Evaluation immediately calls
+  the Manager again on the same frame with the original completed prompt when
+  verification passes, or the original not-completed prompt when it fails.
+  Reporter advances its init frame only after an explicit `true`; a false,
+  missing, or malformed signal is treated as not completed. Reporter `false`
+  and missing-result calls retain the original one-call behavior.
 
 The Manager registry currently applies only to QwenVL. Gemini, MemER, and QPA
 retain their specialized prompt implementations.

@@ -58,7 +58,7 @@ SAVE_DIR="runs/evaluation"
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
 FRAMEWORK_VERSION="trinity_v2.1"
-RUN_NAME="9.test"
+RUN_NAME="10.test"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
