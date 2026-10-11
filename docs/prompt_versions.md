@@ -25,12 +25,18 @@ Manager:
 - `qwenvl_interaction_verify_v2`: an evaluation variant that preserves the
   `qwenvl_v1` Manager prompts. When Reporter returns `true`, the same Manager
   first receives the current image and only the subgoal being checked, then
-  returns `{"verification_passed":true|false}`. Evaluation immediately calls
-  the Manager again on the same frame with the original completed prompt when
-  verification passes, or the original not-completed prompt when it fails.
+  returns the inferred interaction pairs and `verification_passed`. Evaluation
+  uses only that Boolean signal to immediately call the Manager again on the
+  same frame with the original completed prompt when verification passes, or
+  the original not-completed prompt when it fails.
   Reporter advances its init frame only after an explicit `true`; a false,
   missing, or malformed signal is treated as not completed. Reporter `false`
   and missing-result calls retain the original one-call behavior.
+- `qwenvl_interaction_verify_v3`: a concise, trainable verification prompt.
+  Given only the subgoal being checked and the current observation, it first
+  infers concrete interaction triples and then derives the completion Boolean
+  only from those inferred pairs and relations. Its normal Manager prompts and
+  two-call evaluation flow are unchanged from v2.
 
 The Manager registry currently applies only to QwenVL. Gemini, MemER, and QPA
 retain their specialized prompt implementations.
@@ -80,6 +86,12 @@ To run the interaction-verification ablation without retraining, set:
 
 ```bash
 MANAGER_PROMPT_VERSION="qwenvl_interaction_verify_v2"
+```
+
+To evaluate the concise v3 verification prompt, set:
+
+```bash
+MANAGER_PROMPT_VERSION="qwenvl_interaction_verify_v3"
 ```
 
 Then run `bash scripts/eval.sh`. The resolved prompt versions and hashes are

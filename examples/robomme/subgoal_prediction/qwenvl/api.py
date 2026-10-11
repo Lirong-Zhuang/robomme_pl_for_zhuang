@@ -32,7 +32,8 @@ class Qwen3VLModel:
         
         self.prompt = get_manager_prompt(prompt_version)
         self.interaction_verification_enabled = (
-            self.prompt.version == "qwenvl_interaction_verify_v2"
+            self.prompt.verification_system_prompt is not None
+            and self.prompt.verification_user_prompt_template is not None
         )
         self.last_verification_passed = None
         self.system_prompt = self.prompt.system_prompt(subgoal_type)
