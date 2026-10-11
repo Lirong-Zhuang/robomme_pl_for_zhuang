@@ -11,6 +11,11 @@ Reporter:
 - `temporal_v1`: the Trinity v2.1 temporal comparison prompt.
 - `interaction_aware_v2`: the Trinity v2.2 interaction-aware prompt and the
   current default.
+- `interaction_pairs_v3`: preserves the `interaction_aware_v2` temporal
+  completion judgement and additionally outputs interaction pairs selected
+  from the current subgoal. Live evaluation currently parses only `success`;
+  `interaction_pairs` is retained in the raw response and Reporter log for
+  inspection.
 
 Reporter aliases retained for historical commands:
 
@@ -89,6 +94,14 @@ To run the interaction-verification ablation without retraining, set:
 
 ```bash
 MANAGER_PROMPT_VERSION="qwenvl_interaction_verify_v2"
+```
+
+To keep Manager as the original planner and inspect interaction pairs produced
+by Reporter, set:
+
+```bash
+MANAGER_PROMPT_VERSION="qwenvl_v1"
+REPORTER_PROMPT_VERSION="interaction_pairs_v3"
 ```
 
 Then run `bash scripts/eval.sh`. The resolved prompt versions and hashes are

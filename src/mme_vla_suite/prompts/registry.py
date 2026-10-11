@@ -9,6 +9,7 @@ from typing import Literal
 from mme_vla_suite.prompts.manager import qwenvl_interaction_verify_v2
 from mme_vla_suite.prompts.manager import qwenvl_v1
 from mme_vla_suite.prompts.reporter import interaction_aware_v2
+from mme_vla_suite.prompts.reporter import interaction_pairs_v3
 from mme_vla_suite.prompts.reporter import temporal_v1
 
 
@@ -298,6 +299,11 @@ _REPORTER_PROMPTS = {
         version=interaction_aware_v2.VERSION,
         system_prompt=interaction_aware_v2.SYSTEM_PROMPT,
         user_prompt_template=interaction_aware_v2.USER_PROMPT_TEMPLATE,
+    ),
+    interaction_pairs_v3.VERSION: ReporterPromptSpec(
+        version=interaction_pairs_v3.VERSION,
+        system_prompt=interaction_pairs_v3.SYSTEM_PROMPT,
+        user_prompt_template=interaction_pairs_v3.USER_PROMPT_TEMPLATE,
     ),
 }
 

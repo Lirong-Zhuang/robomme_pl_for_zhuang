@@ -58,7 +58,7 @@ SAVE_DIR="runs/evaluation"
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
 FRAMEWORK_VERSION="trinity_v2.1"
-RUN_NAME="9.test"
+RUN_NAME="12.test"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=true
 
@@ -78,7 +78,8 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
-MANAGER_PROMPT_VERSION="qwenvl_interaction_verify_v2"
+# Keep Manager as the original planner; Reporter owns interaction observation.
+MANAGER_PROMPT_VERSION="qwenvl_v1"
 MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
@@ -88,7 +89,10 @@ EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
-REPORTER_PROMPT_VERSION="interaction_aware_v2"
+# This prompt preserves temporal success prediction and additionally emits
+# subgoal-specific interaction pairs. Evaluation currently consumes only the
+# success field; the pairs remain visible in the raw Reporter response/log.
+REPORTER_PROMPT_VERSION="interaction_pairs_v3"
 REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
