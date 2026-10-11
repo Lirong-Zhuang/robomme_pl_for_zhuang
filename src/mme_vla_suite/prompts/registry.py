@@ -113,7 +113,8 @@ class ManagerPromptSpec:
     reporter_completed_template: str
     reporter_incomplete_template: str
     reporter_missing_template: str
-    reporter_completed_followup_user_prompt_template: str | None = None
+    verification_system_prompt: str | None = None
+    verification_user_prompt_template: str | None = None
 
     @property
     def content_hash(self) -> str:
@@ -126,8 +127,10 @@ class ManagerPromptSpec:
             self.reporter_incomplete_template,
             self.reporter_missing_template,
         ]
-        if self.reporter_completed_followup_user_prompt_template is not None:
-            parts.append(self.reporter_completed_followup_user_prompt_template)
+        if self.verification_system_prompt is not None:
+            parts.append(self.verification_system_prompt)
+        if self.verification_user_prompt_template is not None:
+            parts.append(self.verification_user_prompt_template)
         subgoal_types: tuple[SubgoalType, ...] = (
             "simple_subgoal",
             "grounded_subgoal",
@@ -206,31 +209,56 @@ class ManagerPromptSpec:
         if not history_subgoals:
             return self.initial_user_prompt_template.format(**common)
 
-        followup_template = self.followup_user_prompt_template
-        history_for_prompt = history_subgoals
-        completed_context: dict[str, str] = {}
-        if (
-            reporter_result is True
-            and self.reporter_completed_followup_user_prompt_template is not None
-        ):
-            followup_template = self.reporter_completed_followup_user_prompt_template
-            completed_context["subgoal_to_verify"] = history_subgoals[-1]
-
         history = "; ".join(
             f"{index}. {subgoal}"
-            for index, subgoal in enumerate(history_for_prompt, start=1)
+            for index, subgoal in enumerate(history_subgoals, start=1)
         )
         if not history:
             history = "none"
-        return followup_template.format(
+        return self.followup_user_prompt_template.format(
             **common,
-            **completed_context,
             history=history,
             reporter_text=self.format_reporter_result(
                 reporter_result,
                 subgoal_type,
             ),
         )
+
+    def build_verification_messages(
+        self,
+        *,
+        subgoal_type: SubgoalType,
+        task_goal: str,
+        subgoal_to_verify: str,
+        has_video: bool,
+    ) -> list[dict[str, str]]:
+        if (
+            self.verification_system_prompt is None
+            or self.verification_user_prompt_template is None
+        ):
+            raise ValueError(
+                f"Manager prompt {self.version!r} has no verification prompt"
+            )
+        messages = [
+            {
+                "role": "system",
+                "content": self.verification_system_prompt,
+            },
+            {
+                "role": "user",
+                "content": self.verification_user_prompt_template.format(
+                    video_prefix="<video>" if has_video else "",
+                    task_goal=task_goal,
+                    subgoal_to_verify=subgoal_to_verify,
+                ),
+            },
+        ]
+        self.validate_media_alignment(
+            messages,
+            image_count=1,
+            video_count=int(has_video),
+        )
+        return messages
 
     def build_messages(
         self,
@@ -337,8 +365,11 @@ _MANAGER_PROMPTS = {
         reporter_missing_template=(
             qwenvl_interaction_verify_v2.REPORTER_MISSING_TEMPLATE
         ),
-        reporter_completed_followup_user_prompt_template=(
-            qwenvl_interaction_verify_v2.REPORTER_COMPLETED_FOLLOWUP_USER_PROMPT_TEMPLATE
+        verification_system_prompt=(
+            qwenvl_interaction_verify_v2.VERIFICATION_SYSTEM_PROMPT
+        ),
+        verification_user_prompt_template=(
+            qwenvl_interaction_verify_v2.VERIFICATION_USER_PROMPT_TEMPLATE
         ),
     ),
 }
