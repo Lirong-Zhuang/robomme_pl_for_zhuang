@@ -113,6 +113,7 @@ class ManagerPromptSpec:
     reporter_completed_template: str
     reporter_incomplete_template: str
     reporter_missing_template: str
+    reporter_completed_followup_user_prompt_template: str | None = None
 
     @property
     def content_hash(self) -> str:
@@ -125,6 +126,8 @@ class ManagerPromptSpec:
             self.reporter_incomplete_template,
             self.reporter_missing_template,
         ]
+        if self.reporter_completed_followup_user_prompt_template is not None:
+            parts.append(self.reporter_completed_followup_user_prompt_template)
         subgoal_types: tuple[SubgoalType, ...] = (
             "simple_subgoal",
             "grounded_subgoal",
@@ -202,12 +205,26 @@ class ManagerPromptSpec:
         }
         if not history_subgoals:
             return self.initial_user_prompt_template.format(**common)
+
+        followup_template = self.followup_user_prompt_template
+        history_for_prompt = history_subgoals
+        completed_context: dict[str, str] = {}
+        if (
+            reporter_result is True
+            and self.reporter_completed_followup_user_prompt_template is not None
+        ):
+            followup_template = self.reporter_completed_followup_user_prompt_template
+            completed_context["subgoal_to_verify"] = history_subgoals[-1]
+
         history = "; ".join(
             f"{index}. {subgoal}"
-            for index, subgoal in enumerate(history_subgoals, start=1)
+            for index, subgoal in enumerate(history_for_prompt, start=1)
         )
-        return self.followup_user_prompt_template.format(
+        if not history:
+            history = "none"
+        return followup_template.format(
             **common,
+            **completed_context,
             history=history,
             reporter_text=self.format_reporter_result(
                 reporter_result,
@@ -319,6 +336,9 @@ _MANAGER_PROMPTS = {
         ),
         reporter_missing_template=(
             qwenvl_interaction_verify_v2.REPORTER_MISSING_TEMPLATE
+        ),
+        reporter_completed_followup_user_prompt_template=(
+            qwenvl_interaction_verify_v2.REPORTER_COMPLETED_FOLLOWUP_USER_PROMPT_TEMPLATE
         ),
     ),
 }
