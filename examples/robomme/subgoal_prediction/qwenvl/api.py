@@ -1,13 +1,11 @@
-import json
 import os
-import pprint
-import re
 import shutil
-from typing import List
-
-import imageio
 import numpy as np
-
+import imageio
+from typing import List
+import os
+import re
+import pprint
 os.environ['IMAGE_MAX_TOKEN_NUM'] = '256'
 os.environ['VIDEO_MAX_TOKEN_NUM'] = '64'
 os.environ['FPS_MAX_FRAMES'] = '10'
@@ -15,8 +13,6 @@ os.environ['FPS_MAX_FRAMES'] = '10'
 from swift.llm import PtEngine, InferRequest, RequestConfig
 from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
 from mme_vla_suite.prompts import get_manager_prompt
-from mme_vla_suite.manager_response import parse_manager_response
-from mme_vla_suite.manager_response import parse_verification_passed
 
 class Qwen3VLModel:
     
@@ -32,10 +28,6 @@ class Qwen3VLModel:
         assert subgoal_type in ["simple_subgoal", "grounded_subgoal"]
         
         self.prompt = get_manager_prompt(prompt_version)
-        self.interaction_verification_enabled = (
-            self.prompt.version == "qwenvl_interaction_verify_v2"
-        )
-        self.last_verification_passed = None
         self.system_prompt = self.prompt.system_prompt(subgoal_type)
         
         print(f"Loading Qwen3-VL-4B-Instruct model Adapter from {adapter_path}")
@@ -124,7 +116,6 @@ class Qwen3VLModel:
         self.history_grounded_subgoals = []
         self.history_grounded_bboxes = []
         self.last_response = None
-        self.last_verification_passed = None
      
     def _wrap_history_subgoals(self, subgoals) -> str:
         return "; ".join([f"{i+1}. {subgoal}" for i, subgoal in enumerate(subgoals)])
@@ -201,6 +192,7 @@ class Qwen3VLModel:
         if self.subgoal_type == "grounded_subgoal":
             infer_request_dict["objects"] = {"ref": [], "bbox": self.history_grounded_bboxes}
         
+        print("\n\n")
         pprint.pprint(infer_request_dict)
         
         return InferRequest(**infer_request_dict)
@@ -225,46 +217,7 @@ class Qwen3VLModel:
             response = self.engine.infer([infer_request], request_config=RequestConfig(max_tokens=128, temperature=0))
             response = response[0].choices[0].message.content
         
-        subgoal, structured_response = parse_manager_response(response)
-        self.last_verification_passed = None
-        print("Manager raw response: ", response)
-        if reporter_result is True and self.interaction_verification_enabled:
-            reported_verification_passed = parse_verification_passed(
-                structured_response
-            )
-            # The Manager owns both semantic decisions: which interaction
-            # pairs are relevant and whether they are visually satisfied.
-            # Python only parses the Manager's explicit Boolean decision.
-            self.last_verification_passed = reported_verification_passed
-            if structured_response is None:
-                verification_log = {
-                    "interaction_pairs": [],
-                    "verification_passed": reported_verification_passed,
-                    "json_parse_success": False,
-                }
-            else:
-                verification_log = {
-                    "interaction_pairs": structured_response.get(
-                        "interaction_pairs", []
-                    ),
-                    "verification_passed": reported_verification_passed,
-                    "json_parse_success": True,
-                }
-            verification_log["init_frame_update_approved"] = (
-                self.last_verification_passed is True
-            )
-            if (
-                self.last_verification_passed is not True
-                and self.last_response is not None
-            ):
-                # Failed, missing, or malformed verification cannot advance
-                # either the executable subgoal or Reporter's init frame.
-                subgoal = self.last_response
-            print(
-                "Manager interaction verification JSON: ",
-                json.dumps(verification_log, ensure_ascii=False),
-            )
-        print("Manager executable subgoal: ", subgoal)
-        self.last_response = subgoal
-        self.update_history_subgoals(subgoal)
-        return self._parse_subgoal_for_vla(subgoal)
+        print("Response: ", response)
+        self.last_response = response
+        self.update_history_subgoals(response)
+        return self._parse_subgoal_for_vla(response)
