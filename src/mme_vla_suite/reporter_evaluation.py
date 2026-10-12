@@ -47,7 +47,12 @@ def resolve_reporter_test_dataset(testset_path: Path, subgoal_type: str) -> Path
 
 
 def parse_reporter_success(response: str) -> bool | None:
-    """Parse the strict JSON response used by both live and offline Reporter."""
+    """Read only ``success`` from the first Reporter JSON object.
+
+    ``interaction_pairs`` and every other field are deliberately ignored. The
+    first-object rule is a defensive fallback for old/model-mismatched outputs
+    that append another JSON object despite the single-line generation stop.
+    """
     text = response.strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -57,7 +62,8 @@ def parse_reporter_success(response: str) -> bool | None:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     try:
-        success = json.loads(text).get("success")
+        payload, _ = json.JSONDecoder().raw_decode(text)
+        success = payload.get("success")
     except (json.JSONDecodeError, AttributeError):
         return None
     return success if isinstance(success, bool) else None

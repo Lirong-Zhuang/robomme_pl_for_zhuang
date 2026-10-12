@@ -234,9 +234,18 @@ class QwenVLReporter(ReporterBase):
             request["messages"],
             image_count=len(request["images"]),
         )
+        request_config = RequestConfig(max_tokens=64, temperature=0)
+        if self.reporter_prompt.version == "interaction_pairs_v3":
+            # This schema is minified and must occupy one line. Stop at the
+            # first newline so the model cannot append a second JSON object.
+            request_config = RequestConfig(
+                max_tokens=64,
+                temperature=0,
+                stop=["\n"],
+            )
         response = self.engine.infer(
             [InferRequest(**request)],
-            request_config=RequestConfig(max_tokens=64, temperature=0),
+            request_config=request_config,
         )[0].choices[0].message.content
         raw_reporter_success = self._parse_success(response)
         self.last_raw_response = response
