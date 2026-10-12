@@ -114,30 +114,16 @@ def verify_interaction_response(
     expected_color = _cube_color_from_subgoal(normalized_subgoal)
 
     if "pick up" in normalized_subgoal:
-        holds_pairs = [
-            pair
-            for pair in pairs
-            if pair[0] == "robot"
-            and pair[1] == "HOLDS"
-            and _is_concrete_cube(pair[2], expected_color)
-        ]
-        above_pairs = [
-            pair
-            for pair in pairs
-            if _is_concrete_cube(pair[0], expected_color)
-            and pair[1] == "ABOVE"
-            and pair[2] == "table"
-        ]
         passed = (
-            len(pairs) == 2
-            and len(holds_pairs) == 1
-            and len(above_pairs) == 1
-            and holds_pairs[0][2] == above_pairs[0][0]
+            len(pairs) == 1
+            and pairs[0][0] == "robot"
+            and pairs[0][1] == "HOLDS"
+            and _is_concrete_cube(pairs[0][2], expected_color)
         )
         reason = (
-            "pick-up relations satisfied"
+            "pick-up relation satisfied"
             if passed
-            else "pick-up relations not satisfied"
+            else "pick-up relation not satisfied"
         )
     elif "put" in normalized_subgoal and "bin" in normalized_subgoal:
         passed = (

@@ -25,8 +25,8 @@ Manager:
 - `qwenvl_interaction_verify_v2`: a two-call evaluation variant that preserves
   the normal `qwenvl_v1` Manager prompts. When Reporter returns `true`, the
   first Manager call receives the current image and only the subgoal being
-  checked, and returns observed `interaction_pairs` without a completion
-  Boolean or next subgoal. Python then deterministically validates those pairs
+  checked, and returns exactly one observed interaction pair without a completion
+  Boolean or next subgoal. Python then deterministically validates that pair
   against the pick-up, put-into-bin, or button-press relation required by the
   current subgoal. The resulting Boolean selects the completed or incomplete
   prompt for the second Manager call on the same frame. Reporter advances its

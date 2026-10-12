@@ -246,6 +246,8 @@ class Qwen3VLModel:
             self.last_verification_passed = (
                 verification_result.verification_passed
             )
+            # The Python hard-audit result, rather than Reporter true, selects
+            # the completed/incomplete prompt used by the second Manager call.
             effective_reporter_result = self.last_verification_passed
             print("Manager interaction raw response: ", verification_response)
             print(
