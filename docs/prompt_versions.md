@@ -28,10 +28,10 @@ Manager:
   BinFill prompt for the current pick-up, put-into-bin, or button-press subgoal.
   Each prompt contains only one subject/object format and its relevant relation
   candidates, so the Manager does not classify the subgoal type. These prompts
-  omit the overall task. Cube color comes from the current subgoal for pick-up;
-  for `put it`, Python supplies the target color resolved from the latest
-  explicit cube subgoal in Manager history. The relation comes only from the
-  current image. The Manager returns exactly one observed
+  omit the overall task. Python fixes the complete colored cube object from the
+  current subgoal for pick-up; for `put it`, Python fixes the object from the
+  latest preceding explicit cube subgoal in Manager history. The first Manager
+  call fills only the relation based on the current image. It returns one observed
   interaction pair without a completion Boolean or next subgoal. Python
   deterministically validates that pair, and the resulting Boolean selects the
   completed or incomplete prompt for the second Manager call on the same frame.

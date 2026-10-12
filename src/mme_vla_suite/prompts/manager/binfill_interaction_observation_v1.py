@@ -14,27 +14,27 @@ SYSTEM_PROMPT = (
 
 PICK_UP_TEMPLATE = (
     "{video_prefix}SUBGOAL TO VERIFY: {subgoal_to_verify}\n"
+    "TARGET OBJECT FROM SUBGOAL: {target_cube}\n"
     "<image>Observe the current image and output exactly one "
     "interaction pair. The interaction pair is "
-    "[[\"robot\",\"<relationship>\",\"<color> cube\"]]. Never output zero or "
-    "multiple pairs. Replace <color> with the cube color stated in SUBGOAL TO "
-    "VERIFY. Replace <relationship> with one concrete uppercase relation inferred "
-    "only from the current image, such as HOLDS, ABOVE, or NA. Output exactly one "
-    "minified JSON line: "
+    "[[\"robot\",\"<relationship>\",\"{target_cube}\"]]. The subject and object "
+    "are fixed. Replace only <relationship> with one concrete uppercase relation "
+    "inferred from the current image, such as HOLDS, ABOVE, or NA. Never output zero "
+    "or multiple pairs. Output exactly one minified JSON line: "
     "{{\"interaction_pairs\":[[\"robot\",\"<relationship>\","
-    "\"<color> cube\"]]}}."
+    "\"{target_cube}\"]]}}."
 )
 
 PUT_IN_BIN_TEMPLATE = (
     "{video_prefix}SUBGOAL TO VERIFY: {subgoal_to_verify}\n"
+    "TARGET OBJECT FROM PREVIOUS SUBGOAL: {target_cube}\n"
     "<image>Observe only this subgoal in the current image and output exactly one "
     "interaction pair. The interaction pair is "
-    "[[\"<color> cube\",\"<relationship>\",\"bin\"]]. Never output zero or "
-    "multiple pairs. Replace <color> with the cube color stated in SUBGOAL TO "
-    "VERIFY. Replace <relationship> with one concrete uppercase relation "
-    "inferred only from the current image, such as IN, OUTSIDE, ABOVE, or NA. Output "
-    "exactly one minified JSON line: "
-    "{{\"interaction_pairs\":[[\"<color> cube\",\"<relationship>\","
+    "[[\"{target_cube}\",\"<relationship>\",\"bin\"]]. The subject and object are "
+    "fixed. Replace only <relationship> with one concrete uppercase relation inferred "
+    "from the current image, such as IN, OUTSIDE, ABOVE, or NA. Never output zero or "
+    "multiple pairs. Output exactly one minified JSON line: "
+    "{{\"interaction_pairs\":[[\"{target_cube}\",\"<relationship>\","
     "\"bin\"]]}}."
 )
 
@@ -42,11 +42,10 @@ PRESS_BUTTON_TEMPLATE = (
     "{video_prefix}SUBGOAL TO VERIFY: {subgoal_to_verify}\n"
     "<image>Observe only this subgoal in the current image and output exactly one "
     "interaction pair. The interaction pair is "
-    "[[\"robot\",\"<relationship>\",\"button\"]]. Never output zero or multiple "
-    "pairs. Replace "
-    "<relationship> with one concrete uppercase relation inferred from the current "
-    "image only, such as PRESSES, ABOVE, or NA. Output exactly one minified JSON "
-    "line: "
+    "[[\"robot\",\"<relationship>\",\"button\"]]. The subject and object are fixed. "
+    "Replace only <relationship> with one concrete uppercase relation inferred from "
+    "the current image, such as PRESSES, ABOVE, or NA. Never output zero or multiple "
+    "pairs. Output exactly one minified JSON line: "
     "{{\"interaction_pairs\":[[\"robot\",\"<relationship>\",\"button\"]]}}."
 )
 
@@ -72,16 +71,27 @@ def build_user_prompt(
 
     del task_goal  # BinFill verification prompts do not use the overall task.
     normalized_subgoal = " ".join(subgoal_to_verify.lower().split())
-    target_cube = ""
+    target_cube = "unknown cube"
 
     if "pick up" in normalized_subgoal:
+        color = resolve_expected_cube_color(subgoal_to_verify)
+        if color is not None:
+            target_cube = f"{color} cube"
         template = PICK_UP_TEMPLATE
     elif "put" in normalized_subgoal and "bin" in normalized_subgoal:
+        previous_subgoals = history_subgoals
+        if (
+            previous_subgoals
+            and " ".join(previous_subgoals[-1].lower().split())
+            == normalized_subgoal
+        ):
+            previous_subgoals = previous_subgoals[:-1]
         color = resolve_expected_cube_color(
-            subgoal_to_verify,
-            history_subgoals,
+            "",
+            previous_subgoals,
         )
-        target_cube = f"{color} cube" if color is not None else "unknown"
+        if color is not None:
+            target_cube = f"{color} cube"
         template = PUT_IN_BIN_TEMPLATE
     elif "press" in normalized_subgoal and "button" in normalized_subgoal:
         template = PRESS_BUTTON_TEMPLATE
