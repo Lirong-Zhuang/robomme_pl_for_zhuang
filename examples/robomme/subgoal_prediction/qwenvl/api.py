@@ -34,7 +34,10 @@ class Qwen3VLModel:
         self.prompt = get_manager_prompt(prompt_version)
         self.interaction_verification_enabled = (
             self.prompt.verification_system_prompt is not None
-            and self.prompt.verification_user_prompt_template is not None
+            and (
+                self.prompt.verification_user_prompt_template is not None
+                or self.prompt.verification_prompt_builder is not None
+            )
         )
         self.last_verification_passed = None
         self.system_prompt = self.prompt.system_prompt(subgoal_type)
@@ -179,12 +182,14 @@ class Qwen3VLModel:
             if self.subgoal_type == "simple_subgoal"
             else self.history_grounded_subgoals
         )
+        include_video = self.video_path is not None and not verification_only
         if verification_only:
             messages = self.prompt.build_verification_messages(
                 subgoal_type=self.subgoal_type,
                 task_goal=self.task_goal,
                 subgoal_to_verify=history_subgoals[-1],
-                has_video=self.video_path is not None,
+                history_subgoals=history_subgoals,
+                has_video=include_video,
             )
         else:
             messages = self.prompt.build_messages(
@@ -192,7 +197,7 @@ class Qwen3VLModel:
                 task_goal=self.task_goal,
                 history_subgoals=history_subgoals,
                 reporter_result=reporter_result,
-                has_video=self.video_path is not None,
+                has_video=include_video,
             )
         
         infer_request_dict = {
@@ -200,7 +205,7 @@ class Qwen3VLModel:
             "images": [image_path]
         }
         
-        if self.video_path is not None:
+        if include_video:
             infer_request_dict["videos"] = [self.video_path]
         self.prompt.validate_media_alignment(
             messages,
@@ -242,6 +247,7 @@ class Qwen3VLModel:
             verification_result = verify_interaction_response(
                 history_subgoals[-1],
                 verification_response,
+                history_subgoals=history_subgoals,
             )
             self.last_verification_passed = (
                 verification_result.verification_passed

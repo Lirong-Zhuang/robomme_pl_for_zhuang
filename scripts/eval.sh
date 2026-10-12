@@ -46,7 +46,7 @@ RE_EVAL_TASKS=""
 
 # Exact episode IDs override NUM_EPISODES. Examples: "4" or "2,7,17".
 # Set EPISODE_IDS="" to evaluate episodes 0..NUM_EPISODES-1.
-EPISODE_IDS="2"
+EPISODE_IDS="10"
 NUM_EPISODES=1
 
 OBS_HORIZON=16

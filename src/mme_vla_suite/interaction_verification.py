@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -83,6 +84,22 @@ def _cube_color_from_subgoal(subgoal: str) -> str | None:
     return match.group(1) if match else None
 
 
+def resolve_expected_cube_color(
+    subgoal: str,
+    history_subgoals: Sequence[str] = (),
+) -> str | None:
+    """Resolve a cube color from the subgoal or the latest explicit history."""
+
+    color = _cube_color_from_subgoal(subgoal)
+    if color is not None:
+        return color
+    for historical_subgoal in reversed(history_subgoals):
+        color = _cube_color_from_subgoal(historical_subgoal)
+        if color is not None:
+            return color
+    return None
+
+
 def _is_concrete_cube(entity: str, expected_color: str | None) -> bool:
     if not re.fullmatch(r"[a-z]+ cube", entity):
         return False
@@ -94,6 +111,8 @@ def _is_concrete_cube(entity: str, expected_color: str | None) -> bool:
 def verify_interaction_response(
     subgoal: str,
     response: str,
+    *,
+    history_subgoals: Sequence[str] = (),
 ) -> InteractionVerificationResult:
     """Hard-check observed interaction pairs against the current subgoal.
 
@@ -111,7 +130,10 @@ def verify_interaction_response(
         )
 
     normalized_subgoal = " ".join(subgoal.lower().split())
-    expected_color = _cube_color_from_subgoal(normalized_subgoal)
+    expected_color = resolve_expected_cube_color(
+        normalized_subgoal,
+        history_subgoals,
+    )
 
     if "pick up" in normalized_subgoal:
         passed = (
@@ -126,17 +148,21 @@ def verify_interaction_response(
             else "pick-up relation not satisfied"
         )
     elif "put" in normalized_subgoal and "bin" in normalized_subgoal:
-        passed = (
-            len(pairs) == 1
-            and _is_concrete_cube(pairs[0][0], expected_color)
-            and pairs[0][1] == "IN"
-            and pairs[0][2] == "bin"
-        )
-        reason = (
-            "put-into-bin relation satisfied"
-            if passed
-            else "put-into-bin relation not satisfied"
-        )
+        if expected_color is None:
+            passed = False
+            reason = "put-into-bin target cube could not be resolved"
+        else:
+            passed = (
+                len(pairs) == 1
+                and _is_concrete_cube(pairs[0][0], expected_color)
+                and pairs[0][1] == "IN"
+                and pairs[0][2] == "bin"
+            )
+            reason = (
+                "put-into-bin relation satisfied"
+                if passed
+                else "put-into-bin relation not satisfied"
+            )
     elif "press" in normalized_subgoal and "button" in normalized_subgoal:
         passed = pairs == (("robot", "PRESSES", "button"),)
         reason = (

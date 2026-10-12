@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from typing import Literal
+from typing import Callable, Literal
 
 from mme_vla_suite.prompts.manager import qwenvl_interaction_verify_v2
 from mme_vla_suite.prompts.manager import qwenvl_v1
@@ -13,6 +13,7 @@ from mme_vla_suite.prompts.reporter import temporal_v1
 
 
 SubgoalType = Literal["simple_subgoal", "grounded_subgoal"]
+VerificationPromptBuilder = Callable[..., str]
 
 DEFAULT_REPORTER_HISTORY_SIZE = 7
 DEFAULT_REPORTER_PROMPT_VERSION = interaction_aware_v2.VERSION
@@ -115,6 +116,8 @@ class ManagerPromptSpec:
     reporter_missing_template: str
     verification_system_prompt: str | None = None
     verification_user_prompt_template: str | None = None
+    verification_prompt_builder: VerificationPromptBuilder | None = None
+    verification_prompt_source: str | None = None
 
     @property
     def content_hash(self) -> str:
@@ -131,6 +134,8 @@ class ManagerPromptSpec:
             parts.append(self.verification_system_prompt)
         if self.verification_user_prompt_template is not None:
             parts.append(self.verification_user_prompt_template)
+        if self.verification_prompt_source is not None:
+            parts.append(self.verification_prompt_source)
         subgoal_types: tuple[SubgoalType, ...] = (
             "simple_subgoal",
             "grounded_subgoal",
@@ -230,15 +235,35 @@ class ManagerPromptSpec:
         subgoal_type: SubgoalType,
         task_goal: str,
         subgoal_to_verify: str,
+        history_subgoals: list[str],
         has_video: bool,
     ) -> list[dict[str, str]]:
         if (
             self.verification_system_prompt is None
-            or self.verification_user_prompt_template is None
+            or (
+                self.verification_user_prompt_template is None
+                and self.verification_prompt_builder is None
+            )
         ):
             raise ValueError(
                 f"Manager prompt {self.version!r} has no verification prompt"
             )
+        video_prefix = "<video>" if has_video else ""
+        if self.verification_prompt_builder is not None:
+            user_prompt = self.verification_prompt_builder(
+                task_goal=task_goal,
+                subgoal_to_verify=subgoal_to_verify,
+                history_subgoals=history_subgoals,
+                video_prefix=video_prefix,
+            )
+        else:
+            assert self.verification_user_prompt_template is not None
+            user_prompt = self.verification_user_prompt_template.format(
+                video_prefix=video_prefix,
+                task_goal=task_goal,
+                subgoal_to_verify=subgoal_to_verify,
+            )
+
         messages = [
             {
                 "role": "system",
@@ -246,11 +271,7 @@ class ManagerPromptSpec:
             },
             {
                 "role": "user",
-                "content": self.verification_user_prompt_template.format(
-                    video_prefix="<video>" if has_video else "",
-                    task_goal=task_goal,
-                    subgoal_to_verify=subgoal_to_verify,
-                ),
+                "content": user_prompt,
             },
         ]
         self.validate_media_alignment(
@@ -368,8 +389,11 @@ _MANAGER_PROMPTS = {
         verification_system_prompt=(
             qwenvl_interaction_verify_v2.VERIFICATION_SYSTEM_PROMPT
         ),
-        verification_user_prompt_template=(
-            qwenvl_interaction_verify_v2.VERIFICATION_USER_PROMPT_TEMPLATE
+        verification_prompt_builder=(
+            qwenvl_interaction_verify_v2.VERIFICATION_PROMPT_BUILDER
+        ),
+        verification_prompt_source=(
+            qwenvl_interaction_verify_v2.VERIFICATION_PROMPT_SOURCE
         ),
     ),
 }

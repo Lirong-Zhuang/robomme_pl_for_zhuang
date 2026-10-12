@@ -24,15 +24,21 @@ Manager:
   the current default.
 - `qwenvl_interaction_verify_v2`: a two-call evaluation variant that preserves
   the normal `qwenvl_v1` Manager prompts. When Reporter returns `true`, the
-  first Manager call receives the current image and only the subgoal being
-  checked, and returns exactly one observed interaction pair without a completion
-  Boolean or next subgoal. Python then deterministically validates that pair
-  against the pick-up, put-into-bin, or button-press relation required by the
-  current subgoal. The resulting Boolean selects the completed or incomplete
-  prompt for the second Manager call on the same frame. Reporter advances its
-  init frame only when this Python verification passes. Malformed output,
-  unsupported subgoals, and relation mismatches fail closed. Reporter `false`
-  and missing-result calls retain the original one-call behavior.
+  first Manager call receives the current image and one keyword-selected
+  BinFill prompt for the current pick-up, put-into-bin, or button-press subgoal.
+  Each prompt contains only one subject/object format and its relevant relation
+  candidates, so the Manager does not classify the subgoal type. These prompts
+  omit the overall task. Cube color comes from the current subgoal for pick-up;
+  for `put it`, Python supplies the target color resolved from the latest
+  explicit cube subgoal in Manager history. The relation comes only from the
+  current image. The Manager returns exactly one observed
+  interaction pair without a completion Boolean or next subgoal. Python
+  deterministically validates that pair, and the resulting Boolean selects the
+  completed or incomplete prompt for the second Manager call on the same frame.
+  Reporter advances its init frame only when this Python verification passes.
+  Malformed output, unresolved targets, unsupported subgoals, and relation
+  mismatches fail closed. Reporter `false` and missing-result calls retain the
+  original one-call behavior.
 
 The Manager registry currently applies only to QwenVL. Gemini, MemER, and QPA
 retain their specialized prompt implementations.
