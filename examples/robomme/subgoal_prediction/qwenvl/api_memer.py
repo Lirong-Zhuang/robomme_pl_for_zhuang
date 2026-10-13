@@ -10,9 +10,17 @@ import pprint
 os.environ['IMAGE_MAX_TOKEN_NUM'] = '256'
 os.environ['VIDEO_MAX_TOKEN_NUM'] = '64'
 os.environ['FPS_MAX_FRAMES'] = '10'
+os.environ.setdefault('HF_HUB_OFFLINE', '1')
+os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 
 import json
 from swift.llm import PtEngine, InferRequest, RequestConfig
+
+QWEN_BACKBONE_PATH = os.environ.get(
+    "QWEN_BACKBONE_PATH",
+    "/data/public/qwen/Qwen3-VL-4B-Instruct",
+)
+
 
 class Qwen3VLModelMemER:
     
@@ -25,7 +33,7 @@ class Qwen3VLModelMemER:
         
         print(f"Loading Qwen3-VL-4B-Instruct model Adapter from {adapter_path}")
         self.engine = PtEngine(
-            model_id_or_path='Qwen/Qwen3-VL-4B-Instruct',
+            model_id_or_path=QWEN_BACKBONE_PATH,
             adapters=[adapter_path],
             # attn_impl='flash_attention_2' #'sdpa'
             attn_impl='sdpa'

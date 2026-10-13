@@ -13,6 +13,15 @@ REPORTER_DATASET_PATH="data/trinity_preprocessed_data/reporter_binfill_data_5/tr
 REPORTER_RUN_NAME='qwen_reporter_v7_simple_subgoal'
 REPORTER_OUTPUT_DIR="$REPO_ROOT/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 RESUME_CHECKPOINT="$REPORTER_OUTPUT_DIR/v1-20261005-172357/checkpoint-100"
+QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
+
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+
+if [[ ! -d "$QWEN_BACKBONE_PATH" ]]; then
+    echo "ERROR: Qwen backbone directory not found: $QWEN_BACKBONE_PATH" >&2
+    exit 1
+fi
 
 CUDA_DEVICE_IDS="0"
 TRAIN_GLOBAL_BATCH_SIZE=16
@@ -110,7 +119,7 @@ FPS_MAX_FRAMES=10 \
 NPROC_PER_NODE="$NUM_GPUS" \
 CUDA_VISIBLE_DEVICES="$CUDA_DEVICE_IDS" \
 swift sft \
-    --model 'Qwen/Qwen3-VL-4B-Instruct' \
+    --model "$QWEN_BACKBONE_PATH" \
     --dataset "$REPORTER_DATASET_PATH" \
     --split_dataset_ratio 0.1 \
     --eval_strategy steps \

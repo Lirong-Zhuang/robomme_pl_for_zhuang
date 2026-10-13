@@ -6,6 +6,12 @@ set -Eeuo pipefail
 # the directory from which this script is launched.
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
+
+# Prefer the shared, pre-downloaded Qwen backbone and disable Hub network
+# access by default. Export different values before running to override these.
+export QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 #
 # The Executer policy server is started as a managed background process because eval.py
 # must run at the same time. eval.py itself runs in the foreground, so all
@@ -28,8 +34,8 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started Executer server.
-EXECUTER_SEEDS=(7)
-NUM_REPEATS=1
+EXECUTER_SEEDS=(0 7 42)
+NUM_REPEATS=3
 EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
@@ -89,7 +95,7 @@ EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_PROMPT_VERSION="interaction_aware_v2"
-REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
+REPORTER_MODEL_PATH="$QWEN_BACKBONE_PATH"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
@@ -266,6 +272,9 @@ MANAGER_GROUNDED_ADAPTER_PATH=$(resolve_repo_path "$MANAGER_GROUNDED_ADAPTER_PAT
 REPORTER_ADAPTER_PATH=$(resolve_repo_path "$REPORTER_ADAPTER_PATH")
 
 require_local_dir "Executer checkpoint" "$EXECUTER_DIR"
+if [[ "$REPORTER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "memer" ]]; then
+    require_local_dir "Qwen backbone" "$QWEN_BACKBONE_PATH"
+fi
 if [[ "$MANAGER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "memer" ]]; then
     if [[ "$SUBGOAL_TYPE" == "simple_subgoal" ]]; then
         require_local_dir "Manager adapter" "$MANAGER_SIMPLE_ADAPTER_PATH"

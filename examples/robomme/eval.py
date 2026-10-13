@@ -8,6 +8,11 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Optional, TextIO, Tuple
 
+# Use the pre-downloaded shared Qwen model and keep Hub access offline by
+# default. Set either variable explicitly to override this on another server.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 from tqdm import tqdm
 from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
 from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
@@ -81,7 +86,10 @@ class Args:
     reporter_type: str = "qwenvl"
     # Leave this base-model path unchanged and keep reporter_adapter_path empty
     # to evaluate the original, non-fine-tuned Qwen3-VL as Reporter.
-    reporter_model_path: str = "Qwen/Qwen3-VL-4B-Instruct"
+    reporter_model_path: str = os.environ.get(
+        "QWEN_BACKBONE_PATH",
+        "/data/public/qwen/Qwen3-VL-4B-Instruct",
+    )
     reporter_adapter_path: str = ""
     reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION
     # Number of recent Reporter-call observations, including the current one.

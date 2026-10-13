@@ -1,5 +1,6 @@
 """Reporter implementations for RoboMME evaluation."""
 
+import os
 import pprint
 import shutil
 from collections import deque
@@ -8,6 +9,10 @@ from typing import Optional
 
 import imageio
 import numpy as np
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 from swift.llm import InferRequest, PtEngine, RequestConfig
 
 from env_runner import EnvRunner

@@ -29,7 +29,13 @@ from mme_vla_suite.prompts import get_reporter_prompt
 
 CUDA_VISIBLE_DEVICES = "0"
 
-DEFAULT_REPORTER_MODEL_PATH = "Qwen/Qwen3-VL-4B-Instruct"
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+DEFAULT_REPORTER_MODEL_PATH = os.environ.get(
+    "QWEN_BACKBONE_PATH",
+    "/data/public/qwen/Qwen3-VL-4B-Instruct",
+)
 DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v2-20261002-000202/checkpoint-900"
 
 DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_4/reporter_qwenvl"
