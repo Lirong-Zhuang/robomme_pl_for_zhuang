@@ -90,7 +90,7 @@ MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_
 
 # Executer configuration
 EXECUTER_CONFIG="mme_vla_suite"
-EXECUTER_DIR="runs/ckpts/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID"
+EXECUTER_DIR="/data/public/RoboMME/checkpoints/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
