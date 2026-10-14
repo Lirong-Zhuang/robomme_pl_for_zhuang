@@ -8,12 +8,15 @@ set -Eeuo pipefail
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/qwen_backbone.sh"
 
 REPORTER_DATASET_PATH="data/trinity_preprocessed_data/reporter_binfill_data_5/trainset/reporter_qwenvl/simple_subgoal_train.jsonl"
-REPORTER_RUN_NAME='qwen_reporter_v7_simple_subgoal'
+REPORTER_RUN_NAME='qwen_reporter_v8_simple_subgoal'
 REPORTER_OUTPUT_DIR="$REPO_ROOT/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
-RESUME_CHECKPOINT="$REPORTER_OUTPUT_DIR/v1-20261005-172357/checkpoint-100"
-QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
+# Leave empty to start a new run. Set to a checkpoint directory to resume.
+RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"
+QWEN_BACKBONE_NAME="${QWEN_BACKBONE_NAME:-Qwen3-VL-8B-Instruct}"
+resolve_qwen_backbone
 
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
@@ -46,13 +49,17 @@ if [[ ! -f "$REPORTER_DATASET_PATH" ]]; then
     echo "ERROR: Reporter dataset not found: $REPORTER_DATASET_PATH" >&2
     exit 1
 fi
-if [[ ! -d "$RESUME_CHECKPOINT" ]]; then
-    echo "ERROR: Resume checkpoint not found: $RESUME_CHECKPOINT" >&2
-    exit 1
-fi
-if [[ ! -f "$RESUME_CHECKPOINT/trainer_state.json" ]]; then
-    echo "ERROR: trainer_state.json not found in checkpoint: $RESUME_CHECKPOINT" >&2
-    exit 1
+RESUME_ARGS=()
+if [[ -n "$RESUME_CHECKPOINT" ]]; then
+    if [[ ! -d "$RESUME_CHECKPOINT" ]]; then
+        echo "ERROR: Resume checkpoint not found: $RESUME_CHECKPOINT" >&2
+        exit 1
+    fi
+    if [[ ! -f "$RESUME_CHECKPOINT/trainer_state.json" ]]; then
+        echo "ERROR: trainer_state.json not found in checkpoint: $RESUME_CHECKPOINT" >&2
+        exit 1
+    fi
+    RESUME_ARGS=(--resume_from_checkpoint "$RESUME_CHECKPOINT")
 fi
 
 RUN_TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
@@ -94,9 +101,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "Reporter training configuration"
+echo "  Qwen backbone:          $QWEN_BACKBONE_NAME ($QWEN_BACKBONE_PATH)"
 echo "  Dataset:               $REPORTER_DATASET_PATH"
 echo "  Output:                $REPORTER_OUTPUT_DIR"
-echo "  Resume checkpoint:     $RESUME_CHECKPOINT"
+echo "  Resume checkpoint:     ${RESUME_CHECKPOINT:-<none; start from scratch>}"
 echo "  Visible GPUs:          $CUDA_DEVICE_IDS"
 echo "  Train batch/GPU:       $PER_DEVICE_TRAIN_BATCH_SIZE"
 echo "  Eval batch/GPU:        $PER_DEVICE_EVAL_BATCH_SIZE"
@@ -158,7 +166,7 @@ swift sft \
     --warmup_ratio 0.05 \
     --dataset_num_proc 8 \
     --dataloader_num_workers 4 \
-    --resume_from_checkpoint "$RESUME_CHECKPOINT"
+    ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
 TRAIN_STATUS=$?
 set -e
 

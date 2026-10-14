@@ -18,6 +18,9 @@ from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
 from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
 from mme_vla_suite.prompts import get_manager_prompt
 from mme_vla_suite.prompts import get_reporter_prompt
+from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_NAME
+from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_ROOT
+from mme_vla_suite.qwen_backbone import resolve_qwen_backbone_path
 
 # Do not retain unused CUDA allocations on the shared evaluation GPU.
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
@@ -81,14 +84,26 @@ class Args:
     manager_prompt_version: str = DEFAULT_MANAGER_PROMPT_VERSION
     manager_save_memer_kf: bool = False
     subgoal_keep_period: int = 1 # ever subgoal should be kept for this many steps
+    manager_qwen_backbone_name: str = os.environ.get(
+        "MANAGER_QWEN_BACKBONE_NAME", DEFAULT_QWEN_BACKBONE_NAME
+    )
+    manager_qwen_backbone_root: str = os.environ.get(
+        "MANAGER_QWEN_BACKBONE_ROOT", DEFAULT_QWEN_BACKBONE_ROOT
+    )
+    manager_qwen_backbone_path: str = os.environ.get(
+        "MANAGER_QWEN_BACKBONE_PATH", ""
+    )
 
     # Reporter
     reporter_type: str = "qwenvl"
-    # Leave this base-model path unchanged and keep reporter_adapter_path empty
-    # to evaluate the original, non-fine-tuned Qwen3-VL as Reporter.
-    reporter_model_path: str = os.environ.get(
-        "QWEN_BACKBONE_PATH",
-        "/data/public/qwen/Qwen3-VL-4B-Instruct",
+    reporter_qwen_backbone_name: str = os.environ.get(
+        "REPORTER_QWEN_BACKBONE_NAME", DEFAULT_QWEN_BACKBONE_NAME
+    )
+    reporter_qwen_backbone_root: str = os.environ.get(
+        "REPORTER_QWEN_BACKBONE_ROOT", DEFAULT_QWEN_BACKBONE_ROOT
+    )
+    reporter_qwen_backbone_path: str = os.environ.get(
+        "REPORTER_QWEN_BACKBONE_PATH", ""
     )
     reporter_adapter_path: str = ""
     reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION
@@ -503,6 +518,24 @@ def setup_log_dict(save_dir: Path, args: Args) -> dict:
 
 def evaluate(args: Args):
     """Main evaluation function."""
+    args.manager_qwen_backbone_path = resolve_qwen_backbone_path(
+        args.manager_qwen_backbone_name,
+        model_root=args.manager_qwen_backbone_root,
+        model_path=args.manager_qwen_backbone_path or None,
+    )
+    args.reporter_qwen_backbone_path = resolve_qwen_backbone_path(
+        args.reporter_qwen_backbone_name,
+        model_root=args.reporter_qwen_backbone_root,
+        model_path=args.reporter_qwen_backbone_path or None,
+    )
+    print(
+        f"[robomme] Manager Qwen backbone: {args.manager_qwen_backbone_name} "
+        f"({args.manager_qwen_backbone_path})"
+    )
+    print(
+        f"[robomme] Reporter Qwen backbone: {args.reporter_qwen_backbone_name} "
+        f"({args.reporter_qwen_backbone_path})"
+    )
     check_args(args)
 
     save_dir = setup_save_directory(args)
@@ -657,6 +690,16 @@ def evaluate(args: Args):
             final_results["executer_seed"] = args.executer_seed
             final_results["repeat_id"] = args.repeat_id
             final_results["executer_ckpt_id"] = args.executer_ckpt_id
+            final_results["qwen_backbones"] = {
+                "manager": {
+                    "name": args.manager_qwen_backbone_name,
+                    "path": args.manager_qwen_backbone_path,
+                },
+                "reporter": {
+                    "name": args.reporter_qwen_backbone_name,
+                    "path": args.reporter_qwen_backbone_path,
+                },
+            }
             final_results["prompts"] = prompt_metadata
             with open(save_dir / "log.json", "w") as f:
                 json.dump(final_results, f, indent=2)

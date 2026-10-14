@@ -16,24 +16,19 @@ os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 import json
 from swift.llm import PtEngine, InferRequest, RequestConfig
 
-QWEN_BACKBONE_PATH = os.environ.get(
-    "QWEN_BACKBONE_PATH",
-    "/data/public/qwen/Qwen3-VL-4B-Instruct",
-)
-
 
 class Qwen3VLModelMemER:
     
-    def __init__(self, adapter_path: str):
+    def __init__(self, adapter_path: str, model_path: str, model_name: str):
         self.model_name = "memer"
         self.subgoal_type = "grounded_subgoal"
         self.image_size = (256, 256)
         
         self.system_prompt = "You are a robot program that predicts actions. The current input images from the front-view camera shows the most recent actions the robot has executed. The past keyframes are selected frames of particular importance from all the actions the robot has executed so far. Based on these, output the current subtask the robot should execute and nothing else. Some tasks may have a video input for initial setup, some may not.\n\nReturn a JSON with:\n- current_subtask: the action that should be executed at the current timestep\n- keyframe_positions: list of frame positions (1-indexed) from the current input images where actions change"
         
-        print(f"Loading Qwen3-VL-4B-Instruct model Adapter from {adapter_path}")
+        print(f"Loading {model_name} from {model_path} with adapter {adapter_path}")
         self.engine = PtEngine(
-            model_id_or_path=QWEN_BACKBONE_PATH,
+            model_id_or_path=model_path,
             adapters=[adapter_path],
             # attn_impl='flash_attention_2' #'sdpa'
             attn_impl='sdpa'

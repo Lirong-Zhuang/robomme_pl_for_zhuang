@@ -74,11 +74,12 @@ class QwenVLReporter(ReporterBase):
             )
         )
         print(
-            f"Loading Reporter model from {args.reporter_model_path}"
+            f"Loading Reporter {args.reporter_qwen_backbone_name} "
+            f"from {args.reporter_qwen_backbone_path}"
             + (f" with adapter {adapter_path}" if adapter_path else "")
         )
         engine_kwargs = dict(
-            model_id_or_path=args.reporter_model_path,
+            model_id_or_path=args.reporter_qwen_backbone_path,
             attn_impl="sdpa",
         )
         if adapter_path:

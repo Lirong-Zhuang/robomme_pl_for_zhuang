@@ -26,16 +26,23 @@ if str(SRC_ROOT) not in sys.path:
 from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
 from mme_vla_suite.prompts import available_reporter_prompt_versions
 from mme_vla_suite.prompts import get_reporter_prompt
+from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_NAME
+from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_ROOT
+from mme_vla_suite.qwen_backbone import SUPPORTED_QWEN_BACKBONES
+from mme_vla_suite.qwen_backbone import resolve_qwen_backbone_path
 
 CUDA_VISIBLE_DEVICES = "0"
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-DEFAULT_REPORTER_MODEL_PATH = os.environ.get(
-    "QWEN_BACKBONE_PATH",
-    "/data/public/qwen/Qwen3-VL-4B-Instruct",
+QWEN_BACKBONE_NAME = os.environ.get(
+    "QWEN_BACKBONE_NAME", DEFAULT_QWEN_BACKBONE_NAME
 )
+QWEN_BACKBONE_ROOT = os.environ.get(
+    "QWEN_BACKBONE_ROOT", DEFAULT_QWEN_BACKBONE_ROOT
+)
+QWEN_BACKBONE_PATH = os.environ.get("QWEN_BACKBONE_PATH", "")
 DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v2-20261002-000202/checkpoint-900"
 
 DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_4/reporter_qwenvl"
@@ -223,9 +230,20 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
+        "--qwen-backbone-name",
+        choices=SUPPORTED_QWEN_BACKBONES,
+        default=QWEN_BACKBONE_NAME,
+        help="Qwen backbone name used to resolve the local model directory.",
+    )
+    parser.add_argument(
+        "--qwen-backbone-root",
+        default=QWEN_BACKBONE_ROOT,
+        help="Directory containing the supported Qwen backbone directories.",
+    )
+    parser.add_argument(
         "--model-path",
-        default=DEFAULT_REPORTER_MODEL_PATH,
-        help="Reporter base model path.",
+        default=QWEN_BACKBONE_PATH,
+        help="Optional explicit model path overriding name-based resolution.",
     )
     parser.add_argument(
         "--adapter-path",
@@ -329,6 +347,11 @@ def main() -> None:
         )
     dataset_path = resolve_reporter_test_dataset(args.testset_path, args.subgoal_type)
     reporter_prompt = get_reporter_prompt(args.reporter_prompt_version)
+    model_path = resolve_qwen_backbone_path(
+        args.qwen_backbone_name,
+        model_root=args.qwen_backbone_root,
+        model_path=args.model_path or None,
+    )
     adapter_path = "" if args.no_adapter else _resolve_repo_path(args.adapter_path)
     if adapter_path and not Path(adapter_path).is_dir():
         raise FileNotFoundError(f"Reporter adapter not found: {adapter_path}")
@@ -342,7 +365,7 @@ def main() -> None:
     engine = None
     try:
         engine, infer_request_type, request_config = _build_engine(
-            args.model_path,
+            model_path,
             adapter_path,
         )
         result = evaluate_reporter_sequence(
@@ -351,7 +374,7 @@ def main() -> None:
             engine=engine,
             infer_request_type=infer_request_type,
             request_config=request_config,
-            model_path=args.model_path,
+            model_path=model_path,
             adapter_path=adapter_path,
             predictions_path=predictions_path,
             image_root=args.image_root,
@@ -397,6 +420,7 @@ def main() -> None:
     summary = {
         "name": result.name,
         "dataset_path": result.dataset_path,
+        "qwen_backbone_name": args.qwen_backbone_name,
         "model_path": result.model_path,
         "adapter_path": result.adapter_path,
         "reporter_history_size": (

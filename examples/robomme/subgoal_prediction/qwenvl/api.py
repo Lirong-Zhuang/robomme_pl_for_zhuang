@@ -16,16 +16,13 @@ from swift.llm import PtEngine, InferRequest, RequestConfig
 from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
 from mme_vla_suite.prompts import get_manager_prompt
 
-QWEN_BACKBONE_PATH = os.environ.get(
-    "QWEN_BACKBONE_PATH",
-    "/data/public/qwen/Qwen3-VL-4B-Instruct",
-)
-
 
 class Qwen3VLModel:
     
     def __init__(self, 
         adapter_path: str,
+        model_path: str,
+        model_name: str,
         subgoal_type: str = "simple_subgoal", 
         prompt_version: str = DEFAULT_MANAGER_PROMPT_VERSION,
     ):
@@ -38,9 +35,9 @@ class Qwen3VLModel:
         self.prompt = get_manager_prompt(prompt_version)
         self.system_prompt = self.prompt.system_prompt(subgoal_type)
         
-        print(f"Loading Qwen3-VL-4B-Instruct model Adapter from {adapter_path}")
+        print(f"Loading {model_name} from {model_path} with adapter {adapter_path}")
         self.engine = PtEngine(
-            model_id_or_path=QWEN_BACKBONE_PATH,
+            model_id_or_path=model_path,
             adapters=[adapter_path],
             # attn_impl='flash_attention_2' #'sdpa'
             attn_impl='sdpa'

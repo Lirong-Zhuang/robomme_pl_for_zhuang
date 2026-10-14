@@ -6,10 +6,8 @@ set -Eeuo pipefail
 # the directory from which this script is launched.
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/qwen_backbone.sh"
 
-# Prefer the shared, pre-downloaded Qwen backbone and disable Hub network
-# access by default. Export different values before running to override these.
-export QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 #
@@ -85,6 +83,10 @@ EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
 MANAGER_PROMPT_VERSION="qwenvl_v1"
+MANAGER_QWEN_BACKBONE_NAME="${MANAGER_QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
+MANAGER_QWEN_BACKBONE_ROOT="${MANAGER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
+# Leave empty to resolve as <ROOT>/<NAME>; otherwise this is the full override.
+MANAGER_QWEN_BACKBONE_PATH="${MANAGER_QWEN_BACKBONE_PATH:-}"
 MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
@@ -95,7 +97,10 @@ EXECUTER_DIR="/data/public/RoboMME/checkpoints/mme_vla_suite/symbolic-simple-sub
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_PROMPT_VERSION="interaction_aware_v2"
-REPORTER_MODEL_PATH="$QWEN_BACKBONE_PATH"
+REPORTER_QWEN_BACKBONE_NAME="${REPORTER_QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
+REPORTER_QWEN_BACKBONE_ROOT="${REPORTER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
+# Leave empty to resolve as <ROOT>/<NAME>; otherwise this is the full override.
+REPORTER_QWEN_BACKBONE_PATH="${REPORTER_QWEN_BACKBONE_PATH:-}"
 # Empty means the original, non-fine-tuned Qwen3-VL Reporter.
 # Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
 # two-image Reporter adapters must not be reused for the new temporal input.
@@ -123,6 +128,15 @@ SERVER_LOG_DIR="runs/evaluation/server_logs"
 # =============================================================================
 # Implementation
 # =============================================================================
+
+MANAGER_QWEN_BACKBONE_PATH=$(resolve_qwen_backbone_path \
+    "$MANAGER_QWEN_BACKBONE_NAME" \
+    "$MANAGER_QWEN_BACKBONE_ROOT" \
+    "$MANAGER_QWEN_BACKBONE_PATH")
+REPORTER_QWEN_BACKBONE_PATH=$(resolve_qwen_backbone_path \
+    "$REPORTER_QWEN_BACKBONE_NAME" \
+    "$REPORTER_QWEN_BACKBONE_ROOT" \
+    "$REPORTER_QWEN_BACKBONE_PATH")
 
 find_free_port() {
     local min=${1:-2000}
@@ -272,15 +286,16 @@ MANAGER_GROUNDED_ADAPTER_PATH=$(resolve_repo_path "$MANAGER_GROUNDED_ADAPTER_PAT
 REPORTER_ADAPTER_PATH=$(resolve_repo_path "$REPORTER_ADAPTER_PATH")
 
 require_local_dir "Executer checkpoint" "$EXECUTER_DIR"
-if [[ "$REPORTER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "memer" ]]; then
-    require_local_dir "Qwen backbone" "$QWEN_BACKBONE_PATH"
-fi
 if [[ "$MANAGER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "memer" ]]; then
+    require_local_dir "Manager Qwen backbone" "$MANAGER_QWEN_BACKBONE_PATH"
     if [[ "$SUBGOAL_TYPE" == "simple_subgoal" ]]; then
         require_local_dir "Manager adapter" "$MANAGER_SIMPLE_ADAPTER_PATH"
     else
         require_local_dir "Manager adapter" "$MANAGER_GROUNDED_ADAPTER_PATH"
     fi
+fi
+if [[ "$REPORTER_TYPE" == "qwenvl" ]]; then
+    require_local_dir "Reporter Qwen backbone" "$REPORTER_QWEN_BACKBONE_PATH"
 fi
 if [[ -n "$REPORTER_ADAPTER_PATH" ]]; then
     require_local_dir "Reporter adapter" "$REPORTER_ADAPTER_PATH"
@@ -329,9 +344,11 @@ trap cleanup EXIT INT TERM
 
 echo "Evaluation:      $REQUESTED_EVAL_PRESET"
 echo "Manager:         $MANAGER_TYPE"
+echo "Manager Qwen:    $MANAGER_QWEN_BACKBONE_NAME ($MANAGER_QWEN_BACKBONE_PATH)"
 echo "Manager prompt:  $MANAGER_PROMPT_VERSION"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
+echo "Reporter Qwen:   $REPORTER_QWEN_BACKBONE_NAME ($REPORTER_QWEN_BACKBONE_PATH)"
 echo "Reporter prompt: $REPORTER_PROMPT_VERSION"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
 echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
@@ -385,9 +402,14 @@ run_evaluation() {
         --args.manager-simple-adapter-path "$MANAGER_SIMPLE_ADAPTER_PATH"
         --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
         --args.manager-prompt-version "$MANAGER_PROMPT_VERSION"
+        --args.manager-qwen-backbone-name "$MANAGER_QWEN_BACKBONE_NAME"
+        --args.manager-qwen-backbone-root "$MANAGER_QWEN_BACKBONE_ROOT"
+        --args.manager-qwen-backbone-path "$MANAGER_QWEN_BACKBONE_PATH"
         --args.reporter-type "$REPORTER_TYPE"
         --args.reporter-prompt-version "$REPORTER_PROMPT_VERSION"
-        --args.reporter-model-path "$REPORTER_MODEL_PATH"
+        --args.reporter-qwen-backbone-name "$REPORTER_QWEN_BACKBONE_NAME"
+        --args.reporter-qwen-backbone-root "$REPORTER_QWEN_BACKBONE_ROOT"
+        --args.reporter-qwen-backbone-path "$REPORTER_QWEN_BACKBONE_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
         --args.reporter-history-size "$REPORTER_HISTORY_SIZE"
     )

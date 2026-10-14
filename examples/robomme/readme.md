@@ -26,7 +26,7 @@ examples/robomme
 ├── simple_test.py          # sanity check
 ├── subgoal_prediction
 │   ├── gemini              # Prompts and API calling for Gemini-2.5-Pro
-│   └── qwenvl              # scripts for calling fine-tuned Qwen3VL-4B via swift
+│   └── qwenvl              # scripts for calling fine-tuned Qwen3-VL 4B/8B via swift
 ├── subgoal_predictor.py    # A wrapper for subgoal predictor (Gemini, QwenVL, Oracle)
 └── utils.py
 ```

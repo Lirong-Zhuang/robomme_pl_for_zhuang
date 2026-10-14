@@ -160,6 +160,8 @@ class QwenVLManager(ManagerBase):
     
     def setup_api(self) -> None:
         self.api = Qwen3VLModel(
+            model_path=self.args.manager_qwen_backbone_path,
+            model_name=self.args.manager_qwen_backbone_name,
             adapter_path=(
                 self.args.manager_simple_adapter_path
                 if self.args.subgoal_type == "simple_subgoal"
@@ -208,7 +210,9 @@ class QwenVLManager(ManagerBase):
 class MemERManager(ManagerBase):
     def setup_api(self) -> None:
         self.api = Qwen3VLModelMemER(
-            adapter_path=self.args.manager_grounded_adapter_path
+            adapter_path=self.args.manager_grounded_adapter_path,
+            model_path=self.args.manager_qwen_backbone_path,
+            model_name=self.args.manager_qwen_backbone_name,
         )
         print("[robomme] MemER Manager setup finished")
     

@@ -12,11 +12,13 @@ set -Eeuo pipefail
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/qwen_backbone.sh"
 
 REPORTER_DATASET_PATH="$REPO_ROOT/data/trinity_preprocessed_data/reporter_binfill_data_4/trainset/reporter_qwenvl/simple_subgoal_train.jsonl"
 REPORTER_RUN_NAME='qwen_reporter_v6_simple_subgoal'
 REPORTER_OUTPUT_DIR="$REPO_ROOT/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
-QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
+QWEN_BACKBONE_NAME="${QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
+resolve_qwen_backbone
 
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
@@ -64,6 +66,7 @@ if [[ ! -f "$REPORTER_DATASET_PATH" ]]; then
 fi
 
 echo "Slurm job:              $SLURM_JOB_ID"
+echo "Qwen backbone:           $QWEN_BACKBONE_NAME ($QWEN_BACKBONE_PATH)"
 echo "Visible GPUs:           $CUDA_VISIBLE_DEVICES"
 echo "GPU processes:          $NUM_GPUS"
 echo "Dataset:                $REPORTER_DATASET_PATH"

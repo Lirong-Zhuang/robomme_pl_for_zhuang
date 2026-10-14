@@ -158,6 +158,30 @@ To evaluate a trained LoRA, set `REPORTER_ADAPTER_PATH` in `scripts/eval.sh`
 to the generated checkpoint directory and keep `REPORTER_HISTORY_SIZE` equal
 to the training value. Old two-image Reporter adapters should not be reused.
 
+### Select the Qwen backbone
+
+Manager/Reporter fine-tuning and evaluation support these local backbones:
+
+- `Qwen3-VL-4B-Instruct`
+- `Qwen3-VL-8B-Instruct`
+
+Select one by name; its path is resolved as
+`/data/public/qwen/<QWEN_BACKBONE_NAME>`:
+
+```bash
+QWEN_BACKBONE_NAME=Qwen3-VL-8B-Instruct bash scripts/finetune_manager.sh
+QWEN_BACKBONE_NAME=Qwen3-VL-8B-Instruct bash scripts/finetune_reporter.sh
+```
+
+Set `QWEN_BACKBONE_ROOT` to change the common parent directory, or set
+`QWEN_BACKBONE_PATH` as an explicit full-path override. Make sure each LoRA
+adapter is evaluated with the same backbone size used for its training.
+
+During evaluation, Manager and Reporter are independent. Set
+`MANAGER_QWEN_BACKBONE_NAME` and `REPORTER_QWEN_BACKBONE_NAME` separately in
+`scripts/eval.sh`; each also has its own `*_ROOT` and optional `*_PATH`
+override next to the corresponding Manager or Reporter configuration.
+
 ## 2. Train the VLM subgoal predictor with tmux
 
 Before training, set `DATASET_PATH`, `RUN_NAME`, `OUTPUT_DIR`, and, if needed,
