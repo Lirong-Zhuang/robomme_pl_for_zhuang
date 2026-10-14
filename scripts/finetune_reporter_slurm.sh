@@ -98,8 +98,8 @@ swift sft \
     --num_train_epochs 4 \
     --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
     --gradient_accumulation_steps 1 \
-    --attn_impl sdpa \
-    --padding_free false \
+    --attn_impl flash_attn \
+    --padding_free true \
     --learning_rate 5e-5 \
     --lora_rank 16 \
     --lora_alpha 32 \
