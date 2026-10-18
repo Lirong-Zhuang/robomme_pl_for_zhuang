@@ -16,6 +16,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 from swift.llm import InferRequest, PtEngine, RequestConfig
 
 from env_runner import EnvRunner
+from mme_vla_suite.reporter_gripper_tool import PickUpGripperGate
 from mme_vla_suite.reporter_evaluation import debounce_reporter_success
 from mme_vla_suite.reporter_evaluation import parse_reporter_success
 from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
@@ -104,6 +105,15 @@ class QwenVLReporter(ReporterBase):
             maxlen=self.reporter_history_size
         )
         self.consecutive_true_count = 0
+        self.gripper_gate = (
+            PickUpGripperGate(
+                closed_position=float(args.reporter_gripper_closed_position),
+                open_position=float(args.reporter_gripper_open_position),
+                endpoint_buffer=float(args.reporter_gripper_endpoint_buffer),
+            )
+            if bool(getattr(args, "reporter_gripper_gate", False))
+            else None
+        )
 
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
         self.current_subgoal = None
@@ -182,7 +192,7 @@ class QwenVLReporter(ReporterBase):
         ):
             return None
 
-        current_observation, _, _ = epstate.get_current_obs()
+        current_observation, _, current_robot_state = epstate.get_current_obs()
         step_idx = epstate.count
         current_path = self.frames_dir / f"step_{step_idx}_image.png"
         if not current_path.exists():
@@ -214,19 +224,36 @@ class QwenVLReporter(ReporterBase):
             request_config=RequestConfig(max_tokens=64, temperature=0),
         )[0].choices[0].message.content
         raw_reporter_success = self._parse_success(response)
+
+        # The gripper tool is a strict veto and is called only for a parsed
+        # Reporter true. Non-pick-up subgoals pass through as not applicable.
+        # RoboMME's packed robot state stores the first observed finger opening
+        # as its final value; the policy-facing state shape remains unchanged.
+        gripper_gate_result = None
+        verified_reporter_success = raw_reporter_success
+        if raw_reporter_success is True and self.gripper_gate is not None:
+            state = np.asarray(current_robot_state, dtype=np.float32).reshape(-1)
+            gripper_position = float(state[-1]) if state.size else float("nan")
+            gripper_gate_result = self.gripper_gate.verify_reporter_true(
+                subgoal=subgoal,
+                gripper_position=gripper_position,
+            )
+            if gripper_gate_result.applicable and not gripper_gate_result.passed:
+                verified_reporter_success = False
+
         if self.reporter_debounce:
             reporter_success = debounce_reporter_success(
-                raw_reporter_success,
+                verified_reporter_success,
                 self.consecutive_true_count,
             )
             self.consecutive_true_count = (
                 self.consecutive_true_count + 1
-                if raw_reporter_success is True
+                if verified_reporter_success is True
                 else 0
             )
         else:
             # dev_trinity behavior: no filtering between Reporter and Manager.
-            reporter_success = raw_reporter_success
+            reporter_success = verified_reporter_success
             self.consecutive_true_count = 0
 
         next_init_path = None
@@ -248,12 +275,25 @@ class QwenVLReporter(ReporterBase):
                 f"{pprint.pformat(request, width=100, sort_dicts=False)}\n"
                 f"Response: {response}\n"
                 f"Parsed success: {raw_reporter_success}\n"
+                f"Success after gripper gate: {verified_reporter_success}\n"
+                f"Gripper gate enabled: {self.gripper_gate is not None}\n"
                 f"Debounce enabled: {self.reporter_debounce}\n"
                 f"Effective success: {reporter_success}\n"
                 f"Reporter history size: {self.reporter_history_size}\n"
                 f"Reporter prompt version: {self.reporter_prompt.version}\n"
                 f"Reporter prompt sha256: {self.reporter_prompt.content_hash}\n"
             )
+            if gripper_gate_result is not None:
+                log_file.write(
+                    "Gripper gate result: "
+                    f"applicable={gripper_gate_result.applicable}; "
+                    f"passed={gripper_gate_result.passed}; "
+                    f"reason={gripper_gate_result.reason}; "
+                    f"position={gripper_gate_result.gripper_position:.6f}; "
+                    "accepted_interval=("
+                    f"{gripper_gate_result.accepted_lower_bound:.6f}, "
+                    f"{gripper_gate_result.accepted_upper_bound:.6f})\n"
+                )
             if next_init_path is not None:
                 log_file.write(f"Next init frame: {next_init_path}\n")
 

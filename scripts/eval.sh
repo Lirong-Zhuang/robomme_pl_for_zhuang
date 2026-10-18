@@ -102,6 +102,13 @@ REPORTER_QWEN_BACKBONE_PATH="${REPORTER_QWEN_BACKBONE_PATH:-}"
 REPORTER_ADAPTER_PATH="todo"
 REPORTER_HISTORY_SIZE=3
 REPORTER_DEBOUNCE=false
+# Optional deterministic veto for Reporter true on subgoals containing
+# "pick up". RoboMME reports one observed finger opening in [0.0, 0.04].
+# With the defaults below, only the strict interval (0.002, 0.038) passes.
+REPORTER_GRIPPER_GATE=false
+REPORTER_GRIPPER_CLOSED_POSITION=0.0
+REPORTER_GRIPPER_OPEN_POSITION=0.04
+REPORTER_GRIPPER_ENDPOINT_BUFFER=0.002
 
 # micromamba server 117
 MAMBA_ENV="robomme"
@@ -172,6 +179,7 @@ fi
 # Validate this independently from FRAMEWORK_VERSION before starting either
 # GPU process. bool_arg is also used below to emit the matching tyro flag.
 bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce >/dev/null
+bool_arg "$REPORTER_GRIPPER_GATE" --args.reporter-gripper-gate --args.no-reporter-gripper-gate >/dev/null
 EVAL_RUN_NAME="${FRAMEWORK_VERSION}.${RUN_NAME}"
 
 resolve_repo_path() {
@@ -345,6 +353,8 @@ echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
 echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
 echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
+echo "Reporter gripper gate: $REPORTER_GRIPPER_GATE"
+echo "Reporter gripper range: closed=$REPORTER_GRIPPER_CLOSED_POSITION, open=$REPORTER_GRIPPER_OPEN_POSITION, endpoint buffer=$REPORTER_GRIPPER_ENDPOINT_BUFFER"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
 echo "Executer ckpt:   $EXECUTER_DIR"
@@ -403,6 +413,9 @@ run_evaluation() {
         --args.reporter-qwen-backbone-path "$REPORTER_QWEN_BACKBONE_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
         --args.reporter-history-size "$REPORTER_HISTORY_SIZE"
+        --args.reporter-gripper-closed-position "$REPORTER_GRIPPER_CLOSED_POSITION"
+        --args.reporter-gripper-open-position "$REPORTER_GRIPPER_OPEN_POSITION"
+        --args.reporter-gripper-endpoint-buffer "$REPORTER_GRIPPER_ENDPOINT_BUFFER"
     )
 
     eval_args+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
@@ -410,6 +423,7 @@ run_evaluation() {
     eval_args+=("$(bool_arg "$EXECUTER_USE_HISTORY" --args.executer-use-history --args.no-executer-use-history)")
     eval_args+=("$(bool_arg "$MANAGER_SAVE_MEMER_KF" --args.manager-save-memer-kf --args.no-manager-save-memer-kf)")
     eval_args+=("$(bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce)")
+    eval_args+=("$(bool_arg "$REPORTER_GRIPPER_GATE" --args.reporter-gripper-gate --args.no-reporter-gripper-gate)")
 
     case "$MANAGER_TYPE" in
         oracle)

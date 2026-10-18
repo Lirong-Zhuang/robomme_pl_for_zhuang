@@ -8,6 +8,7 @@ from typing import Tuple, Optional
 
 from mme_vla_suite.prompts import get_manager_prompt
 from mme_vla_suite.prompts import get_reporter_prompt
+from mme_vla_suite.reporter_gripper_tool import PickUpGripperGate
 
 
 
@@ -58,6 +59,12 @@ def check_args(args):
     assert getattr(args, "reporter_history_size", 7) >= 1
     get_manager_prompt(args.manager_prompt_version)
     get_reporter_prompt(args.reporter_prompt_version)
+    if getattr(args, "reporter_gripper_gate", False):
+        PickUpGripperGate(
+            closed_position=args.reporter_gripper_closed_position,
+            open_position=args.reporter_gripper_open_position,
+            endpoint_buffer=args.reporter_gripper_endpoint_buffer,
+        )
     if args.manager_use_memer:
         args.subgoal_type = "grounded_subgoal"
 

@@ -21,6 +21,9 @@ from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_NAME
 from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_ROOT
 from mme_vla_suite.qwen_backbone import resolve_qwen_backbone_path
+from mme_vla_suite.reporter_gripper_tool import DEFAULT_GRIPPER_CLOSED_POSITION
+from mme_vla_suite.reporter_gripper_tool import DEFAULT_GRIPPER_ENDPOINT_BUFFER
+from mme_vla_suite.reporter_gripper_tool import DEFAULT_GRIPPER_OPEN_POSITION
 
 # Do not retain unused CUDA allocations on the shared evaluation GPU.
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
@@ -113,6 +116,13 @@ class Args:
     # True: debounce continuous true runs (effective on calls 1, 4, 7, ...).
     # False: match dev_trinity and pass every parsed Reporter result directly.
     reporter_debounce: bool = True
+    # Optional deterministic veto for Reporter true on subgoals containing
+    # "pick up". Only an observed gripper opening strictly outside the fully
+    # closed/open endpoint buffers is accepted as a completed grasp.
+    reporter_gripper_gate: bool = False
+    reporter_gripper_closed_position: float = DEFAULT_GRIPPER_CLOSED_POSITION
+    reporter_gripper_open_position: float = DEFAULT_GRIPPER_OPEN_POSITION
+    reporter_gripper_endpoint_buffer: float = DEFAULT_GRIPPER_ENDPOINT_BUFFER
     # this can accelerate the evaluation process for symbolic memory
     # In our experiments, we just set this to 1
     num_episodes: int = 10 # number of episodes to evaluate for each task
@@ -451,6 +461,14 @@ def update_run_summary(args: Args) -> Path:
             if args.reporter_type == "qwenvl"
             else None
         ),
+        "reporter_history_size": args.reporter_history_size,
+        "reporter_debounce": args.reporter_debounce,
+        "reporter_gripper_gate": {
+            "enabled": args.reporter_gripper_gate,
+            "closed_position": args.reporter_gripper_closed_position,
+            "open_position": args.reporter_gripper_open_position,
+            "endpoint_buffer": args.reporter_gripper_endpoint_buffer,
+        },
         "seeds": seed_values,
         "repeats_per_seed": args.num_repeats,
         "expected_run_count": len(seed_values) * args.num_repeats,
@@ -701,6 +719,16 @@ def evaluate(args: Args):
                 },
             }
             final_results["prompts"] = prompt_metadata
+            final_results["reporter_runtime"] = {
+                "history_size": args.reporter_history_size,
+                "debounce": args.reporter_debounce,
+                "gripper_gate": {
+                    "enabled": args.reporter_gripper_gate,
+                    "closed_position": args.reporter_gripper_closed_position,
+                    "open_position": args.reporter_gripper_open_position,
+                    "endpoint_buffer": args.reporter_gripper_endpoint_buffer,
+                },
+            }
             with open(save_dir / "log.json", "w") as f:
                 json.dump(final_results, f, indent=2)
             update_run_summary(args)
