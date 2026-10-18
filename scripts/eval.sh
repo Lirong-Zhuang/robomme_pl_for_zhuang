@@ -62,7 +62,7 @@ SAVE_DIR="runs/evaluation"
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
 FRAMEWORK_VERSION="trinity_v2.1"
-RUN_NAME="9"
+RUN_NAME="11"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -85,7 +85,6 @@ EXECUTER_USE_HISTORY="auto"
 MANAGER_PROMPT_VERSION="qwenvl_v1"
 MANAGER_QWEN_BACKBONE_NAME="${MANAGER_QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
 MANAGER_QWEN_BACKBONE_ROOT="${MANAGER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
-# Leave empty to resolve as <ROOT>/<NAME>; otherwise this is the full override.
 MANAGER_QWEN_BACKBONE_PATH="${MANAGER_QWEN_BACKBONE_PATH:-}"
 MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
@@ -97,19 +96,11 @@ EXECUTER_DIR="/data/public/RoboMME/checkpoints/mme_vla_suite/symbolic-simple-sub
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
 REPORTER_PROMPT_VERSION="interaction_aware_v2"
-REPORTER_QWEN_BACKBONE_NAME="${REPORTER_QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
+REPORTER_QWEN_BACKBONE_NAME="${REPORTER_QWEN_BACKBONE_NAME:-Qwen3-VL-8B-Instruct}"
 REPORTER_QWEN_BACKBONE_ROOT="${REPORTER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
-# Leave empty to resolve as <ROOT>/<NAME>; otherwise this is the full override.
 REPORTER_QWEN_BACKBONE_PATH="${REPORTER_QWEN_BACKBONE_PATH:-}"
-# Empty means the original, non-fine-tuned Qwen3-VL Reporter.
-# Set this to a checkpoint trained with the same REPORTER_HISTORY_SIZE. The old
-# two-image Reporter adapters must not be reused for the new temporal input.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v7_simple_subgoal/v2-20261006-102030/checkpoint-1284"
-# Maximum recent Reporter calls retained for one subgoal; the newest entry is
-# current. The init is separate, and an unfilled window is not padded.
-REPORTER_HISTORY_SIZE=7
-# Independently enable or disable filtering of continuous Reporter true runs.
-# true keeps calls 1, 4, 7, ... effective; false applies every parsed result.
+REPORTER_ADAPTER_PATH="todo"
+REPORTER_HISTORY_SIZE=3
 REPORTER_DEBOUNCE=false
 
 # micromamba server 117

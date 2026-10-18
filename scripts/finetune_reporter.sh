@@ -10,8 +10,8 @@ REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/qwen_backbone.sh"
 
-REPORTER_DATASET_PATH="data/trinity_preprocessed_data/reporter_binfill_data_5/trainset/reporter_qwenvl/simple_subgoal_train.jsonl"
-REPORTER_RUN_NAME='qwen_reporter_v8_simple_subgoal'
+REPORTER_DATASET_PATH="data/trinity_preprocessed_data/reporter_binfill_data_6/trainset/reporter_qwenvl/simple_subgoal_train.jsonl"
+REPORTER_RUN_NAME='qwen_reporter_v9_simple_subgoal'
 REPORTER_OUTPUT_DIR="$REPO_ROOT/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 # Leave empty to start a new run. Set to a checkpoint directory to resume.
 RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"
