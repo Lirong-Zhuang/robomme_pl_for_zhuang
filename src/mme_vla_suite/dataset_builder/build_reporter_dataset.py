@@ -1,9 +1,11 @@
 """Build QwenVL Reporter completion-classification datasets.
 
 The frame selection and positive-sample duplication rules intentionally reuse
-the Manager QwenVL builder.  Each row contains the observation where a
-subgoal began followed by a capacity-limited sliding window of observations from
-Reporter calls in that subgoal. The window is not padded while it fills.
+the Manager QwenVL builder. Each row contains a capacity-limited sliding window
+of Reporter-call observations. The init observation and every recent
+observation contain an overall image and a wrist image, ordered overall then
+wrist. The recent window grows from one to ``k`` Reporter-call observations and
+then rolls at capacity, so the default rows contain 4, 6, or 8 images.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.reporter_prompts import (
     DEFAULT_REPORTER_HISTORY_SIZE,
     build_reporter_image_window,
+    build_reporter_multiview_window,
     validate_reporter_history_size,
 )
 
@@ -121,11 +124,13 @@ class DatasetBuilder(ManagerDatasetBuilder):
         history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
     ) -> dict:
         """Format one row exactly like the live Reporter request and response."""
-        expected_image_count = validate_reporter_history_size(history_size) + 1
+        validate_reporter_history_size(history_size)
+        expected_image_count = self.reporter_prompt.image_count(history_size)
         if len(image_paths) != expected_image_count:
             raise ValueError(
                 f"Reporter row requires {expected_image_count} images "
-                f"(init + {history_size} observations), got {len(image_paths)}"
+                f"for {history_size} observations with views "
+                f"{self.reporter_prompt.image_views}, got {len(image_paths)}"
             )
         return {
             "messages": [
@@ -159,21 +164,41 @@ class DatasetBuilder(ManagerDatasetBuilder):
             ) as file:
                 file.write(json.dumps(grounded_data) + "\n")
 
-    def _write_frame(
+    def _write_observation_views(
         self,
         episode_data: h5py.Group,
         env_id: str,
         episode_idx: int,
         step_idx: int,
-    ) -> str:
-        image_path = os.path.join(
-            self.images_dir,
-            f"{env_id}_ep{episode_idx}_step{step_idx}.png",
-        )
-        if not os.path.exists(image_path):
-            image = episode_data[f"timestep_{step_idx}"]["obs"]["front_rgb"][()]
-            imageio.imwrite(image_path, image)
-        return image_path
+        views: tuple[str, ...] | None = None,
+    ) -> tuple[str, ...]:
+        """Write one Reporter-call observation in prompt-declared view order."""
+        dataset_keys = {
+            "overall": "front_rgb",
+            "wrist": "wrist_rgb",
+        }
+        paths = []
+        observation = episode_data[f"timestep_{step_idx}"]["obs"]
+        selected_views = self.reporter_prompt.image_views if views is None else views
+        for view in selected_views:
+            if view not in dataset_keys:
+                raise ValueError(f"Unsupported Reporter image view: {view!r}")
+            dataset_key = dataset_keys[view]
+            if dataset_key not in observation:
+                raise KeyError(
+                    f"Missing {dataset_key!r} for Reporter {view!r} view at "
+                    f"{env_id} episode_{episode_idx} timestep_{step_idx}"
+                )
+            view_dir = os.path.join(self.images_dir, view)
+            os.makedirs(view_dir, exist_ok=True)
+            image_path = os.path.join(
+                view_dir,
+                f"{env_id}_ep{episode_idx}_step{step_idx}.png",
+            )
+            if not os.path.exists(image_path):
+                imageio.imwrite(image_path, observation[dataset_key][()])
+            paths.append(image_path)
+        return tuple(paths)
 
     @staticmethod
     def _subgoals_at_step(
@@ -427,13 +452,16 @@ class DatasetBuilder(ManagerDatasetBuilder):
             )
             last_simple_subgoal = simple_subgoal
             last_grounded_subgoal = grounded_subgoal
-            before_path = self._write_frame(
-                episode_data,
-                env_id,
-                episode_idx,
-                start_idx,
-            )
-            reporter_observation_paths: deque[str] = deque(
+            init_paths: tuple[str, ...] = ()
+            if self.reporter_prompt.include_init_image:
+                init_paths = self._write_observation_views(
+                    episode_data,
+                    env_id,
+                    episode_idx,
+                    start_idx,
+                    self.reporter_prompt.init_image_views,
+                )
+            reporter_observation_paths: deque[tuple[str, ...]] = deque(
                 maxlen=self.reporter_history_size
             )
             # Reporter is called after execution chunks, never on the initial
@@ -450,7 +478,7 @@ class DatasetBuilder(ManagerDatasetBuilder):
                         f"{env_id} episode_{episode_idx} step {idx}: failed "
                         "grasp endpoint overlaps a completed-subgoal label"
                     )
-                after_path = self._write_frame(
+                current_paths = self._write_observation_views(
                     episode_data,
                     env_id,
                     episode_idx,
@@ -458,13 +486,28 @@ class DatasetBuilder(ManagerDatasetBuilder):
                 )
                 # Selected observations follow the regular sampling schedule
                 # plus a failure anchor when present. The queue resets only at
-                # real subgoal transitions and is never padded.
-                reporter_observation_paths.append(after_path)
-                image_paths = build_reporter_image_window(
-                    before_path,
-                    reporter_observation_paths,
-                    self.reporter_history_size,
-                )
+                # subgoal transitions and grows naturally until it reaches k.
+                reporter_observation_paths.append(current_paths)
+                if init_paths:
+                    if len(init_paths) == 1:
+                        image_paths = build_reporter_image_window(
+                            init_paths[0],
+                            [paths[0] for paths in reporter_observation_paths],
+                            self.reporter_history_size,
+                        )
+                    else:
+                        image_paths = [
+                            *init_paths,
+                            *build_reporter_multiview_window(
+                                reporter_observation_paths,
+                                self.reporter_history_size,
+                            ),
+                        ]
+                else:
+                    image_paths = build_reporter_multiview_window(
+                        reporter_observation_paths,
+                        self.reporter_history_size,
+                    )
                 simple_data = self.make_reporter_data(
                     simple_subgoal,
                     image_paths,

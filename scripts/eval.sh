@@ -61,8 +61,8 @@ SAVE_DIR="runs/evaluation"
 # FRAMEWORK_VERSION is only a free-form result label; it does not select any
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
-FRAMEWORK_VERSION="trinity_v2.1"
-RUN_NAME="11"
+FRAMEWORK_VERSION="trinity_v2.2"
+RUN_NAME="1"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -95,7 +95,7 @@ EXECUTER_DIR="/data/public/RoboMME/checkpoints/mme_vla_suite/symbolic-simple-sub
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
-REPORTER_PROMPT_VERSION="interaction_aware_v2"
+REPORTER_PROMPT_VERSION="dual_view_temporal_v3"
 REPORTER_QWEN_BACKBONE_NAME="${REPORTER_QWEN_BACKBONE_NAME:-Qwen3-VL-8B-Instruct}"
 REPORTER_QWEN_BACKBONE_ROOT="${REPORTER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
 REPORTER_QWEN_BACKBONE_PATH="${REPORTER_QWEN_BACKBONE_PATH:-}"
@@ -350,7 +350,7 @@ echo "Reporter:        $REPORTER_TYPE"
 echo "Reporter Qwen:   $REPORTER_QWEN_BACKBONE_NAME ($REPORTER_QWEN_BACKBONE_PATH)"
 echo "Reporter prompt: $REPORTER_PROMPT_VERSION"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
-echo "Reporter history: $REPORTER_HISTORY_SIZE calls (+ init observation)"
+echo "Reporter input: 2 init images + up to $REPORTER_HISTORY_SIZE paired-view calls"
 echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
 echo "Reporter gripper gate: $REPORTER_GRIPPER_GATE"

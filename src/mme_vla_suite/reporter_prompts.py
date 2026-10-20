@@ -39,6 +39,16 @@ def build_reporter_image_window(
     return [init_image, *history]
 
 
+def build_reporter_multiview_window(
+    recent_observations: Iterable[tuple[_ImageT, ...]],
+    history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,
+) -> list[_ImageT]:
+    """Flatten the latest paired views in temporal, then per-view, order."""
+    validate_reporter_history_size(history_size)
+    history = list(recent_observations)[-history_size:]
+    return [image for observation in history for image in observation]
+
+
 def format_reporter_user_prompt(
     subgoal: str,
     history_size: int = DEFAULT_REPORTER_HISTORY_SIZE,

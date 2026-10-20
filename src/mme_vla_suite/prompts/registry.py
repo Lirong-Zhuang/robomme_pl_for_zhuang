@@ -7,15 +7,19 @@ import hashlib
 from typing import Literal
 
 from mme_vla_suite.prompts.manager import qwenvl_v1
+from mme_vla_suite.prompts.reporter import dual_view_temporal_v3
 from mme_vla_suite.prompts.reporter import interaction_aware_v2
 from mme_vla_suite.prompts.reporter import temporal_v1
 
 
 SubgoalType = Literal["simple_subgoal", "grounded_subgoal"]
 
-DEFAULT_REPORTER_HISTORY_SIZE = 7
-DEFAULT_REPORTER_PROMPT_VERSION = interaction_aware_v2.VERSION
+DEFAULT_REPORTER_HISTORY_SIZE = 3
+DEFAULT_REPORTER_PROMPT_VERSION = dual_view_temporal_v3.VERSION
 DEFAULT_MANAGER_PROMPT_VERSION = qwenvl_v1.VERSION
+# Keep prompt hashes stable when the runtime window default changes. Existing
+# Reporter prompt hashes were originally derived with a seven-observation render.
+_REPORTER_HASH_OBSERVATION_COUNT = 7
 
 
 def _content_hash(*parts: str) -> str:
@@ -34,6 +38,9 @@ class ReporterPromptSpec:
     version: str
     system_prompt: str
     user_prompt_template: str
+    image_views: tuple[str, ...] = ("overall",)
+    include_init_image: bool = True
+    init_image_views: tuple[str, ...] = ("overall",)
 
     @property
     def content_hash(self) -> str:
@@ -43,7 +50,7 @@ class ReporterPromptSpec:
             self.format_user_prompt("<subgoal>", 1),
             self.format_user_prompt(
                 "<subgoal>",
-                DEFAULT_REPORTER_HISTORY_SIZE,
+                _REPORTER_HASH_OBSERVATION_COUNT,
             ),
         )
 
@@ -53,11 +60,25 @@ class ReporterPromptSpec:
         observation_lines = []
         for index in range(1, observation_count + 1):
             suffix = " (current observation)" if index == observation_count else ""
-            observation_lines.append(
-                f"Recent observation {index}/{observation_count}{suffix}: <image>"
-            )
+            if self.image_views == ("overall",):
+                observation_lines.append(
+                    f"Recent observation {index}/{observation_count}{suffix}: <image>"
+                )
+            else:
+                observation_lines.append(
+                    "\n".join(
+                        [
+                            f"Observation {index}/{observation_count}{suffix}:",
+                            *[
+                                f"  {view.capitalize()} image: <image>"
+                                for view in self.image_views
+                            ],
+                        ]
+                    )
+                )
         return self.user_prompt_template.format(
             subgoal=subgoal,
+            observation_count=observation_count,
             observation_lines="\n".join(observation_lines),
         )
 
@@ -75,9 +96,18 @@ class ReporterPromptSpec:
         ]
         self.validate_media_alignment(
             messages,
-            image_count=observation_count + 1,
+            image_count=self.image_count(observation_count),
         )
         return messages
+
+    def image_count(self, observation_count: int) -> int:
+        """Return the exact number of images required for a prompt window."""
+        if observation_count < 1:
+            raise ValueError("Reporter history size must be at least 1")
+        return (
+            (len(self.init_image_views) if self.include_init_image else 0)
+            + observation_count * len(self.image_views)
+        )
 
     @staticmethod
     def validate_media_alignment(
@@ -281,12 +311,21 @@ _REPORTER_PROMPTS = {
         system_prompt=interaction_aware_v2.SYSTEM_PROMPT,
         user_prompt_template=interaction_aware_v2.USER_PROMPT_TEMPLATE,
     ),
+    dual_view_temporal_v3.VERSION: ReporterPromptSpec(
+        version=dual_view_temporal_v3.VERSION,
+        system_prompt=dual_view_temporal_v3.SYSTEM_PROMPT,
+        user_prompt_template=dual_view_temporal_v3.USER_PROMPT_TEMPLATE,
+        image_views=("overall", "wrist"),
+        include_init_image=True,
+        init_image_views=("overall", "wrist"),
+    ),
 }
 
 _REPORTER_ALIASES = {
     "trinity_v2.1": temporal_v1.VERSION,
-    "trinity_v2.2": interaction_aware_v2.VERSION,
+    "trinity_v2.2": dual_view_temporal_v3.VERSION,
     "trinity_v2.2-interaction-aware": interaction_aware_v2.VERSION,
+    "trinity_v2.2-dual-view": dual_view_temporal_v3.VERSION,
 }
 
 _MANAGER_PROMPTS = {

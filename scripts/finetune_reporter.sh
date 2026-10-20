@@ -3,15 +3,15 @@
 set -Eeuo pipefail
 
 # Fine-tune the Trinity Reporter. The selected JSONL uses the same prompt and
-# image ordering as examples/robomme/reporter.py: one subgoal-init image,
-# followed by 1..7 actual Reporter-call observations.
+# image ordering as examples/robomme/reporter.py: init overall/wrist followed by
+# up to three Reporter-call observations, each represented by overall then wrist.
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/qwen_backbone.sh"
 
-REPORTER_DATASET_PATH="data/trinity_preprocessed_data/reporter_binfill_data_6/trainset/reporter_qwenvl/simple_subgoal_train.jsonl"
-REPORTER_RUN_NAME='qwen_reporter_v9_simple_subgoal'
+REPORTER_DATASET_PATH="data/trinity_preprocessed_data/reporter_binfill_data_7/trainset/reporter_qwenvl/simple_subgoal_train.jsonl"
+REPORTER_RUN_NAME='qwen_reporter_v10_simple_subgoal'
 REPORTER_OUTPUT_DIR="$REPO_ROOT/runs/ckpts/reporter/${REPORTER_RUN_NAME}"
 # Leave empty to start a new run. Set to a checkpoint directory to resume.
 RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"

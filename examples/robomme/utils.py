@@ -9,6 +9,7 @@ from typing import Tuple, Optional
 from mme_vla_suite.prompts import get_manager_prompt
 from mme_vla_suite.prompts import get_reporter_prompt
 from mme_vla_suite.reporter_gripper_tool import PickUpGripperGate
+from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
 
 
 
@@ -56,7 +57,11 @@ def pack_buffer(image_buffer, state_buffer, exec_start_idx=0):
 def check_args(args):
     assert args.subgoal_type in ["simple_subgoal", "grounded_subgoal", None] and args.obs_horizon == 16
     assert args.reporter_type in ["none", "qwenvl"]
-    assert getattr(args, "reporter_history_size", 7) >= 1
+    assert getattr(
+        args,
+        "reporter_history_size",
+        DEFAULT_REPORTER_HISTORY_SIZE,
+    ) >= 1
     get_manager_prompt(args.manager_prompt_version)
     get_reporter_prompt(args.reporter_prompt_version)
     if getattr(args, "reporter_gripper_gate", False):

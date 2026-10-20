@@ -9,14 +9,19 @@ text cannot silently drift between training and inference.
 Reporter:
 
 - `temporal_v1`: the Trinity v2.1 temporal comparison prompt.
-- `interaction_aware_v2`: the Trinity v2.2 interaction-aware prompt and the
-  current default.
+- `interaction_aware_v2`: the Trinity v2.2 interaction-aware single-view
+  prompt retained for existing checkpoints.
+- `dual_view_temporal_v3`: the current Trinity v2.2 default. It uses a rolling
+  window of up to three Reporter-call observations, each ordered as overall
+  image then wrist image, and compares them with an overall/wrist init pair.
+  Eval deletes the temporary init-frame directory after each episode.
 
-Reporter aliases retained for historical commands:
+Reporter aliases:
 
 - `trinity_v2.1` -> `temporal_v1`
-- `trinity_v2.2` -> `interaction_aware_v2`
+- `trinity_v2.2` -> `dual_view_temporal_v3`
 - `trinity_v2.2-interaction-aware` -> `interaction_aware_v2`
+- `trinity_v2.2-dual-view` -> `dual_view_temporal_v3`
 
 Manager:
 
@@ -42,8 +47,8 @@ Build an episode-disjoint Reporter train/test dataset with the v2.2 prompt:
 ```bash
 uv run python scripts/build_trainset_testset.py \
   --dataset_type reporter_qwenvl \
-  --reporter_prompt_version interaction_aware_v2 \
-  --reporter_history_size 7
+  --reporter_prompt_version dual_view_temporal_v3 \
+  --reporter_history_size 3
 ```
 
 Build a QwenVL Manager dataset:
@@ -64,7 +69,7 @@ For full environment evaluation, edit these values in `scripts/eval.sh`:
 
 ```bash
 MANAGER_PROMPT_VERSION="qwenvl_v1"
-REPORTER_PROMPT_VERSION="interaction_aware_v2"
+REPORTER_PROMPT_VERSION="dual_view_temporal_v3"
 ```
 
 Then run `bash scripts/eval.sh`. The resolved prompt versions and hashes are
@@ -80,9 +85,9 @@ python user_code/test_reporter.py \
   --result-name reporter-v1-prompt
 ```
 
-This intentionally permits cross-prompt experiments, such as evaluating an
-adapter trained with `temporal_v1` using `interaction_aware_v2`. Such a result
-is a prompt-mismatch ablation, not a like-for-like checkpoint comparison.
+This intentionally permits compatible cross-prompt experiments. The
+`dual_view_temporal_v3` media layout is different from the older prompts, so it
+must be used with a newly built dual-view dataset and a matching checkpoint.
 
 ## Add a prompt version
 
@@ -98,10 +103,11 @@ is a prompt-mismatch ablation, not a like-for-like checkpoint comparison.
    experiment; doing so changes its hash while leaving its name unchanged.
 
 Reporter user prompts are dynamic because the number of `<image>` placeholders
-must equal `1 + observation_count`. New Reporter formatters must preserve that
-invariant. Manager prompt versions must define both simple and grounded system
-prompts, initial-turn formatting, follow-up formatting, and all three Reporter
-feedback states (`true`, `false`, and unavailable).
+must equal the prompt version's declared media count. For the default dual-view
+prompt this is `2 + 2 * observation_count`; the legacy single-view prompts use
+`1 + observation_count`. Manager prompt versions must define both simple and
+grounded system prompts, initial-turn formatting, follow-up formatting, and all
+three Reporter feedback states (`true`, `false`, and unavailable).
 
 ## Rename a version or change the default
 

@@ -24,6 +24,7 @@ from mme_vla_suite.qwen_backbone import resolve_qwen_backbone_path
 from mme_vla_suite.reporter_gripper_tool import DEFAULT_GRIPPER_CLOSED_POSITION
 from mme_vla_suite.reporter_gripper_tool import DEFAULT_GRIPPER_ENDPOINT_BUFFER
 from mme_vla_suite.reporter_gripper_tool import DEFAULT_GRIPPER_OPEN_POSITION
+from mme_vla_suite.reporter_prompts import DEFAULT_REPORTER_HISTORY_SIZE
 
 # Do not retain unused CUDA allocations on the shared evaluation GPU.
 os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
@@ -111,8 +112,8 @@ class Args:
     reporter_adapter_path: str = ""
     reporter_prompt_version: str = DEFAULT_REPORTER_PROMPT_VERSION
     # Number of recent Reporter-call observations, including the current one.
-    # Together with init, the default model sees 2..8 images without padding.
-    reporter_history_size: int = 7
+    # Input is two init images plus up to three overall/wrist observation pairs.
+    reporter_history_size: int = DEFAULT_REPORTER_HISTORY_SIZE
     # True: debounce continuous true runs (effective on calls 1, 4, 7, ...).
     # False: match dev_trinity and pass every parsed Reporter result directly.
     reporter_debounce: bool = True
@@ -197,10 +198,9 @@ class EpisodeEvaluator:
                 )
             )
             if should_predict_subgoal:
-                # Reporter first inserts the current observation into its
-                # call-level sliding window, then compares init + history. A
-                # successful result promotes the current frame to the next
-                # subgoal init before the result is passed to Manager.
+                # Reporter compares the init overall/wrist pair with a rolling
+                # window of up to three recent pairs. A successful result
+                # clears that window before the result is passed to Manager.
                 reporter_result = reporter.step(epstate, subgoal)
 
             # Manager receives/buffers the same current observation only after
@@ -225,6 +225,7 @@ class EpisodeEvaluator:
                 reporter.observe_subgoal(
                     subgoal,
                     img,
+                    wrist_img,
                     epstate.count,
                     reporter_result,
                 )
@@ -270,6 +271,7 @@ class EpisodeEvaluator:
             if stop_flag:
                 break
 
+        reporter.end_episode(epstate, success_flag)
         if success_flag == "unknown":
             return "unknown"
 
@@ -277,7 +279,6 @@ class EpisodeEvaluator:
         recorder.save_video(video_filename)
 
         manager.end_episode(epstate, success_flag)
-        reporter.end_episode(epstate, success_flag)
         executer.end_episode()
         return success_flag
 

@@ -43,15 +43,18 @@ QWEN_BACKBONE_ROOT = os.environ.get(
     "QWEN_BACKBONE_ROOT", DEFAULT_QWEN_BACKBONE_ROOT
 )
 QWEN_BACKBONE_PATH = os.environ.get("QWEN_BACKBONE_PATH", "")
-DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v6.1_simple_subgoal/v2-20261002-000202/checkpoint-900"
+DEFAULT_REPORTER_ADAPTER_PATH = os.environ.get("REPORTER_ADAPTER_PATH", "")
 
-DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_4/reporter_qwenvl"
+DEFAULT_TESTSET_PATH = (
+    "data/trinity_preprocessed_data/reporter_binfill_data_7/"
+    "testset/reporter_qwenvl"
+)
 DEFAULT_SUBGOAL_TYPE = "simple"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
-DEFAULT_RESULT_NAME = "reporter_qwen_v6.1_ckpt900"
+DEFAULT_RESULT_NAME = "reporter_dual_view_v3"
 # False exactly matches dev_trinity: every parsed result is applied directly.
 REPORTER_DEBOUNCE = True
-REPORTER_HISTORY_SIZE = 7
+REPORTER_HISTORY_SIZE = 3
 REPORTER_PROMPT_VERSION = DEFAULT_REPORTER_PROMPT_VERSION
 
 # Completion-scoring tolerance, measured in Reporter calls.
@@ -161,19 +164,14 @@ def _export_errors(
 
         error_index = len(errors) + 1
         error_type = _error_type(record["expected"], record["predicted"])
-        used_init_source = Path(record["used_init_image"])
-        current_source = Path(record["current_image"])
+        current_sources = [Path(path) for path in record["current_images"]]
 
         error_record = dict(record)
         error_record.update(
             {
                 "error_index": error_index,
                 "error_type": error_type,
-                "dataset_init_frame_name": Path(
-                    record["dataset_init_image"]
-                ).name,
-                "used_init_frame_name": used_init_source.name,
-                "error_frame_name": current_source.name,
+                "error_frame_names": [source.name for source in current_sources],
             }
         )
         errors.append(error_record)
@@ -225,8 +223,8 @@ def _print_completion_summary(completion_report: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate one Reporter frame by frame while using its own success "
-            "predictions to update the next init frame."
+            "Evaluate one dual-view Reporter frame by frame while using its own "
+            "success predictions to advance the active subgoal."
         )
     )
     parser.add_argument(
@@ -310,7 +308,7 @@ def parse_args() -> argparse.Namespace:
         "--reporter-history-size",
         type=int,
         default=REPORTER_HISTORY_SIZE,
-        help="Maximum observations retained for the current subgoal (default: 7).",
+        help="Maximum paired-view observations retained for the current subgoal (default: 3).",
     )
     parser.add_argument(
         "--early-tolerance-calls",

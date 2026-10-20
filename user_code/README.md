@@ -64,10 +64,11 @@ output directory in the `USER CONFIG` block at the top of
 `user_code/test_reporter.py`. Command-line options remain available when a
 one-off override is useful. `REPORTER_DEBOUNCE=True` enables periodic debounce;
 set it to `False` or pass `--no-reporter-debounce` to use every raw Reporter
-result directly, matching `dev_trinity`. The script evaluates one Reporter sequentially. The first
-sample in each episode supplies the initial frame; later init frames are
-updated only on a debounced, effective `{"success": true}`. The first `true`
-in a continuous run is effective, the next two are suppressed,
+result directly, matching `dev_trinity`. The script evaluates one Reporter
+sequentially with a rolling window of up to three observations. Each request
+contains an overall/wrist init pair followed by one to three overall/wrist
+observation pairs.
+The first `true` in a continuous run is effective, the next two are suppressed,
 and the fourth becomes effective again; this repeats every three calls while
 `true` continues. A `false` or invalid output resets the run. Exact duplicates
 are disabled when `build_trainset_testset.py` creates the test set;
@@ -76,10 +77,10 @@ check. Completion is scored as causal subgoal progress: consecutive `true`
 outputs are debounced, predictions up to one Reporter call early are accepted,
 delays up to one Reporter call receive full credit,
 a delay of two calls is completed with a warning, and premature or later
-transitions stop progress for that episode. During sequential inference,
-both the init frame and active subgoal advance only on a debounced predicted
-`true`; dataset labels never advance the prompt. The command writes
+transitions stop progress for that episode. During sequential inference, the
+paired-view history is cleared and the active subgoal advances only on a
+debounced predicted `true`; dataset labels never advance the prompt. The command writes
 `summary.json`, `episode_completion.jsonl`, `predictions.jsonl`, and `errors.json`.
 Error images are not copied, which avoids duplicating the dataset and consuming
 extra storage. Every prediction row contains
-the numeric `frame` as well as the full `current_frame` image path.
+the numeric `frame` as well as both full `current_frames` image paths.
