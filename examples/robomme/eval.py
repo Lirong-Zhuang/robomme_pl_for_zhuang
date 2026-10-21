@@ -332,6 +332,41 @@ def get_evaluation_run_directory(args: Args) -> Path:
     return Path(args.save_dir) / args.executer_name / get_evaluation_run_name(args)
 
 
+def format_eval_duration(seconds: float) -> str:
+    """Format an evaluation duration without zero-valued leading units."""
+    total_seconds = max(0, round(seconds))
+    hours, remaining_seconds = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remaining_seconds, 60)
+    if hours:
+        return f"{hours}h {minutes}min {seconds}s"
+    if minutes:
+        return f"{minutes}min {seconds}s"
+    return f"{seconds}s"
+
+
+def parse_eval_duration(value: object) -> float:
+    """Parse the current display format or a legacy numeric-seconds value."""
+    if isinstance(value, (int, float)):
+        duration_seconds = float(value)
+    elif isinstance(value, str):
+        duration_seconds = 0.0
+        for part in value.split():
+            if part.endswith("min"):
+                duration_seconds += float(part[:-3]) * 60
+            elif part.endswith("h"):
+                duration_seconds += float(part[:-1]) * 3600
+            elif part.endswith("s"):
+                duration_seconds += float(part[:-1])
+            else:
+                raise ValueError(f"unknown duration unit in {part!r}")
+    else:
+        raise TypeError(f"unsupported duration value: {value!r}")
+
+    if duration_seconds < 0:
+        raise ValueError("duration cannot be negative")
+    return duration_seconds
+
+
 def setup_save_directory(args: Args) -> Path:
     """Set up one seed/repeat directory and validate overwrite behavior."""
     if args.repeat_id < 1:
@@ -412,6 +447,7 @@ def update_run_summary(args: Args) -> Path:
     completed = []
     missing = []
     task_success_rates: dict[str, list[float]] = {}
+    eval_durations: list[float] = []
     for seed in seed_values:
         for repeat_id in range(1, args.num_repeats + 1):
             log_path = run_dir / f"seed{seed}" / f"repeat{repeat_id}" / "log.json"
@@ -428,13 +464,33 @@ def update_run_summary(args: Args) -> Path:
                 missing.append({"seed": seed, "repeat": repeat_id})
                 continue
 
-            completed.append(
-                {
-                    "seed": seed,
-                    "repeat": repeat_id,
-                    "total_success_rate": total_success_rate,
-                }
+            raw_eval_duration = result.get(
+                "eval_duration",
+                result.get("eval_duration_seconds"),
             )
+            eval_duration_seconds = None
+            if raw_eval_duration is not None:
+                try:
+                    eval_duration_seconds = parse_eval_duration(raw_eval_duration)
+                except (TypeError, ValueError) as e:
+                    print(
+                        f"Warning: ignoring invalid eval duration in {log_path}: {e}"
+                    )
+                    eval_duration_seconds = None
+
+            completed_run = {
+                "seed": seed,
+                "repeat": repeat_id,
+                "total_success_rate": total_success_rate,
+                "eval_duration": (
+                    format_eval_duration(eval_duration_seconds)
+                    if eval_duration_seconds is not None
+                    else None
+                ),
+            }
+            completed.append(completed_run)
+            if eval_duration_seconds is not None:
+                eval_durations.append(eval_duration_seconds)
             for task_name, success_rate in per_task.items():
                 task_success_rates.setdefault(task_name, []).append(float(success_rate))
 
@@ -480,6 +536,11 @@ def update_run_summary(args: Args) -> Path:
             if completed
             else None
         ),
+        "average_eval_duration": (
+            format_eval_duration(sum(eval_durations) / len(eval_durations))
+            if eval_durations
+            else None
+        ),
         "per_task_average_success_rate": {
             task_name: sum(values) / len(values)
             for task_name, values in sorted(task_success_rates.items())
@@ -495,7 +556,9 @@ def update_run_summary(args: Args) -> Path:
     print(
         f"[robomme] Updated {summary_path}: "
         f"{len(completed)}/{summary['expected_run_count']} runs completed, "
-        f"total average success rate={summary['total_average_success_rate']}"
+        f"total average success rate={summary['total_average_success_rate']}, "
+        f"average eval duration="
+        f"{summary['average_eval_duration']}"
     )
     return summary_path
 
@@ -537,6 +600,7 @@ def setup_log_dict(save_dir: Path, args: Args) -> dict:
 
 def evaluate(args: Args):
     """Main evaluation function."""
+    eval_started_at = time.perf_counter()
     args.manager_qwen_backbone_path = resolve_qwen_backbone_path(
         args.manager_qwen_backbone_name,
         model_root=args.manager_qwen_backbone_root,
@@ -709,6 +773,9 @@ def evaluate(args: Args):
             final_results["executer_seed"] = args.executer_seed
             final_results["repeat_id"] = args.repeat_id
             final_results["executer_ckpt_id"] = args.executer_ckpt_id
+            final_results["eval_duration"] = format_eval_duration(
+                time.perf_counter() - eval_started_at
+            )
             final_results["qwen_backbones"] = {
                 "manager": {
                     "name": args.manager_qwen_backbone_name,
