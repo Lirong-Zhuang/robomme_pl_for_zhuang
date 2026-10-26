@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import time
+import traceback
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Optional, TextIO, Tuple
@@ -576,13 +577,15 @@ def setup_log_dict(save_dir: Path, args: Args) -> dict:
     else:
         log_dict = {}
 
-    for task_name in log_dict:
-        error_list = []
-        for k, v in log_dict[task_name].items():
-            if v == "error":
-                error_list.append(k)
-        for k in error_list:
-            log_dict[task_name].pop(k)
+    for task_name, episode_results in log_dict.items():
+        # JSON object keys are strings after a resume, while freshly recorded
+        # episode IDs used to be integers. Keep one representation so the
+        # completed-episode check behaves the same before and after a restart.
+        log_dict[task_name] = {
+            str(episode_id): result
+            for episode_id, result in episode_results.items()
+            if result != "error"
+        }
 
     if args.re_eval_tasks:
         for task_name in args.re_eval_tasks.split(","):
@@ -676,6 +679,14 @@ def evaluate(args: Args):
         if str(episode_id) in log_dict.get(task_name, {})
         or episode_id in log_dict.get(task_name, {})
     )
+    final_log_path = save_dir / "log.json"
+    if completed_current_run == episodes_per_run and final_log_path.exists():
+        print(
+            f"[robomme] Evaluation already complete at {final_log_path}; "
+            "leaving the existing result and duration unchanged."
+        )
+        update_run_summary(args)
+        return
 
     manager = build_manager(args, save_dir)
     executer = build_executer(args)
@@ -698,7 +709,6 @@ def evaluate(args: Args):
     # log.json summarizes the latest completed run. Remove only this derived
     # summary so a new invocation can add tasks/episodes from progress.json.
     # Existing task videos, frames, logs, and episode results remain untouched.
-    final_log_path = save_dir / "log.json"
     if final_log_path.exists():
         final_log_path.unlink()
 
@@ -727,9 +737,12 @@ def evaluate(args: Args):
             success_flag = "unknown"
 
             for episode_id in episode_ids:
-                if str(episode_id) in log_dict[task_name]:
+                episode_key = str(episode_id)
+                if episode_key in log_dict[task_name]:
                     continue
 
+                success_flag = "unknown"
+                episode_error = None
                 with manager_log(
                     save_dir, task_name, episode_id, args.save_manager_logs
                 ):
@@ -740,26 +753,49 @@ def evaluate(args: Args):
                             env_runner, manager, executer, reporter, video_save_dir
                         )
                         if success_flag == "unknown":
-                            log_dict[task_name][episode_id] = "error"
+                            log_dict[task_name][episode_key] = "error"
                         else:
-                            log_dict[task_name][episode_id] = success_flag == "success"
+                            log_dict[task_name][episode_key] = success_flag == "success"
                     except Exception as e:
                         print(f"Error evaluating episode {episode_id} for task {task_name}: {e}")
-                        log_dict[task_name][episode_id] = "error"
+                        traceback.print_exc()
+                        log_dict[task_name][episode_key] = "error"
+                        episode_error = e
                     finally:
                         env_runner.close_env()
+
+                if episode_error is not None:
+                    print(
+                        f"[robomme] Episode failed: task={task_name}, "
+                        f"episode={episode_id}: {episode_error}. See the Manager "
+                        "log for the traceback."
+                    )
 
                 evaluation_progress.update(1)
 
                 with open(save_dir / "progress.json", "w") as f:
                     json.dump(log_dict, f, indent=2)
 
-                if success_flag == "unknown":
-                    evaluation_progress.close()
-                    return
-
             del env_runner
             time.sleep(1)
+
+        invalid_episode_results = [
+            (task_name, episode_id, result)
+            for task_name, episode_results in log_dict.items()
+            for episode_id, result in episode_results.items()
+            if not isinstance(result, bool)
+        ]
+        if invalid_episode_results:
+            evaluation_progress.close()
+            invalid_text = ", ".join(
+                f"{task_name}/{episode_id}={result!r}"
+                for task_name, episode_id, result in invalid_episode_results
+            )
+            raise RuntimeError(
+                f"Evaluation finished with {len(invalid_episode_results)} "
+                f"invalid episode result(s): {invalid_text}. Re-run with "
+                "overwrite disabled to evaluate only entries marked 'error'."
+            )
 
         try:
             final_results = {}
@@ -802,7 +838,8 @@ def evaluate(args: Args):
             update_run_summary(args)
         except Exception as e:
             print(f"Error saving final results: {e}")
-            time.sleep(1)
+            evaluation_progress.close()
+            raise
 
     evaluation_progress.close()
 

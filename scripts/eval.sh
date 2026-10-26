@@ -99,7 +99,7 @@ REPORTER_PROMPT_VERSION="dual_view_temporal_v3"
 REPORTER_QWEN_BACKBONE_NAME="${REPORTER_QWEN_BACKBONE_NAME:-Qwen3-VL-8B-Instruct}"
 REPORTER_QWEN_BACKBONE_ROOT="${REPORTER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
 REPORTER_QWEN_BACKBONE_PATH="${REPORTER_QWEN_BACKBONE_PATH:-}"
-REPORTER_ADAPTER_PATH="todo"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v10_simple_subgoal/v0-20261021-001545/checkpoint-1284"
 REPORTER_HISTORY_SIZE=3
 REPORTER_DEBOUNCE=false
 # Optional deterministic veto for Reporter true on subgoals containing
