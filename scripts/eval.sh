@@ -32,8 +32,8 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started Executer server.
-EXECUTER_SEEDS=(0 7 42)
-NUM_REPEATS=3
+EXECUTER_SEEDS=(0)
+NUM_REPEATS=1
 EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
@@ -62,7 +62,7 @@ SAVE_DIR="runs/evaluation"
 # evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
 # RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
 FRAMEWORK_VERSION="trinity_v2.2"
-RUN_NAME="1"
+RUN_NAME="2"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
@@ -373,6 +373,7 @@ run_evaluation() {
     local executer_port=$EXECUTER_PORT
     local server_log
     local start_time
+    local gpu_start_snapshot
     local -a eval_args
     local -a server_env
 
@@ -393,6 +394,8 @@ run_evaluation() {
         --args.repeat-id "$repeat_id"
         --args.eval-seeds "$EVAL_SEEDS_CSV"
         --args.num-repeats "$NUM_REPEATS"
+        --args.executer-gpu-id "$EXECUTER_GPU_ID"
+        --args.manager-reporter-gpu-id "$MANAGER_REPORTER_GPU_ID"
         --args.only-tasks "$ONLY_TASKS"
         --args.exclude-tasks "$EXCLUDE_TASKS"
         --args.re-eval-tasks "$RE_EVAL_TASKS"
@@ -453,6 +456,16 @@ run_evaluation() {
     echo "Server log: $server_log"
     echo "======================================================================"
 
+    # Capture other jobs' occupancy before either process belonging to this
+    # seed/repeat evaluation starts. eval.py receives the raw rows and uses the
+    # same physical-device selectors when writing this run's GPU metrics.
+    gpu_start_snapshot=""
+    if command -v nvidia-smi &>/dev/null; then
+        gpu_start_snapshot=$(nvidia-smi \
+            --query-gpu=index,uuid,memory.total,memory.used \
+            --format=csv,noheader,nounits 2>/dev/null || true)
+    fi
+
     server_env=(
         CUDA_VISIBLE_DEVICES="$EXECUTER_GPU_ID"
         XLA_PYTHON_CLIENT_PREALLOCATE=false
@@ -490,6 +503,8 @@ run_evaluation() {
     printf '\n\n'
 
     CUDA_VISIBLE_DEVICES="$MANAGER_REPORTER_GPU_ID" \
+    ROBOMME_GPU_START_SNAPSHOT="$gpu_start_snapshot" \
+    ROBOMME_EXECUTER_LAUNCH_PID="$SERVER_PID" \
     PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
     PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
     MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \

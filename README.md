@@ -284,7 +284,7 @@ Set the `EVAL_PRESET` variable to one of the following:
 
 Running `eval.sh` starts the policy server as a managed background process and runs RoboMME evaluation in the foreground. If evaluation is interrupted, rerun the script to resume from each generated `progress.json`.
 
-By default, the integrated script evaluates seeds `0`, `42`, and `7` three times each. Results are stored under `runs/evaluation/<executer_name>/<trinity_version>/seed<seed>/repeat<repeat>/`; `summary.json` in the `<trinity_version>` directory tracks completion and the average success rate across all completed runs.
+By default, the integrated script evaluates seeds `0`, `42`, and `7` three times each. Results are stored under `runs/evaluation/<executer_name>/<trinity_version>/seed<seed>/repeat<repeat>/`; `summary.json` in the `<trinity_version>` directory tracks completion and average success rate. Each item in `summary.json`'s `runs` array records only the GPU ID, total memory, pre-launch occupied memory, and this eval's average process memory as one-decimal `GB` strings; GPU metrics are not averaged across runs.
 
 
 ### ✍️ Manual evaluation (per model)

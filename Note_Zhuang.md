@@ -273,3 +273,8 @@ a fresh policy server for each pair, writes the individual result under
 `<SAVE_DIR>/<executer_name>/<evaluation_run_name>/seed<seed>/repeat<repeat>/`,
 updates `summary.json` in the evaluation-run directory, and stops the server
 automatically. Re-running with `OVERWRITE=false` resumes incomplete episodes.
+Each completed run's `log.json`, and its corresponding item in the aggregate
+summary's `runs` array, records only the GPU ID, total memory, pre-launch
+occupied memory, and that eval's average process memory as one-decimal `GB`
+strings. GPU statistics are not averaged across evals, and a GPU metadata
+collection failure does not stop evaluation.

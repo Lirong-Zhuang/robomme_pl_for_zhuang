@@ -1,8 +1,11 @@
+import csv
 import dataclasses
 import json
 import os
 import shutil
+import subprocess
 import sys
+import threading
 import time
 import traceback
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -79,6 +82,10 @@ class Args:
     repeat_id: int = 1
     eval_seeds: str = ""
     num_repeats: int = 1
+    # Physical GPU selectors used by the launcher. CUDA remaps each selected
+    # device to cuda:0 inside its process, so record the launcher values too.
+    executer_gpu_id: str = ""
+    manager_reporter_gpu_id: str = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
 
     # task control
     re_eval_tasks: str = "" # tasks split by comma
@@ -628,6 +635,243 @@ def setup_prompt_metadata(args: Args, save_dir: Path) -> dict:
     return metadata
 
 
+def _parse_nvidia_smi_int(value: str) -> Optional[int]:
+    value = value.strip()
+    if value.lower() in {"", "n/a", "[not supported]"}:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _gpu_selectors(value: str) -> list[str]:
+    value = value.strip()
+    if not value or value.lower() in {"none", "nodevfiles", "-1"}:
+        return []
+    if value.lower() == "all":
+        return ["all"]
+    return [selector.strip() for selector in value.split(",") if selector.strip()]
+
+
+GPU_QUERY_FIELDS = (
+    "index",
+    "uuid",
+    "memory.total",
+    "memory.used",
+)
+GPU_PROCESS_QUERY_FIELDS = ("gpu_uuid", "pid", "used_gpu_memory")
+GPU_SAMPLE_INTERVAL_SECONDS = 5.0
+
+
+def _gpu_assignments(args: Args) -> dict[str, list[str]]:
+    return {
+        "executer": _gpu_selectors(args.executer_gpu_id),
+        "manager_reporter": _gpu_selectors(args.manager_reporter_gpu_id),
+    }
+
+
+def _parse_gpu_devices(
+    raw_csv: str,
+    assignments: dict[str, list[str]],
+) -> list[dict]:
+    devices = []
+    for row in csv.reader(raw_csv.splitlines(), skipinitialspace=True):
+        if len(row) != len(GPU_QUERY_FIELDS):
+            continue
+        index, uuid, memory_total, memory_used = (value.strip() for value in row)
+        parsed_index = _parse_nvidia_smi_int(index)
+        if parsed_index is None:
+            continue
+        selected = any(
+            "all" in selectors
+            or any(
+                selector == index
+                or selector == uuid
+                or uuid.startswith(selector)
+                for selector in selectors
+            )
+            for selectors in assignments.values()
+        )
+        if not selected:
+            continue
+        devices.append(
+            {
+                "gpu_id": parsed_index,
+                "uuid": uuid,
+                "total_memory_mib": _parse_nvidia_smi_int(memory_total),
+                "start_used_mib": _parse_nvidia_smi_int(memory_used),
+            }
+        )
+    return devices
+
+
+def _process_parent_map() -> dict[int, int]:
+    try:
+        completed = subprocess.run(
+            ["ps", "-eo", "pid=,ppid="],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    parents = {}
+    for line in completed.stdout.splitlines():
+        columns = line.split()
+        if len(columns) != 2:
+            continue
+        try:
+            pid, parent_pid = (int(value) for value in columns)
+        except ValueError:
+            continue
+        parents[pid] = parent_pid
+    return parents
+
+
+def _belongs_to_eval_process(
+    pid: int,
+    root_pids: set[int],
+    parent_by_pid: dict[int, int],
+) -> bool:
+    visited = set()
+    while pid > 1 and pid not in visited:
+        if pid in root_pids:
+            return True
+        visited.add(pid)
+        pid = parent_by_pid.get(pid, 0)
+    return False
+
+
+def _query_eval_gpu_memory(devices: list[dict]) -> tuple[dict[str, int], Optional[str]]:
+    if any(device["uuid"].startswith("index:") for device in devices):
+        return {}, "GPU UUID was unavailable"
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi is None:
+        return {}, "nvidia-smi was not found"
+    try:
+        completed = subprocess.run(
+            [
+                nvidia_smi,
+                f"--query-compute-apps={','.join(GPU_PROCESS_QUERY_FIELDS)}",
+                "--format=csv,noheader,nounits",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return {}, str(e)
+
+    root_pids = {os.getpid()}
+    executer_pid = _parse_nvidia_smi_int(
+        os.environ.get("ROBOMME_EXECUTER_LAUNCH_PID", "")
+    )
+    if executer_pid is not None:
+        root_pids.add(executer_pid)
+    parent_by_pid = _process_parent_map()
+    memory_by_uuid = {device["uuid"]: 0 for device in devices}
+    for row in csv.reader(completed.stdout.splitlines(), skipinitialspace=True):
+        if len(row) != len(GPU_PROCESS_QUERY_FIELDS):
+            continue
+        uuid, pid, memory_used = (value.strip() for value in row)
+        parsed_pid = _parse_nvidia_smi_int(pid)
+        parsed_memory = _parse_nvidia_smi_int(memory_used)
+        if (
+            uuid in memory_by_uuid
+            and parsed_pid is not None
+            and parsed_memory is not None
+            and _belongs_to_eval_process(parsed_pid, root_pids, parent_by_pid)
+        ):
+            memory_by_uuid[uuid] += parsed_memory
+    return memory_by_uuid, None
+
+
+def _fallback_gpu_devices(assignments: dict[str, list[str]]) -> list[dict]:
+    gpu_ids = sorted(
+        {
+            int(selector)
+            for selectors in assignments.values()
+            for selector in selectors
+            if selector.isdigit()
+        }
+    )
+    return [
+        {
+            "gpu_id": gpu_id,
+            "uuid": f"index:{gpu_id}",
+            "total_memory_mib": None,
+            "start_used_mib": None,
+        }
+        for gpu_id in gpu_ids
+    ]
+
+
+def _format_gpu_memory(memory_mib: Optional[float]) -> Optional[str]:
+    return f"{memory_mib / 1024:.1f} GB" if memory_mib is not None else None
+
+
+class GpuUsageMonitor:
+    """Measure only this seed/repeat evaluation's GPU memory."""
+
+    def __init__(self, args: Args, interval_seconds: float = GPU_SAMPLE_INTERVAL_SECONDS):
+        assignments = _gpu_assignments(args)
+        self.devices = _parse_gpu_devices(
+            os.environ.get("ROBOMME_GPU_START_SNAPSHOT", ""),
+            assignments,
+        )
+        if not self.devices:
+            self.devices = _fallback_gpu_devices(assignments)
+        self.interval_seconds = interval_seconds
+        self._samples_by_uuid: dict[str, list[int]] = {
+            device["uuid"]: [] for device in self.devices
+        }
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="robomme-gpu-monitor",
+            daemon=True,
+        )
+
+    def _sample(self) -> None:
+        memory_by_uuid, error = _query_eval_gpu_memory(self.devices)
+        if error is not None:
+            return
+        for uuid, memory_used in memory_by_uuid.items():
+            self._samples_by_uuid[uuid].append(memory_used)
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self.interval_seconds):
+            self._sample()
+
+    def start(self) -> None:
+        self._sample()
+        self._thread.start()
+
+    def stop(self) -> list[dict]:
+        self._stop_event.set()
+        self._thread.join(timeout=self.interval_seconds + 10)
+        self._sample()
+        result = []
+        for device in self.devices:
+            samples = self._samples_by_uuid[device["uuid"]]
+            average_used_mib = sum(samples) / len(samples) if samples else None
+            start_used_mib = device["start_used_mib"]
+            result.append(
+                {
+                    "gpu_id": device["gpu_id"],
+                    "total_memory": _format_gpu_memory(
+                        device["total_memory_mib"]
+                    ),
+                    "start_used": _format_gpu_memory(start_used_mib),
+                    "average_eval_used": _format_gpu_memory(average_used_mib),
+                }
+            )
+        return result
+
+
 def update_run_summary(args: Args) -> Path:
     """Aggregate all completed seed/repeat logs for the current run."""
     run_dir = get_evaluation_run_directory(args)
@@ -687,6 +931,8 @@ def update_run_summary(args: Args) -> Path:
                     else None
                 ),
             }
+            if "gpu" in result:
+                completed_run["gpu"] = result["gpu"]
             run_episode_timing = result.get("episode_timing", {}).get(
                 "episodes",
                 {},
@@ -915,6 +1161,8 @@ def evaluate(args: Args):
         update_run_summary(args)
         return
 
+    gpu_monitor = GpuUsageMonitor(args)
+    gpu_monitor.start()
     manager = build_manager(args, save_dir)
     executer = build_executer(args)
     reporter = build_reporter(args, save_dir)
@@ -1067,6 +1315,7 @@ def evaluate(args: Args):
                     "endpoint_buffer": args.reporter_gripper_endpoint_buffer,
                 },
             }
+            final_results["gpu"] = gpu_monitor.stop()
             final_results["episode_timing"] = load_episode_timing_summaries(
                 save_dir,
                 log_dict,
