@@ -49,6 +49,16 @@ os.environ['VIDEO_MAX_TOKEN_NUM'] = '64'
 os.environ['FPS_MAX_FRAMES'] = '10'
 
 
+TIMING_COMPONENTS = ("framework", "reporter", "manager", "executer")
+TIMING_UNIT = "ms"
+TIMING_DEFINITION = (
+    "End-to-end wall-clock latency for one action-chunk inference cycle. "
+    "Each timing is calculated as result-ready timestamp minus the timestamp "
+    "when that scope receives the current observation. Framework ends when "
+    "the action chunk is returned; Reporter, Manager, and Executer end when "
+    "their respective results are returned."
+)
+
 
 @dataclasses.dataclass
 class Args:
@@ -164,11 +174,153 @@ def manager_log(save_dir: Path, task_name: str, episode_id: int, enabled: bool):
             yield log_path
 
 
+def summarize_episode_timing(cycles: list[dict]) -> dict:
+    """Return per-component averages without counting skipped component calls."""
+    summary = {}
+    for component in TIMING_COMPONENTS:
+        key = f"{component}_ms"
+        values = [
+            float(cycle[key])
+            for cycle in cycles
+            if cycle.get(key) is not None
+        ]
+        total_ms = sum(values)
+        summary[component] = {
+            "call_count": len(values),
+            "average_ms": (
+                round(total_ms / len(values), 3) if values else None
+            ),
+            "total_ms": round(total_ms, 3),
+        }
+    return summary
+
+
+def load_episode_timing_summaries(save_dir: Path, log_dict: dict) -> dict:
+    """Load completed per-episode timing summaries for the repeat log."""
+    episodes = {}
+    for task_name, episode_results in sorted(log_dict.items()):
+        task_timings = {}
+        for episode_id in sorted(episode_results, key=lambda value: int(value)):
+            timing_path = (
+                save_dir
+                / task_name
+                / "timing_logs"
+                / f"{task_name}_ep{episode_id}.json"
+            )
+            if not timing_path.exists():
+                continue
+            try:
+                payload = json.loads(timing_path.read_text(encoding="utf-8"))
+                task_timings[str(episode_id)] = {
+                    "status": payload["status"],
+                    **payload["summary"],
+                }
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+                print(f"Warning: cannot include {timing_path} in timing summary: {e}")
+        if task_timings:
+            episodes[task_name] = task_timings
+
+    return {
+        "unit": TIMING_UNIT,
+        "definition": TIMING_DEFINITION,
+        "episodes": episodes,
+    }
+
+
+def summarize_eval_timing(episode_timings: dict) -> dict:
+    """Aggregate every episode call into one seed/repeat evaluation summary."""
+    summary = {}
+    for component in TIMING_COMPONENTS:
+        call_count = 0
+        total_ms = 0.0
+        for task_timings in episode_timings.values():
+            for episode_timing in task_timings.values():
+                component_timing = episode_timing.get(component, {})
+                call_count += int(component_timing.get("call_count", 0))
+                total_ms += float(component_timing.get("total_ms", 0.0))
+        summary[component] = {
+            "call_count": call_count,
+            "average_ms": (
+                round(total_ms / call_count, 3) if call_count else None
+            ),
+            "total_ms": round(total_ms, 3),
+        }
+    return summary
+
 
 class EpisodeEvaluator:
     def __init__(self, args: Args, save_dir: Path):
         self.args = args
         self.save_dir = save_dir
+        self._active_episode_timing: Optional[dict] = None
+
+    def _start_episode_timing(self, env_runner: EnvRunner) -> None:
+        self._active_episode_timing = {
+            "task": env_runner.env_id,
+            "episode_id": env_runner.episode_id,
+            "cycles": [],
+        }
+
+    def _record_inference_cycle(
+        self,
+        *,
+        step: int,
+        framework_ms: float,
+        reporter_ms: Optional[float],
+        manager_ms: Optional[float],
+        executer_ms: float,
+    ) -> None:
+        if self._active_episode_timing is None:
+            raise RuntimeError("Episode timing was not initialized")
+        self._active_episode_timing["cycles"].append(
+            {
+                "step": int(step),
+                "framework_ms": round(framework_ms, 3),
+                "reporter_ms": (
+                    round(reporter_ms, 3) if reporter_ms is not None else None
+                ),
+                "manager_ms": (
+                    round(manager_ms, 3) if manager_ms is not None else None
+                ),
+                "executer_ms": round(executer_ms, 3),
+            }
+        )
+
+    def finish_episode_timing(
+        self,
+        task_name: str,
+        episode_id: int,
+        status: str,
+    ) -> Optional[Path]:
+        """Persist all completed timing cycles, including those before an error."""
+        timing = self._active_episode_timing
+        if timing is None:
+            return None
+        if timing["task"] != task_name or timing["episode_id"] != episode_id:
+            raise RuntimeError(
+                "Attempted to finalize timing for a different episode: "
+                f"active={timing['task']}/ep{timing['episode_id']}, "
+                f"requested={task_name}/ep{episode_id}"
+            )
+
+        payload = {
+            "task": task_name,
+            "episode_id": episode_id,
+            "status": status,
+            "unit": TIMING_UNIT,
+            "definition": TIMING_DEFINITION,
+            "summary": summarize_episode_timing(timing["cycles"]),
+            "cycles": timing["cycles"],
+        }
+        timing_dir = self.save_dir / task_name / "timing_logs"
+        timing_dir.mkdir(parents=True, exist_ok=True)
+        timing_path = timing_dir / f"{task_name}_ep{episode_id}.json"
+        temporary_path = timing_path.with_suffix(".json.tmp")
+        with temporary_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(temporary_path, timing_path)
+        self._active_episode_timing = None
+        return timing_path
 
     def eval_each_episode(
         self,
@@ -178,6 +330,7 @@ class EpisodeEvaluator:
         reporter: ReporterBase,
         video_save_dir: Path,
     ) -> str:
+        self._start_episode_timing(env_runner)
         executer.start_episode()
         epstate = EpisodeState()
         task_goal, recorder = self.init_episode(env_runner, epstate, video_save_dir)
@@ -185,14 +338,21 @@ class EpisodeEvaluator:
         reporter.start_episode(epstate, env_runner)
 
         img, wrist_img, robot_state = epstate.get_current_obs()
+        observation_received_at_ns = time.perf_counter_ns()
         success_flag = "unknown"
         subgoal = None
         last_subgoal = None
         reporter_result = None
 
         while True:
+            is_inference_cycle = not epstate.action_plan
+            framework_started_at_ns = (
+                observation_received_at_ns if is_inference_cycle else None
+            )
+            reporter_ms = None
+            manager_ms = None
             should_predict_subgoal = (
-                not epstate.action_plan
+                is_inference_cycle
                 and (
                     epstate.count % self.args.subgoal_keep_period == 0
                     or last_subgoal is None
@@ -202,20 +362,38 @@ class EpisodeEvaluator:
                 # Reporter compares the init overall/wrist pair with a rolling
                 # window of up to three recent pairs. A successful result
                 # clears that window before the result is passed to Manager.
+                reporter_will_infer = (
+                    self.args.reporter_type != "none" and subgoal is not None
+                )
+                reporter_started_at_ns = (
+                    time.perf_counter_ns() if reporter_will_infer else None
+                )
                 reporter_result = reporter.step(epstate, subgoal)
+                if reporter_started_at_ns is not None:
+                    reporter_ms = (
+                        time.perf_counter_ns() - reporter_started_at_ns
+                    ) / 1_000_000
 
             # Manager receives/buffers the same current observation only after
             # Reporter has finished the pre-prediction check.
+            manager_started_at_ns = (
+                time.perf_counter_ns() if should_predict_subgoal else None
+            )
             manager.step(epstate)
 
-            if not epstate.action_plan:
+            if is_inference_cycle:
                 if should_predict_subgoal:
+                    if manager_started_at_ns is None:
+                        raise RuntimeError("Manager timing was not initialized")
                     subgoal, has_api_error = manager.get_subgoal(
                         epstate.count,
                         subgoal,
                         last_subgoal,
                         reporter_result,
                     )
+                    manager_ms = (
+                        time.perf_counter_ns() - manager_started_at_ns
+                    ) / 1_000_000
                 else:
                     subgoal = last_subgoal
                     has_api_error = False
@@ -241,9 +419,26 @@ class EpisodeEvaluator:
                     execution_goal = subgoal
                 else:
                     execution_goal = task_goal
+                executer_started_at_ns = time.perf_counter_ns()
                 action_chunk = executer.get_action_chunk(
                     epstate, img, wrist_img, robot_state, execution_goal,
                     exec_horizon=self.args.obs_horizon
+                )
+                action_chunk_ready_at_ns = time.perf_counter_ns()
+                executer_ms = (
+                    action_chunk_ready_at_ns - executer_started_at_ns
+                ) / 1_000_000
+                if framework_started_at_ns is None:
+                    raise RuntimeError("Framework timing was not initialized")
+                framework_ms = (
+                    action_chunk_ready_at_ns - framework_started_at_ns
+                ) / 1_000_000
+                self._record_inference_cycle(
+                    step=epstate.count,
+                    framework_ms=framework_ms,
+                    reporter_ms=reporter_ms,
+                    manager_ms=manager_ms,
+                    executer_ms=executer_ms,
                 )
 
                 epstate.action_plan.extend(action_chunk)
@@ -253,6 +448,7 @@ class EpisodeEvaluator:
 
             action = epstate.action_plan.popleft()
             obs, stop_flag, success_flag = env_runner.step(action)
+            observation_received_at_ns = time.perf_counter_ns()
             epstate.count += 1
 
             if epstate.count > self.args.max_steps:
@@ -449,6 +645,8 @@ def update_run_summary(args: Args) -> Path:
     missing = []
     task_success_rates: dict[str, list[float]] = {}
     eval_durations: list[float] = []
+    timing_call_counts = {component: 0 for component in TIMING_COMPONENTS}
+    timing_totals_ms = {component: 0.0 for component in TIMING_COMPONENTS}
     for seed in seed_values:
         for repeat_id in range(1, args.num_repeats + 1):
             log_path = run_dir / f"seed{seed}" / f"repeat{repeat_id}" / "log.json"
@@ -489,6 +687,23 @@ def update_run_summary(args: Args) -> Path:
                     else None
                 ),
             }
+            run_episode_timing = result.get("episode_timing", {}).get(
+                "episodes",
+                {},
+            )
+            if run_episode_timing:
+                run_timing = summarize_eval_timing(run_episode_timing)
+                completed_run["average_timing_ms"] = {
+                    component: run_timing[component]["average_ms"]
+                    for component in TIMING_COMPONENTS
+                }
+                for component in TIMING_COMPONENTS:
+                    timing_call_counts[component] += run_timing[component][
+                        "call_count"
+                    ]
+                    timing_totals_ms[component] += run_timing[component][
+                        "total_ms"
+                    ]
             completed.append(completed_run)
             if eval_duration_seconds is not None:
                 eval_durations.append(eval_duration_seconds)
@@ -542,6 +757,18 @@ def update_run_summary(args: Args) -> Path:
             if eval_durations
             else None
         ),
+        "average_timing_ms": {
+            component: (
+                round(
+                    timing_totals_ms[component]
+                    / timing_call_counts[component],
+                    3,
+                )
+                if timing_call_counts[component]
+                else None
+            )
+            for component in TIMING_COMPONENTS
+        },
         "per_task_average_success_rate": {
             task_name: sum(values) / len(values)
             for task_name, values in sorted(task_success_rates.items())
@@ -762,7 +989,14 @@ def evaluate(args: Args):
                         log_dict[task_name][episode_key] = "error"
                         episode_error = e
                     finally:
-                        env_runner.close_env()
+                        try:
+                            evaluator.finish_episode_timing(
+                                task_name,
+                                episode_id,
+                                "error" if episode_error is not None else success_flag,
+                            )
+                        finally:
+                            env_runner.close_env()
 
                 if episode_error is not None:
                     print(
@@ -833,6 +1067,10 @@ def evaluate(args: Args):
                     "endpoint_buffer": args.reporter_gripper_endpoint_buffer,
                 },
             }
+            final_results["episode_timing"] = load_episode_timing_summaries(
+                save_dir,
+                log_dict,
+            )
             with open(save_dir / "log.json", "w") as f:
                 json.dump(final_results, f, indent=2)
             update_run_summary(args)
