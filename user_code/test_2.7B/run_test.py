@@ -37,9 +37,11 @@ DEFAULT_MODEL_PATH = os.environ.get(
     "QWEN_MODEL_PATH",
     "/data/public/qwen/Qwen3.8-27B-FP8",
 )
-# Qwen3.8 reuses the Qwen3.5 model implementation in Transformers/ms-swift.
-# This is an internal registry key, not the checkpoint or model version.
-SWIFT_ARCHITECTURE_KEY = "qwen3_5"
+# Qwen3.8 reuses the Qwen3.5 model implementation in Transformers/ms-swift,
+# but it has its own prompt/chat template. These are internal registry keys,
+# not the checkpoint or model version.
+SWIFT_MODEL_TYPE = "qwen3_5"
+SWIFT_TEMPLATE_TYPE = "qwen3_8"
 
 
 def _directory_name(value: str) -> str:
@@ -113,7 +115,7 @@ def _validate_qwen38_config(model_path: Path) -> None:
     model_type = config.get("model_type")
     architectures = config.get("architectures", [])
     if (
-        model_type != SWIFT_ARCHITECTURE_KEY
+        model_type != SWIFT_MODEL_TYPE
         or "Qwen3_5ForConditionalGeneration" not in architectures
     ):
         raise ValueError(
@@ -159,7 +161,7 @@ def _build_engine(
 
     model, processor = get_model_processor(
         model_path,
-        model_type=SWIFT_ARCHITECTURE_KEY,
+        model_type=SWIFT_MODEL_TYPE,
         attn_impl=attn_impl,
     )
     if adapter_path:
@@ -173,6 +175,7 @@ def _build_engine(
     # behavior does not depend on the installed ms-swift version's default.
     template = get_template(
         processor,
+        template_type=SWIFT_TEMPLATE_TYPE,
         enable_thinking=False,
         preserve_thinking=False,
     )
@@ -377,8 +380,9 @@ def main() -> None:
     print(f"Model weights path: {resolved_model_path}")
     print(
         "Internal ms-swift architecture key: "
-        f"{SWIFT_ARCHITECTURE_KEY} (Qwen3.8 reuses the Qwen3.5 implementation)"
+        f"{SWIFT_MODEL_TYPE} (Qwen3.8 reuses the Qwen3.5 implementation)"
     )
+    print(f"Internal ms-swift template key: {SWIFT_TEMPLATE_TYPE}")
     engine, InferRequest, RequestConfig = _build_engine(
         str(resolved_model_path),
         str(Path(args.adapter_path).expanduser().resolve()) if args.adapter_path else None,

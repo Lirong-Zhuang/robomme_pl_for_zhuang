@@ -19,9 +19,11 @@ DEFAULT_MODEL_PATH = os.environ.get(
     "QWEN_MODEL_PATH",
     "/data/public/qwen/Qwen3.8-27B-FP8",
 )
-# Qwen3.8 reuses the Qwen3.5 model implementation in Transformers/ms-swift.
-# This is an internal registry key, not the checkpoint or model version.
-SWIFT_ARCHITECTURE_KEY = "qwen3_5"
+# Qwen3.8 reuses the Qwen3.5 model implementation in Transformers/ms-swift,
+# but it has its own prompt/chat template. These are internal registry keys,
+# not the checkpoint or model version.
+SWIFT_MODEL_TYPE = "qwen3_5"
+SWIFT_TEMPLATE_TYPE = "qwen3_8"
 DEFAULT_PROMPT = (
     "Michael is Daniel's father, and Daniel is Emma's father. "
     "What is Michael's relationship to Emma? Explain your reasoning briefly "
@@ -65,7 +67,7 @@ def validate_qwen38_config(model_path: Path) -> None:
     model_type = config.get("model_type")
     architectures = config.get("architectures", [])
     if (
-        model_type != SWIFT_ARCHITECTURE_KEY
+        model_type != SWIFT_MODEL_TYPE
         or "Qwen3_5ForConditionalGeneration" not in architectures
     ):
         raise ValueError(
@@ -164,15 +166,16 @@ def main() -> None:
     print(f"Model weights path: {model_path}")
     print(
         "Internal ms-swift architecture key: "
-        f"{SWIFT_ARCHITECTURE_KEY} (Qwen3.8 reuses the Qwen3.5 implementation)"
+        f"{SWIFT_MODEL_TYPE} (Qwen3.8 reuses the Qwen3.5 implementation)"
     )
+    print(f"Internal ms-swift template key: {SWIFT_TEMPLATE_TYPE}")
     print("Input modality: text only (no images are passed to InferRequest)")
     print(f"Prompt: {args.prompt}")
 
     load_started = time.perf_counter()
     model, processor = get_model_processor(
         str(model_path),
-        model_type=SWIFT_ARCHITECTURE_KEY,
+        model_type=SWIFT_MODEL_TYPE,
         attn_impl=args.attn_impl,
     )
     print(f"Model load time: {time.perf_counter() - load_started:.2f} s")
@@ -186,6 +189,7 @@ def main() -> None:
 
     template = get_template(
         processor,
+        template_type=SWIFT_TEMPLATE_TYPE,
         enable_thinking=False,
         preserve_thinking=False,
     )
