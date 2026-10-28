@@ -12,6 +12,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Qwen3.8 FP8 needs the versioned finegrained-fp8 runtime kernel.  ms-swift's
+# Hugging Face backend resolves that version correctly, and both offline flags
+# must be disabled before swift/transformers/huggingface_hub are imported.
+os.environ["USE_HF"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "0"
+os.environ["TRANSFORMERS_OFFLINE"] = "0"
+
 from prompts import match_action_name
 from runtime_metrics import GpuMemoryMonitor
 from runtime_metrics import timing_summary
