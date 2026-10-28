@@ -37,6 +37,9 @@ DEFAULT_MODEL_PATH = os.environ.get(
     "QWEN_MODEL_PATH",
     "/data/public/qwen/Qwen3.8-27B-FP8",
 )
+# Qwen3.8 reuses the Qwen3.5 model implementation in Transformers/ms-swift.
+# This is an internal registry key, not the checkpoint or model version.
+SWIFT_ARCHITECTURE_KEY = "qwen3_5"
 
 
 def _directory_name(value: str) -> str:
@@ -99,6 +102,44 @@ def _input_messages(row: dict[str, Any]) -> list[dict[str, Any]]:
     return [message for message in row["messages"] if message.get("role") != "assistant"]
 
 
+def _validate_qwen38_config(model_path: Path) -> None:
+    """Confirm that the checkpoint uses Qwen3.8's registered architecture."""
+    config_path = model_path / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Model config does not exist: {config_path}")
+    with config_path.open("r", encoding="utf-8") as source:
+        config = json.load(source)
+
+    model_type = config.get("model_type")
+    architectures = config.get("architectures", [])
+    if (
+        model_type != SWIFT_ARCHITECTURE_KEY
+        or "Qwen3_5ForConditionalGeneration" not in architectures
+    ):
+        raise ValueError(
+            "This Qwen3.8 test expects config.json to declare "
+            "model_type='qwen3_5' and "
+            "Qwen3_5ForConditionalGeneration. "
+            f"Found model_type={model_type!r}, architectures={architectures!r}."
+        )
+
+    quantization_config = config.get("quantization_config", {})
+    exclusions = quantization_config.get("modules_to_not_convert", [])
+    shadowing_exclusions = [
+        item
+        for item in exclusions
+        if isinstance(item, str) and item.endswith(".mlp.gate")
+    ]
+    if shadowing_exclusions:
+        raise ValueError(
+            "This is the unpatched Qwen3.8 FP8 config: "
+            f"{len(shadowing_exclusions)} '.mlp.gate' exclusions can shadow "
+            "gate_proj and discard its FP8 scales. First run "
+            "prepare_qwen38_fp8_model.py and pass its output directory to "
+            "--model-path."
+        )
+
+
 def _build_engine(
     model_path: str,
     adapter_path: str | None,
@@ -116,7 +157,11 @@ def _build_engine(
             "server inference environment or update ms-swift."
         ) from error
 
-    model, processor = get_model_processor(model_path, attn_impl=attn_impl)
+    model, processor = get_model_processor(
+        model_path,
+        model_type=SWIFT_ARCHITECTURE_KEY,
+        attn_impl=attn_impl,
+    )
     if adapter_path:
         try:
             from peft import PeftModel
@@ -326,8 +371,16 @@ def main() -> None:
     os.environ.pop("PYTORCH_NO_CUDA_MEMORY_CACHING", None)
     gpu_monitor = GpuMemoryMonitor(args.cuda_visible_devices)
     model_load_started = time.perf_counter()
+    resolved_model_path = Path(args.model_path).expanduser().resolve()
+    _validate_qwen38_config(resolved_model_path)
+    print("Checkpoint family: Qwen3.8")
+    print(f"Model weights path: {resolved_model_path}")
+    print(
+        "Internal ms-swift architecture key: "
+        f"{SWIFT_ARCHITECTURE_KEY} (Qwen3.8 reuses the Qwen3.5 implementation)"
+    )
     engine, InferRequest, RequestConfig = _build_engine(
-        str(Path(args.model_path).expanduser().resolve()),
+        str(resolved_model_path),
         str(Path(args.adapter_path).expanduser().resolve()) if args.adapter_path else None,
         args.attn_impl,
     )

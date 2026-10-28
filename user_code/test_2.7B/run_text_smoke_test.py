@@ -8,6 +8,7 @@ language/FP8 loading problem from a vision-input problem.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import time
@@ -18,6 +19,9 @@ DEFAULT_MODEL_PATH = os.environ.get(
     "QWEN_MODEL_PATH",
     "/data/public/qwen/Qwen3.8-27B-FP8",
 )
+# Qwen3.8 reuses the Qwen3.5 model implementation in Transformers/ms-swift.
+# This is an internal registry key, not the checkpoint or model version.
+SWIFT_ARCHITECTURE_KEY = "qwen3_5"
 DEFAULT_PROMPT = (
     "Michael is Daniel's father, and Daniel is Emma's father. "
     "What is Michael's relationship to Emma? Explain your reasoning briefly "
@@ -50,25 +54,65 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def print_fp8_diagnostics(model: object) -> None:
+def validate_qwen38_config(model_path: Path) -> None:
+    """Confirm that the checkpoint uses Qwen3.8's registered architecture."""
+    config_path = model_path / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Model config does not exist: {config_path}")
+    with config_path.open("r", encoding="utf-8") as source:
+        config = json.load(source)
+
+    model_type = config.get("model_type")
+    architectures = config.get("architectures", [])
+    if (
+        model_type != SWIFT_ARCHITECTURE_KEY
+        or "Qwen3_5ForConditionalGeneration" not in architectures
+    ):
+        raise ValueError(
+            "This Qwen3.8 test expects config.json to declare "
+            "model_type='qwen3_5' and "
+            "Qwen3_5ForConditionalGeneration. "
+            f"Found model_type={model_type!r}, architectures={architectures!r}."
+        )
+
+    quantization_config = config.get("quantization_config", {})
+    exclusions = quantization_config.get("modules_to_not_convert", [])
+    shadowing_exclusions = [
+        item
+        for item in exclusions
+        if isinstance(item, str) and item.endswith(".mlp.gate")
+    ]
+    if shadowing_exclusions:
+        raise ValueError(
+            "This is the unpatched Qwen3.8 FP8 config: "
+            f"{len(shadowing_exclusions)} '.mlp.gate' exclusions can shadow "
+            "gate_proj and discard its FP8 scales. First run "
+            "prepare_qwen38_fp8_model.py and pass its output directory to "
+            "--model-path."
+        )
+
+
+def print_fp8_diagnostics(model: object) -> bool:
     """Print lightweight evidence about the loaded MLP projection modules."""
     backbone = getattr(model, "model", None)
     language_model = getattr(backbone, "language_model", None)
     layers = getattr(language_model, "layers", None)
     if layers is None or len(layers) == 0:
         print("FP8 diagnostics: could not locate model.language_model.layers")
-        return
+        return False
 
     mlp = getattr(layers[0], "mlp", None)
     if mlp is None:
         print("FP8 diagnostics: could not locate layer 0 MLP")
-        return
+        return False
 
     print("\nFP8 diagnostics (language layer 0):")
+    fp8_ready = True
     for projection_name in ("gate_proj", "up_proj", "down_proj"):
         projection = getattr(mlp, projection_name, None)
         if projection is None:
             print(f"  {projection_name}: missing")
+            fp8_ready = False
             continue
 
         weight = getattr(projection, "weight", None)
@@ -82,6 +126,9 @@ def print_fp8_diagnostics(model: object) -> None:
             f"weight_scale_inv_dtype={scale_dtype}, "
             f"weight_scale_inv_shape={scale_shape}"
         )
+        if scale is None or "float8" not in str(weight_dtype):
+            fp8_ready = False
+    return fp8_ready
 
 
 def main() -> None:
@@ -111,20 +158,31 @@ def main() -> None:
             "Activate the robomme-qwen38 environment first."
         ) from error
 
-    model_path = str(Path(args.model_path).expanduser().resolve())
-    print(f"Model path: {model_path}")
+    model_path = Path(args.model_path).expanduser().resolve()
+    validate_qwen38_config(model_path)
+    print("Checkpoint family: Qwen3.8")
+    print(f"Model weights path: {model_path}")
+    print(
+        "Internal ms-swift architecture key: "
+        f"{SWIFT_ARCHITECTURE_KEY} (Qwen3.8 reuses the Qwen3.5 implementation)"
+    )
     print("Input modality: text only (no images are passed to InferRequest)")
     print(f"Prompt: {args.prompt}")
 
     load_started = time.perf_counter()
     model, processor = get_model_processor(
-        model_path,
+        str(model_path),
+        model_type=SWIFT_ARCHITECTURE_KEY,
         attn_impl=args.attn_impl,
     )
     print(f"Model load time: {time.perf_counter() - load_started:.2f} s")
 
     if args.inspect_fp8:
-        print_fp8_diagnostics(model)
+        if not print_fp8_diagnostics(model):
+            raise RuntimeError(
+                "Qwen3.8 FP8 validation failed: gate_proj, up_proj and "
+                "down_proj must all have float8 weights and weight_scale_inv."
+            )
 
     template = get_template(
         processor,

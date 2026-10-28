@@ -219,6 +219,7 @@ __marimo__/
 # Running files
 runs/
 /runs
+/text_smoke_fixed.txt
 
 
 # Micromamba
