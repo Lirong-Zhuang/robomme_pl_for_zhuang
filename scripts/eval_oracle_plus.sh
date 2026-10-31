@@ -16,7 +16,7 @@ NUM_EPISODES=10
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
 # tied to each episode's test metadata; this measures repeated-run variance.
 NUM_REPEATS=1
-MAX_STEPS=1300
+MAX_STEPS=3000
 MAX_DECISIONS=20
 HISTORY_SIZE=3
 # true: use the prompt that requires a visual description in every VLM output.
@@ -46,6 +46,7 @@ SERVER_LOG_DIR="runs/evaluation/oracle-plus/server_logs"
 VLM_PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
 EVAL_PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/third_party/robomme_benchmark/src:$REPO_ROOT/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
 export MAMBA_ROOT_PREFIX
+export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore::FutureWarning}"
 
 if [[ ! -x "$MAMBA_EXE" ]]; then
     echo "ERROR: micromamba is not executable: $MAMBA_EXE" >&2
@@ -131,7 +132,6 @@ SERVER_PID=""
 stop_server() {
     if [[ -n "$SERVER_PID" ]]; then
         if kill -0 "$SERVER_PID" 2>/dev/null; then
-            echo "Stopping Oracle Plus VLM server (PID $SERVER_PID)..."
             kill "$SERVER_PID" 2>/dev/null || true
         fi
         wait "$SERVER_PID" 2>/dev/null || true

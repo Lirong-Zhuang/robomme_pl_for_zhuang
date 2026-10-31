@@ -18,6 +18,8 @@ import os
 import sys
 import time
 import traceback
+from contextlib import redirect_stderr
+from contextlib import redirect_stdout
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,11 +27,13 @@ from typing import Any
 
 import imageio.v3 as iio
 import numpy as np
+from tqdm import tqdm
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 THIRD_PARTY_ROOT = REPO_ROOT / "third_party" / "robomme_benchmark" / "src"
-for import_root in (REPO_ROOT / "src", THIRD_PARTY_ROOT):
+ROBOMME_EXAMPLES_ROOT = REPO_ROOT / "examples" / "robomme"
+for import_root in (REPO_ROOT / "src", THIRD_PARTY_ROOT, ROBOMME_EXAMPLES_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
@@ -45,6 +49,7 @@ from oracle_plus.runtime_metrics import latency_summary
 from oracle_plus.vlm import SubgoalDecision
 from oracle_plus.vlm_client import VLMSubgoalPlannerClient
 from robomme.env_record_wrapper import BenchmarkEnvBuilder
+from utils import RolloutRecorder
 
 
 def _csv(value: str) -> list[str]:
@@ -206,6 +211,64 @@ def _jsonable(value: Any) -> Any:
     return repr(value)
 
 
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path.write_text(
+        json.dumps(_jsonable(value), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary_path, path)
+
+
+def _column_values(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _to_vector(value: Any) -> np.ndarray:
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    return np.asarray(value, dtype=np.float32).reshape(-1)
+
+
+def _record_video_observations(
+    recorder: RolloutRecorder,
+    observations: dict[str, Any],
+    *,
+    subgoal: str | None,
+) -> int:
+    fronts = _column_values(observations.get("front_rgb_list", []))
+    wrists = _column_values(observations.get("wrist_rgb_list", []))
+    joints = _column_values(observations.get("joint_state_list", []))
+    grippers = _column_values(observations.get("gripper_state_list", []))
+    frame_count = min(len(fronts), len(wrists), len(joints), len(grippers))
+    for index in range(frame_count):
+        joint_state = _to_vector(joints[index])
+        gripper_state = _to_vector(grippers[index])
+        state = np.concatenate([joint_state, gripper_state[:1]]).astype(np.float32)
+        recorder.record(
+            image=_to_rgb(fronts[index]),
+            wrist_image=_to_rgb(wrists[index]),
+            state=state,
+            action=None,
+            subgoal=subgoal,
+        )
+    return frame_count
+
+
+def _filename_text(value: str, *, limit: int = 100) -> str:
+    normalized = "_".join(value.strip().split())
+    safe = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "_"
+        for character in normalized
+    )
+    return safe[:limit] or "unknown_goal"
+
+
 def _task_goal_candidates(info: dict[str, Any]) -> list[str]:
     value = info.get("task_goal", "")
     if isinstance(value, str):
@@ -287,13 +350,12 @@ def run_episode(
         include_front_camera_intrinsic=True,
     )
     runtime = OraclePlusPlannerRuntime(env, task, gui_render=False)
-    episode_dir = (
-        run_dir
-        / task
-        / f"repeat_{repeat_id}"
-        / f"episode_{episode_id:04d}"
-    )
+    repeat_dir = run_dir / task / f"repeat_{repeat_id}"
+    episode_dir = repeat_dir / f"episode_{episode_id:04d}"
+    video_dir = repeat_dir / "videos"
+    vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep{episode_id}.json"
     episode_dir.mkdir(parents=True, exist_ok=True)
+    recorder: RolloutRecorder | None = None
     record: dict[str, Any] = {
         "task": task,
         "episode_id": episode_id,
@@ -302,6 +364,12 @@ def run_episode(
         "task_goal_candidates": [],
         "status": "error",
         "decisions": [],
+        "artifacts": {
+            "episode_log": str((episode_dir / "episode.json").resolve()),
+            "vlm_log": str(vlm_log_path.resolve()),
+            "image_dir": str(episode_dir.resolve()),
+            "video": None,
+        },
         "prompt": get_prompt(
             task,
             include_description=args.include_description,
@@ -313,6 +381,12 @@ def run_episode(
         goal = _task_goal(reset_info)
         record["task_goal"] = goal
         record["task_goal_candidates"] = goal_candidates
+        recorder = RolloutRecorder(video_dir, goal, fps=30)
+        _record_video_observations(
+            recorder,
+            obs,
+            subgoal="[initializing...]",
+        )
         adapter = build_action_adapter(task, runtime)
         if tuple(adapter.point_actions) != get_point_action_names(task):
             raise RuntimeError(
@@ -378,6 +452,11 @@ def run_episode(
                 resolved_action_name,
                 active_subgoal,
                 decision.point,
+            )
+            _record_video_observations(
+                recorder,
+                execution.obs_batch,
+                subgoal=active_subgoal,
             )
             gpu_monitor.sample()
             last_status = execution.status
@@ -460,13 +539,38 @@ def run_episode(
         record["error"] = f"{type(error).__name__}: {error}"
         record["traceback"] = traceback.format_exc()
     finally:
+        if recorder is not None and recorder.total_images:
+            video_filename = (
+                f"{task}_ep{episode_id}_{record['status']}_"
+                f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
+            )
+            video_path = video_dir / video_filename
+            try:
+                recorder.save_video(video_filename)
+                record["artifacts"]["video"] = str(video_path.resolve())
+            except Exception as video_error:
+                record["video_error"] = (
+                    f"{type(video_error).__name__}: {video_error}"
+                )
         runtime.close()
 
     output_path = episode_dir / "episode.json"
-    output_path.write_text(
-        json.dumps(_jsonable(record), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    _write_json(
+        vlm_log_path,
+        {
+            "task": task,
+            "episode_id": episode_id,
+            "repeat_id": repeat_id,
+            "task_goal": record["task_goal"],
+            "task_goal_candidates": record["task_goal_candidates"],
+            "status": record["status"],
+            "prompt": record["prompt"],
+            "decisions": record["decisions"],
+            "error": record.get("error"),
+            "traceback": record.get("traceback"),
+        },
     )
+    _write_json(output_path, record)
     return record
 
 
@@ -499,11 +603,6 @@ def main() -> None:
             f"Run directory already exists: {run_dir}. Use --overwrite to continue."
         )
     run_dir.mkdir(parents=True, exist_ok=True)
-    print(
-        f"Oracle Plus tasks: {tasks}; episodes: {episode_ids}; "
-        f"repeats: {args.num_repeats}"
-    )
-    print(f"Connecting to Qwen3.8-27B at {args.vlm_host}:{args.vlm_port}")
     eval_gpu_monitor = GpuMemoryMonitor(
         os.environ.get("CUDA_VISIBLE_DEVICES", "0")
     )
@@ -515,35 +614,66 @@ def main() -> None:
         )
 
     records: list[dict[str, Any]] = []
+    progress_state: dict[str, dict[str, dict[str, bool | str]]] = {}
     predictions_path = run_dir / "episodes.jsonl"
-    with predictions_path.open("w", encoding="utf-8") as output:
+    eval_log_path = run_dir / "eval.log"
+    total_episode_runs = args.num_repeats * len(tasks) * len(episode_ids)
+    terminal_stderr = sys.stderr
+    success_count = 0
+    error_count = 0
+    progress = tqdm(
+        total=total_episode_runs,
+        desc="oracle_plus",
+        unit="episode",
+        dynamic_ncols=True,
+        leave=True,
+        file=terminal_stderr,
+        bar_format=(
+            "{desc} |{bar}| {n_fmt}/{total_fmt} episodes "
+            "({percentage:3.0f}%) [elapsed={elapsed}, remaining={remaining}, {rate_fmt}]"
+        ),
+    )
+    with (
+        predictions_path.open("w", encoding="utf-8") as output,
+        eval_log_path.open("a", encoding="utf-8") as eval_log,
+    ):
         for repeat_id in range(1, args.num_repeats + 1):
+            repeat_key = f"repeat_{repeat_id}"
+            progress_state[repeat_key] = {}
             for task in tasks:
+                progress_state[repeat_key][task] = {}
                 for episode_id in episode_ids:
-                    print(
-                        f"[repeat {repeat_id}/{args.num_repeats}] "
-                        f"[{task}] episode {episode_id} ...",
-                        flush=True,
-                    )
-                    record = run_episode(
-                        task=task,
-                        episode_id=episode_id,
-                        repeat_id=repeat_id,
-                        args=args,
-                        model=model,
-                        gpu_monitor=eval_gpu_monitor,
-                        run_dir=run_dir,
-                    )
+                    with redirect_stdout(eval_log), redirect_stderr(eval_log):
+                        record = run_episode(
+                            task=task,
+                            episode_id=episode_id,
+                            repeat_id=repeat_id,
+                            args=args,
+                            model=model,
+                            gpu_monitor=eval_gpu_monitor,
+                            run_dir=run_dir,
+                        )
                     records.append(record)
                     output.write(
                         json.dumps(_jsonable(record), ensure_ascii=False) + "\n"
                     )
                     output.flush()
-                    print(
-                        f"[repeat {repeat_id}/{args.num_repeats}] "
-                        f"[{task}] episode {episode_id}: {record['status']}",
-                        flush=True,
+                    eval_log.flush()
+                    progress_state[repeat_key][task][str(episode_id)] = (
+                        True
+                        if record["status"] == "success"
+                        else record["status"]
                     )
+                    _write_json(run_dir / "progress.json", progress_state)
+                    success_count += int(record["status"] == "success")
+                    error_count += int(record["status"] == "error")
+                    progress.set_postfix(
+                        success=success_count,
+                        error=error_count,
+                        refresh=False,
+                    )
+                    progress.update(1)
+    progress.close()
 
     successes = sum(record["status"] == "success" for record in records)
     vlm_step_times_ms = [
@@ -642,11 +772,8 @@ def main() -> None:
             ),
         },
     }
-    (run_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    _write_json(run_dir / "summary.json", summary)
+    _write_json(run_dir / "log.json", summary)
     model.close()
     eval_gpu_monitor.close()
 

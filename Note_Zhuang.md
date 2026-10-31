@@ -146,6 +146,14 @@ record per episode plus `summary.json`; the exact VLM input images are retained
 beside each episode log for auditing. The VLM server log is stored under
 `runs/evaluation/oracle-plus/server_logs/`.
 
+During evaluation the terminal shows one global episode progress bar. Detailed
+planner output is redirected to `<run-name>/eval.log`. Each task/repeat stores
+annotated rollout videos under `videos/`, one complete raw/parsed VLM trace per
+episode under `vlm_logs/`, and the exact overall/wrist request images under the
+corresponding `episode_XXXX/decision_XXX/` directories. `progress.json` is
+updated after every episode; `log.json`, `summary.json`, and `episodes.jsonl`
+provide final aggregate and per-episode machine-readable results.
+
 ## 1. Build the dataset
 
 The QwenVL builder writes the processed dataset under
