@@ -14,7 +14,6 @@ from typing import Any
 
 import websockets
 import websockets.asyncio.server as websocket_server
-import websockets.frames
 
 from openpi_client import msgpack_numpy
 from oracle_plus.runtime_metrics import GpuMemoryMonitor
@@ -39,7 +38,7 @@ def parse_args() -> argparse.Namespace:
         choices=("flash_attention_2", "sdpa"),
         default="flash_attention_2",
     )
-    parser.add_argument("--max-tokens", type=int, default=256)
+    parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     return parser.parse_args()
 
@@ -68,6 +67,7 @@ class OraclePlusVLMService:
             "temperature": args.temperature,
             "request_seed": self.planner.inference_seed,
             "enable_thinking": False,
+            "response_prefix": self.planner.response_prefix,
             "image_max_token_num": os.environ.get("IMAGE_MAX_TOKEN_NUM"),
         }
 
@@ -172,12 +172,9 @@ async def handle_connection(
             LOGGER.info("Connection from %s closed", connection.remote_address)
             return
         except Exception:
-            await connection.send(traceback.format_exc())
-            await connection.close(
-                code=websockets.frames.CloseCode.INTERNAL_ERROR,
-                reason="Internal VLM server error; traceback sent to client.",
-            )
-            raise
+            error_traceback = traceback.format_exc()
+            LOGGER.error("VLM request failed:\n%s", error_traceback)
+            await connection.send(error_traceback)
 
 
 async def run_server(

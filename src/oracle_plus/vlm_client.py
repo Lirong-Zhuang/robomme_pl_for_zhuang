@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import socket
 from typing import Any
 
 from openpi_client.websocket_client_policy import WebsocketClientPolicy
+from websockets.exceptions import ConnectionClosed
 
 from .vlm import SubgoalDecision
 
@@ -13,8 +15,38 @@ class VLMSubgoalPlannerClient:
     """Expose the remote 27B service through the local planner interface."""
 
     def __init__(self, host: str, port: int) -> None:
-        self._client = WebsocketClientPolicy(host=host, port=port)
+        self.host = host
+        self.port = port
+        self._client = self._connect()
         self.server_metadata = self._client.get_server_metadata()
+
+    def _connect(self) -> WebsocketClientPolicy:
+        return WebsocketClientPolicy(host=self.host, port=self.port)
+
+    def _request(
+        self,
+        payload: dict[str, Any],
+        *,
+        reconnect_once: bool = True,
+    ) -> dict[str, Any]:
+        try:
+            response = self._client.infer(payload)
+        except ConnectionClosed:
+            if not reconnect_once:
+                raise
+            try:
+                with socket.create_connection((self.host, self.port), timeout=2):
+                    pass
+            except OSError as error:
+                raise ConnectionError(
+                    f"VLM server is no longer listening at {self.host}:{self.port}"
+                ) from error
+            self._client = self._connect()
+            self.server_metadata = self._client.get_server_metadata()
+            response = self._client.infer(payload)
+        if not isinstance(response, dict):
+            raise ValueError("VLM server response is not an object")
+        return response
 
     def infer(
         self,
@@ -23,7 +55,7 @@ class VLMSubgoalPlannerClient:
         images: list[str],
         include_description: bool,
     ) -> tuple[SubgoalDecision, str, float, float]:
-        response = self._client.infer(
+        response = self._request(
             {
                 "operation": "infer",
                 "messages": messages,
@@ -49,10 +81,7 @@ class VLMSubgoalPlannerClient:
         )
 
     def metrics(self) -> dict[str, Any]:
-        response = self._client.infer({"operation": "metrics"})
-        if not isinstance(response, dict):
-            raise ValueError("VLM server metrics response is not an object")
-        return response
+        return self._request({"operation": "metrics"})
 
     def close(self) -> None:
         websocket = getattr(self._client, "_ws", None)

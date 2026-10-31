@@ -25,7 +25,9 @@ VLM_INCLUDE_DESCRIPTION=true
 
 MODEL_PATH="${QWEN_MODEL_PATH:-/data/zhuanglr/models/Qwen3.8-27B-FP8-fixed}"
 ATTN_IMPL="flash_attention_2"
-MAX_TOKENS=256
+# JSON is normally short; 512 also leaves enough room for description-enabled
+# decisions without truncating a closing brace.
+MAX_TOKENS=512
 IMAGE_MAX_TOKEN_NUM=256
 CUDA_VISIBLE_DEVICES_ORACLE_PLUS="${CUDA_VISIBLE_DEVICES_ORACLE_PLUS:-0}"
 VLM_HOST="127.0.0.1"
@@ -35,7 +37,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_2"
+RUN_NAME="test_4"
 OVERWRITE=false
 
 VLM_MAMBA_ENV="robomme-qwen38"

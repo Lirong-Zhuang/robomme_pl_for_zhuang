@@ -630,7 +630,8 @@ def main() -> None:
         file=terminal_stderr,
         bar_format=(
             "{desc} |{bar}| {n_fmt}/{total_fmt} episodes "
-            "({percentage:3.0f}%) [elapsed={elapsed}, remaining={remaining}, {rate_fmt}]"
+            "({percentage:3.0f}%) [elapsed={elapsed}, remaining={remaining}, "
+            "{rate_fmt}] {postfix}"
         ),
     )
     with (
@@ -714,7 +715,24 @@ def main() -> None:
                 },
             }
         )
-    vlm_metrics = model.metrics()
+    vlm_metrics_error = None
+    try:
+        vlm_metrics = model.metrics()
+    except Exception as error:
+        vlm_metrics_error = f"{type(error).__name__}: {error}"
+        with eval_log_path.open("a", encoding="utf-8") as eval_log:
+            eval_log.write("\nVLM metrics request failed:\n")
+            eval_log.write(traceback.format_exc())
+            eval_log.flush()
+        metadata = model.server_metadata
+        vlm_metrics = {
+            "protocol": metadata.get("protocol", "oracle_plus_vlm_v1"),
+            "model_family": metadata.get("model_family", "Qwen3.8-27B"),
+            "model_path": metadata.get("model_path", "unknown"),
+            "inference_config": metadata.get("inference_config", {}),
+            "gpu": {"error": vlm_metrics_error},
+            "model_load_seconds": metadata.get("model_load_seconds"),
+        }
     eval_gpu_monitor.sample()
     summary = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -730,6 +748,7 @@ def main() -> None:
             "port": args.vlm_port,
             "protocol": vlm_metrics["protocol"],
         },
+        "vlm_server_metrics_error": vlm_metrics_error,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,

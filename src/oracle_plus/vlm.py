@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,18 +20,18 @@ os.environ["TRANSFORMERS_OFFLINE"] = "0"
 SWIFT_MODEL_TYPE = "qwen3_5"
 SWIFT_TEMPLATE_TYPE = "qwen3_8"
 INFERENCE_SEED = 42
+JSON_RESPONSE_PREFIX = "{"
 
 
 def parse_json_object(text: str) -> dict[str, Any] | None:
-    """Parse one JSON object, tolerating an optional Markdown fence."""
-    stripped = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.DOTALL)
-    candidate = fenced.group(1) if fenced else stripped
-    if not candidate.startswith("{"):
-        embedded = re.search(r"\{.*\}", candidate, re.DOTALL)
-        candidate = embedded.group(0) if embedded else candidate
+    """Parse the first complete JSON object, tolerating wrapper text or fences."""
+    if not isinstance(text, str):
+        return None
+    object_start = text.find("{")
+    if object_start < 0:
+        return None
     try:
-        value = json.loads(candidate)
+        value, _ = json.JSONDecoder().raw_decode(text[object_start:])
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
@@ -162,7 +161,7 @@ class VLMSubgoalPlanner27B:
         *,
         model_path: str,
         attn_impl: str = "flash_attention_2",
-        max_tokens: int = 256,
+        max_tokens: int = 512,
         temperature: float = 0.0,
     ) -> None:
         try:
@@ -189,9 +188,15 @@ class VLMSubgoalPlanner27B:
             template_type=SWIFT_TEMPLATE_TYPE,
             enable_thinking=False,
             preserve_thinking=False,
+            # Qwen3.8 normally inserts an empty <think></think> block when
+            # thinking is disabled. An explicit response prefix takes priority
+            # and makes the visible answer start directly with a JSON object.
+            response_prefix=JSON_RESPONSE_PREFIX,
         )
         if getattr(template, "enable_thinking", None) is not False:
             raise RuntimeError("Failed to disable Qwen3.8 thinking mode")
+        if getattr(template, "response_prefix", None) != JSON_RESPONSE_PREFIX:
+            raise RuntimeError("Failed to force direct Qwen3.8 JSON output")
         self.engine = TransformersEngine(model, template=template, max_batch_size=1)
         self.InferRequest = InferRequest
         self.request_config = RequestConfig(
@@ -205,6 +210,7 @@ class VLMSubgoalPlanner27B:
         self.model_path = str(resolved_model_path)
         self.attn_impl = attn_impl
         self.inference_seed = INFERENCE_SEED
+        self.response_prefix = JSON_RESPONSE_PREFIX
 
     def infer(
         self,

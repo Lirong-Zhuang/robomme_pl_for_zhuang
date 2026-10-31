@@ -42,8 +42,8 @@ For the initial call, return only:
 For a follow-up call, return only:
 {followup_schema}
 
-Return JSON only. Do not output analysis, reasoning, think tags, action_name,
-or action_sequence.
+Return JSON only. Start the answer directly with {{ and do not restate the task.
+Do not output analysis, reasoning, think tags, action_name, or action_sequence.
 """
 
 
@@ -92,7 +92,7 @@ Initial overall image: <image>
 Initial wrist image: <image>
 Any target point must refer to the initial overall image in original pixel
 coordinates. Do not use normalized 0-1000 coordinates.
-Output JSON only.
+Start directly with the JSON object. Output JSON only.
 """
 
 
@@ -112,7 +112,7 @@ success merely because the robot stopped moving. Decide whether the current subg
 is complete, then return the subgoal that should be active now. If incomplete, keep
 the same subgoal. Any target point must refer to the newest overall image in original
 pixel coordinates. Do not use normalized 0-1000 coordinates.
-Output JSON only.
+Start directly with the JSON object. Output JSON only.
 """
 
 
