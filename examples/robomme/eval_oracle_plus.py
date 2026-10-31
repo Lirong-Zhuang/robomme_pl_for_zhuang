@@ -206,13 +206,25 @@ def _jsonable(value: Any) -> Any:
     return repr(value)
 
 
+def _task_goal_candidates(info: dict[str, Any]) -> list[str]:
+    value = info.get("task_goal", "")
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, (list, tuple)):
+        candidates = list(value)
+    else:
+        raise ValueError(f"Environment returned an invalid task_goal: {value!r}")
+    if not candidates or not all(
+        isinstance(candidate, str) and candidate.strip()
+        for candidate in candidates
+    ):
+        raise ValueError(f"Environment returned an invalid task_goal: {value!r}")
+    return [candidate.strip() for candidate in candidates]
+
+
 def _task_goal(info: dict[str, Any]) -> str:
-    goal = info.get("task_goal", "")
-    while isinstance(goal, (list, tuple)) and len(goal) == 1:
-        goal = goal[0]
-    if not isinstance(goal, str) or not goal.strip():
-        raise ValueError(f"Environment returned an invalid task_goal: {goal!r}")
-    return goal.strip()
+    """Use RoboMME's first goal paraphrase, matching the original EnvRunner."""
+    return _task_goal_candidates(info)[0]
 
 
 def _infer(
@@ -287,6 +299,7 @@ def run_episode(
         "episode_id": episode_id,
         "repeat_id": repeat_id,
         "task_goal": None,
+        "task_goal_candidates": [],
         "status": "error",
         "decisions": [],
         "prompt": get_prompt(
@@ -296,8 +309,10 @@ def run_episode(
     }
     try:
         obs, reset_info = runtime.reset()
+        goal_candidates = _task_goal_candidates(reset_info)
         goal = _task_goal(reset_info)
         record["task_goal"] = goal
+        record["task_goal_candidates"] = goal_candidates
         adapter = build_action_adapter(task, runtime)
         if tuple(adapter.point_actions) != get_point_action_names(task):
             raise RuntimeError(

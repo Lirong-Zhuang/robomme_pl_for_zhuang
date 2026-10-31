@@ -12,7 +12,7 @@ cd "$REPO_ROOT"
 # robomme-qwen38, while RoboMME and MPLib run from the robomme environment.
 TASKS="BinFill"
 EPISODE_IDS=""
-NUM_EPISODES=1
+NUM_EPISODES=10
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
 # tied to each episode's test metadata; this measures repeated-run variance.
 NUM_REPEATS=1
@@ -23,7 +23,7 @@ HISTORY_SIZE=3
 # false: use the compact prompt with completed, next_subgoal, and point only.
 VLM_INCLUDE_DESCRIPTION=true
 
-MODEL_PATH="${QWEN_MODEL_PATH:-/data/public/qwen/Qwen3.8-27B-FP8}"
+MODEL_PATH="${QWEN_MODEL_PATH:-/data/zhuanglr/models/Qwen3.8-27B-FP8-fixed}"
 ATTN_IMPL="flash_attention_2"
 MAX_TOKENS=256
 IMAGE_MAX_TOKEN_NUM=256
@@ -35,7 +35,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_1"
+RUN_NAME="test_2"
 OVERWRITE=false
 
 VLM_MAMBA_ENV="robomme-qwen38"
