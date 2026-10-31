@@ -243,12 +243,30 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "step": decision_record["step"],
+        "simulator_frame": decision_record["simulator_frame"],
         "messages": decision_record["messages"],
         "images": decision_record["images"],
         "raw_response": decision_record["raw_response"],
         "decision": decision_record["decision"],
         "resolved_action_name": decision_record["resolved_action_name"],
     }
+
+
+def _simulator_frame(
+    info: dict[str, Any],
+    *,
+    fallback: int,
+) -> int:
+    """Read the cumulative simulator frame from an action result."""
+
+    value = _jsonable(info.get("elapsed_steps"))
+    while isinstance(value, list):
+        if not value:
+            return fallback
+        value = value[-1]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return fallback
+    return int(value)
 
 
 def _repeat_gpu_summary(
@@ -481,6 +499,7 @@ def run_episode(
         )
         current_pair_paths = initial_pair_paths[0]
         current_image_step = 0
+        current_simulator_frame = 0
         initial_paths = list(current_pair_paths)
         messages = build_messages(
             task=task,
@@ -505,6 +524,7 @@ def run_episode(
         record["decisions"].append(
             {
                 "step": current_image_step,
+                "simulator_frame": current_simulator_frame,
                 "decision_index": 0,
                 "call_type": "initial",
                 "messages": messages,
@@ -542,6 +562,13 @@ def run_episode(
             )
             gpu_monitor.sample()
             last_status = execution.status
+            action_frame_count = len(
+                execution.obs_batch.get("front_rgb_list", [])
+            )
+            current_simulator_frame = _simulator_frame(
+                execution.info,
+                fallback=current_simulator_frame + action_frame_count,
+            )
             recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
             if not recent_pairs:
                 recent_pairs = [current_pair]
@@ -562,9 +589,7 @@ def run_episode(
                 "status": execution.status,
                 "stopped": execution.stopped,
                 "info": _jsonable(execution.info),
-                "simulator_frame_count": len(
-                    execution.obs_batch.get("front_rgb_list", [])
-                ),
+                "simulator_frame_count": action_frame_count,
             }
             if execution.stopped:
                 record["status"] = execution.status
@@ -606,6 +631,7 @@ def run_episode(
             record["decisions"].append(
                 {
                     "step": current_image_step_after,
+                    "simulator_frame": current_simulator_frame,
                     "decision_index": decision_index,
                     "call_type": "followup",
                     "messages": messages,

@@ -13,9 +13,13 @@ TASK_NAME = "BinFill"
 NOTES = """1. The bin is a box with black holes on the top. It sucks in cubes
 placed into it, so count how many cubes have already been inserted.
 2. Use the task goal to determine the required cube color, order, and total count.
-3. A pick-up subgoal is complete only when the correct cube is securely grasped
-and visibly lifted clear of the supporting surface by a noticeable height.
-Closing the gripper, touching the cube, or grasping without lifting is not enough.
+3. Treat a pick-up subgoal as complete when the correct cube appears to be held
+by the gripper and there is visual evidence that it has been lifted or moved
+upward with the gripper. Approximate visual evidence is sufficient: a small lift,
+a slight visible separation, or the cube moving upward together with the gripper
+all count as success. Do not require a large or clearly measurable lifting height.
+Only keep the pickup incomplete when the gripper appears empty, the cube remains
+resting without upward movement, or there is clear evidence that it was dropped.
 4. A pickup subgoal requires point=[y, x] at the center of the intended cube in
 the latest overall image. Put-into-bin, press-button, and STOP require point=null.
 5. Press the button only after all requested cubes have been placed into the bin."""
@@ -49,7 +53,7 @@ POINT_ACTION_NAMES: tuple[str, ...] = ("solve_pickup",)
 
 PROMPT_WITH_DESCRIPTION = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_point_v1_with_description",
+    version="binfill_subgoal_point_v2_with_description",
     include_description=True,
     system_prompt=build_system_prompt(
         subgoals=SUBGOALS,
@@ -61,7 +65,7 @@ PROMPT_WITH_DESCRIPTION = TaskPromptSpec(
 
 PROMPT_WITHOUT_DESCRIPTION = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_point_v1_without_description",
+    version="binfill_subgoal_point_v2_without_description",
     include_description=False,
     system_prompt=build_system_prompt(
         subgoals=SUBGOALS,
