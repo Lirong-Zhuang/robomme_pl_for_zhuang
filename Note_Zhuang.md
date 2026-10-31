@@ -1,6 +1,53 @@
 # Trinity
 
-This branch develops a benchmark with three separated parts to do the memory-based tasks.
+**Current version: Trinity v2.2.**
+
+This branch implements the Trinity pipeline for memory-based robot tasks. The
+pipeline has three cooperating components: a Manager that predicts the current
+subgoal, an Executer that performs the action, and a Reporter that determines
+whether the subgoal has completed.
+
+## Version overview
+
+Trinity v0 is the first attempt to divide the system into the three-part
+Manager-Executer-Reporter framework. Trinity v2.1 changes the Reporter from a
+single current observation to a rolling window of multiple overall-camera
+observations. The current Trinity v2.2 builds on the v2.1 temporal input and
+adds the wrist-camera view, so every Reporter observation contains an overall
+and wrist image pair.
+
+The table below keeps only the best result for each compared version from the
+provided experiments.
+
+| Version | Best experiment | Average success rate | Main configuration |
+| --- | --- | ---: | --- |
+| Baseline | `Baseline_v4` | 0.78 | The VLM Predictor is fine-tuned on a single task; the VLA uses the RoboMME team's released multi-task fine-tuned model. |
+| Trinity v0 | `Trinity_v0.7` | 0.80 | Best result from the initial Manager-Executer-Reporter framework; the Reporter uses a single-frame observation and the Executer uses the RoboMME multi-task fine-tuned model. |
+| Trinity v2.1 | `Trinity_v2.1.7` | 0.78 | The Reporter uses multiple overall-camera frames instead of judging the current state from only one frame; the best run also uses a Reporter success buffer. |
+| Trinity v2.2 | `Trinity_v2.2.1` | **0.84** | `k=3`; each Reporter observation contains paired overall and wrist views. |
+
+Trinity v1 is intentionally omitted from the comparison table. It was a
+standalone test of Reporter debounce rather than a directly comparable version.
+That debounce behavior has since evolved into the `REPORTER_DEBOUNCE` switch in
+`scripts/eval.sh`, so it can be enabled or disabled independently during eval.
+
+For the current v2.2 implementation, the default Reporter prompt is
+`dual_view_temporal_v3`: an overall/wrist init pair plus up to three recent
+Reporter-call pairs. Manager and Reporter prompts are selected explicitly, and
+prompt metadata is written to datasets and evaluation results.
+`FRAMEWORK_VERSION` is now an output label; features such as debounce, prompt
+version, history size, and the gripper gate are controlled by their own
+configuration values.
+
+### Trinity v2.2 architecture
+
+![Trinity v2.2 architecture](assets/trinity-v2.2-architecture.png)
+
+In this diagram, $O_t$ denotes the current-frame **overall observation**.
+`OBS` denotes one paired **overall + wrist observation** used by the Reporter:
+`OBS_init` is the paired observation captured when the current subgoal starts,
+and `k-OBS` is the rolling window of the latest $k$ paired observations. The
+current v2.2 configuration uses $k=3$.
 
 ## 1. Build the dataset
 
@@ -56,7 +103,7 @@ runs/
 └── evaluation/
     ├── server_logs/
     └── <executer_name>/
-        └── <evaluation_run_name>/             # e.g. trinity_v1.1
+        └── <evaluation_run_name>/             # e.g. trinity_v2.2.2
             ├── summary.json                   # aggregate of all seeds/repeats
             └── seed<seed>/
                 └── repeat<repeat_id>/
@@ -258,9 +305,14 @@ of `scripts/eval.sh`. In particular, check:
 - `EXECUTER_SEEDS` and `NUM_REPEATS`
 - `ONLY_TASKS` and `NUM_EPISODES`
 - the Manager and Reporter adapter paths
+- `MANAGER_PROMPT_VERSION` and `REPORTER_PROMPT_VERSION`
+- `MANAGER_QWEN_BACKBONE_NAME` and `REPORTER_QWEN_BACKBONE_NAME`
+- `REPORTER_HISTORY_SIZE` (must match Reporter training)
 - `EXECUTER_GPU_ID` and `MANAGER_REPORTER_GPU_ID`
 - `FRAMEWORK_VERSION`, `RUN_NAME`, and `SAVE_DIR`
 - `REPORTER_DEBOUNCE` (`true`/`false`, independent of `FRAMEWORK_VERSION`)
+- `REPORTER_GRIPPER_GATE` and its position thresholds when the optional pickup
+  verification is enabled
 
 Run the evaluation from the repository root:
 
