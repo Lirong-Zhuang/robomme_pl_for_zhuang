@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import time
 from typing import Any
 
 from openpi_client.websocket_client_policy import WebsocketClientPolicy
@@ -63,6 +64,7 @@ class VLMSubgoalPlannerClient:
                 "include_description": include_description,
             }
         )
+        client_parse_started = time.perf_counter()
         decision_value = response.get("decision")
         if not isinstance(decision_value, dict):
             raise ValueError("VLM server response has no decision object")
@@ -73,15 +75,29 @@ class VLMSubgoalPlannerClient:
         raw_response = response.get("raw_response")
         if not isinstance(raw_response, str):
             raise ValueError("VLM server response has no raw_response text")
+        request_to_decision_ms = (
+            float(response["request_to_decision_ms"])
+            + (time.perf_counter() - client_parse_started) * 1000
+        )
         return (
             decision,
             raw_response,
             float(response["vlm_latency_ms"]),
-            float(response["request_to_decision_ms"]),
+            request_to_decision_ms,
         )
 
     def metrics(self) -> dict[str, Any]:
         return self._request({"operation": "metrics"})
+
+    def start_repeat(self, repeat_id: int) -> dict[str, Any]:
+        return self._request(
+            {"operation": "repeat_start", "repeat_id": repeat_id}
+        )
+
+    def end_repeat(self, repeat_id: int) -> dict[str, Any]:
+        return self._request(
+            {"operation": "repeat_end", "repeat_id": repeat_id}
+        )
 
     def close(self) -> None:
         websocket = getattr(self._client, "_ws", None)

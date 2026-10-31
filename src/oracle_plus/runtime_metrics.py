@@ -9,11 +9,11 @@ from typing import Any
 GIB = 1024**3
 
 
-def _gib(value: int | None) -> float | None:
+def _gib(value: int | float | None) -> float | None:
     return round(value / GIB, 3) if value is not None else None
 
 
-def latency_summary(values_ms: list[float], *, scope: str) -> dict[str, Any]:
+def latency_summary(values_ms: list[float]) -> dict[str, Any]:
     """Summarize one latency sample per VLM or mapped-action request."""
     return {
         "steps": len(values_ms),
@@ -21,7 +21,6 @@ def latency_summary(values_ms: list[float], *, scope: str) -> dict[str, Any]:
         "average_ms": (
             round(sum(values_ms) / len(values_ms), 3) if values_ms else None
         ),
-        "measurement_scope": scope,
     }
 
 
@@ -36,6 +35,7 @@ class GpuMemoryMonitor:
         self._handle: Any = None
         self._baseline: dict[str, int] | None = None
         self._peak: dict[str, int] | None = None
+        self._samples: list[dict[str, int]] = []
         self.physical_gpu_index: int | None = None
         self.gpu_identifier: str | None = None
         self.gpu_name: str | None = None
@@ -65,6 +65,7 @@ class GpuMemoryMonitor:
             self._nvml_ready = True
             self._baseline = self._snapshot()
             self._peak = dict(self._baseline)
+            self._samples.append(dict(self._baseline))
         except Exception as error:
             self.error = f"{type(error).__name__}: {error}"
 
@@ -109,6 +110,7 @@ class GpuMemoryMonitor:
         try:
             current = self._snapshot()
             assert self._peak is not None
+            self._samples.append(current)
             for key in ("global_used_bytes", "current_process_used_bytes"):
                 self._peak[key] = max(self._peak[key], current[key])
         except Exception as error:
@@ -117,10 +119,52 @@ class GpuMemoryMonitor:
     def mark_model_loaded(self) -> None:
         self.sample()
 
+    def begin_interval(self) -> tuple[int, dict[str, Any]]:
+        """Start a sampled interval and return its first GPU-memory snapshot."""
+
+        self.sample()
+        if not self._nvml_ready or not self._samples:
+            return 0, {
+                "gpu_idx": self.physical_gpu_index,
+                "error": self.error or "NVML is unavailable",
+            }
+        sample_index = len(self._samples) - 1
+        start = self._samples[sample_index]
+        return sample_index, {
+            "gpu_idx": self.physical_gpu_index,
+            "global_used_gb": _gib(start["global_used_bytes"]),
+            "current_process_used_gb": _gib(
+                start["current_process_used_bytes"]
+            ),
+        }
+
+    def end_interval(self, sample_index: int) -> dict[str, Any]:
+        """Finish an interval and average this process across its samples."""
+
+        self.sample()
+        if not self._nvml_ready or not self._samples:
+            return {
+                "gpu_idx": self.physical_gpu_index,
+                "error": self.error or "NVML is unavailable",
+            }
+        first = min(max(sample_index, 0), len(self._samples) - 1)
+        samples = self._samples[first:]
+        average_process_bytes = sum(
+            sample["current_process_used_bytes"] for sample in samples
+        ) / len(samples)
+        result: dict[str, Any] = {
+            "gpu_idx": self.physical_gpu_index,
+            "samples": len(samples),
+            "average_current_process_gb": _gib(average_process_bytes),
+        }
+        if self.error is not None:
+            result["error"] = self.error
+        return result
+
     def summary(self) -> dict[str, Any]:
         if not self._nvml_ready or self._baseline is None or self._peak is None:
             return {
-                "cuda_visible_devices": self.cuda_visible_devices,
+                "gpu_idx": self.physical_gpu_index,
                 "error": self.error or "NVML is unavailable",
             }
         baseline = self._baseline
@@ -130,10 +174,7 @@ class GpuMemoryMonitor:
             0,
         )
         result: dict[str, Any] = {
-            "cuda_visible_devices": self.cuda_visible_devices,
-            "physical_gpu_index": self.physical_gpu_index,
-            "gpu_identifier": self.gpu_identifier,
-            "gpu_name": self.gpu_name,
+            "gpu_idx": self.physical_gpu_index,
             "total_memory_gb": _gib(baseline["total_bytes"]),
             "other_processes_before_eval_gb": _gib(
                 other_processes_before_eval
@@ -144,12 +185,9 @@ class GpuMemoryMonitor:
             "current_process_peak_during_entire_eval_gb": _gib(
                 self._peak["current_process_used_bytes"]
             ),
-            "baseline_definition": (
-                "other_processes_before_eval_gb is global GPU use minus this "
-                "process at monitor startup, before loading Qwen3.8-27B."
-            ),
-            "error": self.error,
         }
+        if self.error is not None:
+            result["error"] = self.error
         return result
 
     def close(self) -> None:

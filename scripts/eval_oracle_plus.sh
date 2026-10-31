@@ -12,10 +12,10 @@ cd "$REPO_ROOT"
 # robomme-qwen38, while RoboMME and MPLib run from the robomme environment.
 TASKS="BinFill"
 EPISODE_IDS=""
-NUM_EPISODES=10
+NUM_EPISODES=2
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
 # tied to each episode's test metadata; this measures repeated-run variance.
-NUM_REPEATS=1
+NUM_REPEATS=2
 MAX_STEPS=3000
 MAX_DECISIONS=20
 HISTORY_SIZE=3
@@ -37,7 +37,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_4"
+RUN_NAME="test_5"
 OVERWRITE=false
 
 VLM_MAMBA_ENV="robomme-qwen38"

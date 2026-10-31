@@ -61,6 +61,7 @@ class OraclePlusVLMService:
         self.gpu_monitor.mark_model_loaded()
         self.vlm_times_ms: list[float] = []
         self.request_to_decision_times_ms: list[float] = []
+        self.repeat_gpu_intervals: dict[int, int] = {}
         self.inference_config = {
             "attn_impl": args.attn_impl,
             "max_tokens": args.max_tokens,
@@ -85,28 +86,34 @@ class OraclePlusVLMService:
         return {
             **self.metadata(),
             "gpu": self.gpu_monitor.summary(),
-            "vlm_single_step": latency_summary(
-                self.vlm_times_ms,
-                scope=(
-                    "One Qwen3.8-27B engine.infer call after InferRequest "
-                    "construction until raw model output returns. WebSocket "
-                    "transfer and request unpacking are excluded."
-                ),
-            ),
+            "vlm_single_step": latency_summary(self.vlm_times_ms),
             "request_to_decision_single_step": latency_summary(
-                self.request_to_decision_times_ms,
-                scope=(
-                    "One server-side request after InferRequest construction "
-                    "through JSON parsing and decision validation. WebSocket "
-                    "transfer is excluded."
-                ),
+                self.request_to_decision_times_ms
             ),
         }
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
+        request_received_at = time.perf_counter()
         operation = request.get("operation", "infer")
         if operation == "metrics":
             return self.metrics()
+        if operation in {"repeat_start", "repeat_end"}:
+            repeat_id = request.get("repeat_id")
+            if isinstance(repeat_id, bool) or not isinstance(repeat_id, int):
+                raise ValueError("repeat_id must be an integer")
+            if operation == "repeat_start":
+                if repeat_id in self.repeat_gpu_intervals:
+                    raise ValueError(f"Repeat {repeat_id} is already being measured")
+                sample_index, gpu_start = self.gpu_monitor.begin_interval()
+                self.repeat_gpu_intervals[repeat_id] = sample_index
+                return {"gpu_start": gpu_start}
+            try:
+                sample_index = self.repeat_gpu_intervals.pop(repeat_id)
+            except KeyError as error:
+                raise ValueError(
+                    f"Repeat {repeat_id} has no active GPU interval"
+                ) from error
+            return {"gpu_interval": self.gpu_monitor.end_interval(sample_index)}
         if operation != "infer":
             raise ValueError(f"Unsupported VLM service operation: {operation!r}")
         messages = request.get("messages")
@@ -122,13 +129,16 @@ class OraclePlusVLMService:
             raise ValueError("VLM request images must be a list of paths")
         if not isinstance(include_description, bool):
             raise ValueError("VLM request include_description must be boolean")
-        decision, raw_response, latency_ms, request_to_decision_ms = (
+        decision, raw_response, latency_ms, _ = (
             self.planner.infer(
                 messages=messages,
                 images=images,
                 include_description=include_description,
             )
         )
+        request_to_decision_ms = (
+            time.perf_counter() - request_received_at
+        ) * 1000
         self.vlm_times_ms.append(latency_ms)
         self.request_to_decision_times_ms.append(request_to_decision_ms)
         self.gpu_monitor.sample()

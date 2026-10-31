@@ -163,29 +163,32 @@ def _recent_pairs(
 
 
 def _write_pair(
-    directory: Path,
-    prefix: str,
+    episode_dir: Path,
+    step_index: int,
     pair: tuple[np.ndarray, np.ndarray],
 ) -> list[str]:
-    directory.mkdir(parents=True, exist_ok=True)
-    overall_path = directory / f"{prefix}_overall.png"
-    wrist_path = directory / f"{prefix}_wrist.png"
+    overall_dir = episode_dir / "overall"
+    wrist_dir = episode_dir / "wrist"
+    overall_dir.mkdir(parents=True, exist_ok=True)
+    wrist_dir.mkdir(parents=True, exist_ok=True)
+    overall_path = overall_dir / f"step_{step_index}.png"
+    wrist_path = wrist_dir / f"step_{step_index}.png"
     iio.imwrite(overall_path, pair[0])
     iio.imwrite(wrist_path, pair[1])
     return [str(overall_path.resolve()), str(wrist_path.resolve())]
 
 
-def _write_observation_request(
+def _write_observation_steps(
     episode_dir: Path,
-    decision_index: int,
-    before_pair: tuple[np.ndarray, np.ndarray],
-    recent_pairs: list[tuple[np.ndarray, np.ndarray]],
-) -> list[str]:
-    request_dir = episode_dir / f"decision_{decision_index:03d}"
-    paths = _write_pair(request_dir, "before", before_pair)
-    for index, pair in enumerate(recent_pairs, start=1):
-        paths.extend(_write_pair(request_dir, f"recent_{index:02d}", pair))
-    return paths
+    pairs: list[tuple[np.ndarray, np.ndarray]],
+    *,
+    start_step: int,
+) -> tuple[list[list[str]], int]:
+    paths_by_step = [
+        _write_pair(episode_dir, start_step + offset, pair)
+        for offset, pair in enumerate(pairs)
+    ]
+    return paths_by_step, start_step + len(pairs)
 
 
 def _jsonable(value: Any) -> Any:
@@ -219,6 +222,81 @@ def _write_json(path: Path, value: Any) -> None:
         encoding="utf-8",
     )
     os.replace(temporary_path, path)
+
+
+def _write_vlm_log(path: Path, value: Any) -> None:
+    """Write valid JSON with five blank lines between consecutive VLM steps."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    content = json.dumps(_jsonable(value), indent=2, ensure_ascii=False) + "\n"
+    content = content.replace(
+        '\n    },\n    {\n      "step":',
+        '\n    },\n\n\n\n\n\n    {\n      "step":',
+    )
+    temporary_path.write_text(content, encoding="utf-8")
+    os.replace(temporary_path, path)
+
+
+def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the prompt, images, and VLM/controller result for one step."""
+
+    return {
+        "step": decision_record["step"],
+        "messages": decision_record["messages"],
+        "images": decision_record["images"],
+        "raw_response": decision_record["raw_response"],
+        "decision": decision_record["decision"],
+        "resolved_action_name": decision_record["resolved_action_name"],
+    }
+
+
+def _repeat_gpu_summary(
+    *,
+    server_start: dict[str, Any],
+    eval_start: dict[str, Any],
+    server_interval: dict[str, Any],
+    eval_interval: dict[str, Any],
+) -> dict[str, Any]:
+    """Combine the two Oracle Plus processes into one repeat-level GPU view."""
+
+    gpu_idx = server_start.get("gpu_idx")
+    if gpu_idx != eval_start.get("gpu_idx"):
+        raise RuntimeError(
+            "VLM server and eval process are not using the same physical GPU: "
+            f"server={gpu_idx!r}, eval={eval_start.get('gpu_idx')!r}"
+        )
+    sources = (server_start, eval_start, server_interval, eval_interval)
+    errors = [source.get("error") for source in sources if source.get("error")]
+    required = (
+        server_start.get("global_used_gb"),
+        server_start.get("current_process_used_gb"),
+        eval_start.get("current_process_used_gb"),
+        server_interval.get("average_current_process_gb"),
+        eval_interval.get("average_current_process_gb"),
+    )
+    if errors or any(value is None for value in required):
+        result: dict[str, Any] = {"gpu_idx": gpu_idx}
+        result["error"] = "; ".join(str(error) for error in errors) or (
+            "Incomplete repeat-level GPU measurements"
+        )
+        return result
+    (
+        global_used,
+        server_used,
+        eval_used,
+        server_average,
+        eval_average,
+    ) = (float(value) for value in required)
+    return {
+        "gpu_idx": gpu_idx,
+        "other_processes_before_repeat_gb": round(
+            max(global_used - server_used - eval_used, 0.0), 3
+        ),
+        "current_program_average_during_repeat_gb": round(
+            server_average + eval_average, 3
+        ),
+    }
 
 
 def _column_values(value: Any) -> list[Any]:
@@ -351,9 +429,9 @@ def run_episode(
     )
     runtime = OraclePlusPlannerRuntime(env, task, gui_render=False)
     repeat_dir = run_dir / task / f"repeat_{repeat_id}"
-    episode_dir = repeat_dir / f"episode_{episode_id:04d}"
+    episode_dir = repeat_dir / f"ep_{episode_id}"
     video_dir = repeat_dir / "videos"
-    vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep{episode_id}.json"
+    vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
     episode_dir.mkdir(parents=True, exist_ok=True)
     recorder: RolloutRecorder | None = None
     record: dict[str, Any] = {
@@ -395,12 +473,15 @@ def run_episode(
                 f"adapter={adapter.point_actions}"
             )
         current_pair = _current_pair(obs)
-        initial_paths = _write_observation_request(
+        image_step = 0
+        initial_pair_paths, image_step = _write_observation_steps(
             episode_dir,
-            decision_index=0,
-            before_pair=current_pair,
-            recent_pairs=[],
+            [current_pair],
+            start_step=image_step,
         )
+        current_pair_paths = initial_pair_paths[0]
+        current_image_step = 0
+        initial_paths = list(current_pair_paths)
         messages = build_messages(
             task=task,
             call_type="initial",
@@ -423,6 +504,7 @@ def run_episode(
         gpu_monitor.sample()
         record["decisions"].append(
             {
+                "step": current_image_step,
                 "decision_index": 0,
                 "call_type": "initial",
                 "messages": messages,
@@ -463,6 +545,15 @@ def run_episode(
             recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
             if not recent_pairs:
                 recent_pairs = [current_pair]
+                recent_pair_paths = [current_pair_paths]
+                current_image_step_after = current_image_step
+            else:
+                recent_pair_paths, image_step = _write_observation_steps(
+                    episode_dir,
+                    recent_pairs,
+                    start_step=image_step,
+                )
+                current_image_step_after = image_step - 1
             current_pair_after = recent_pairs[-1]
             record["decisions"][-1]["execution"] = {
                 "resolved_action_name": resolved_action_name,
@@ -479,12 +570,9 @@ def run_episode(
                 record["status"] = execution.status
                 break
 
-            image_paths = _write_observation_request(
-                episode_dir,
-                decision_index=decision_index,
-                before_pair=current_pair,
-                recent_pairs=recent_pairs,
-            )
+            image_paths = list(current_pair_paths)
+            for pair_paths in recent_pair_paths:
+                image_paths.extend(pair_paths)
             messages = build_messages(
                 task=task,
                 call_type="followup",
@@ -517,6 +605,7 @@ def run_episode(
                 history.append(active_subgoal)
             record["decisions"].append(
                 {
+                    "step": current_image_step_after,
                     "decision_index": decision_index,
                     "call_type": "followup",
                     "messages": messages,
@@ -532,6 +621,8 @@ def run_episode(
             decision = next_decision
             resolved_action_name = next_resolved_action_name
             current_pair = current_pair_after
+            current_pair_paths = recent_pair_paths[-1]
+            current_image_step = current_image_step_after
         else:
             record["status"] = "decision_limit"
     except Exception as error:
@@ -541,7 +632,7 @@ def run_episode(
     finally:
         if recorder is not None and recorder.total_images:
             video_filename = (
-                f"{task}_ep{episode_id}_{record['status']}_"
+                f"{task}_ep_{episode_id}_{record['status']}_"
                 f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
             )
             video_path = video_dir / video_filename
@@ -555,7 +646,7 @@ def run_episode(
         runtime.close()
 
     output_path = episode_dir / "episode.json"
-    _write_json(
+    _write_vlm_log(
         vlm_log_path,
         {
             "task": task,
@@ -565,7 +656,10 @@ def run_episode(
             "task_goal_candidates": record["task_goal_candidates"],
             "status": record["status"],
             "prompt": record["prompt"],
-            "decisions": record["decisions"],
+            "steps": [
+                _compact_vlm_step(decision_record)
+                for decision_record in record["decisions"]
+            ],
             "error": record.get("error"),
             "traceback": record.get("traceback"),
         },
@@ -614,6 +708,7 @@ def main() -> None:
         )
 
     records: list[dict[str, Any]] = []
+    repeat_runtime: dict[int, dict[str, Any]] = {}
     progress_state: dict[str, dict[str, dict[str, bool | str]]] = {}
     predictions_path = run_dir / "episodes.jsonl"
     eval_log_path = run_dir / "eval.log"
@@ -639,6 +734,8 @@ def main() -> None:
         eval_log_path.open("a", encoding="utf-8") as eval_log,
     ):
         for repeat_id in range(1, args.num_repeats + 1):
+            eval_gpu_sample, eval_gpu_start = eval_gpu_monitor.begin_interval()
+            server_gpu_start = model.start_repeat(repeat_id)["gpu_start"]
             repeat_key = f"repeat_{repeat_id}"
             progress_state[repeat_key] = {}
             for task in tasks:
@@ -674,6 +771,16 @@ def main() -> None:
                         refresh=False,
                     )
                     progress.update(1)
+            server_gpu_interval = model.end_repeat(repeat_id)["gpu_interval"]
+            eval_gpu_interval = eval_gpu_monitor.end_interval(eval_gpu_sample)
+            repeat_runtime[repeat_id] = {
+                "gpu": _repeat_gpu_summary(
+                    server_start=server_gpu_start,
+                    eval_start=eval_gpu_start,
+                    server_interval=server_gpu_interval,
+                    eval_interval=eval_gpu_interval,
+                )
+            }
     progress.close()
 
     successes = sum(record["status"] == "success" for record in records)
@@ -682,7 +789,7 @@ def main() -> None:
         for record in records
         for decision in record["decisions"]
     ]
-    action_step_times_ms = [
+    program_step_times_ms = [
         float(decision["action_request_ms"])
         for record in records
         for decision in record["decisions"]
@@ -695,6 +802,16 @@ def main() -> None:
         repeat_successes = sum(
             record["status"] == "success" for record in repeat_records
         )
+        repeat_vlm_times_ms = [
+            float(decision["vlm_latency_ms"])
+            for record in repeat_records
+            for decision in record["decisions"]
+        ]
+        repeat_program_times_ms = [
+            float(decision["action_request_ms"])
+            for record in repeat_records
+            for decision in record["decisions"]
+        ]
         repeat_summaries.append(
             {
                 "repeat_id": repeat_id,
@@ -705,13 +822,12 @@ def main() -> None:
                     if repeat_records
                     else 0.0
                 ),
-                "status_counts": {
-                    status: sum(
-                        record["status"] == status for record in repeat_records
-                    )
-                    for status in sorted(
-                        {record["status"] for record in repeat_records}
-                    )
+                "gpu_and_timing": {
+                    **repeat_runtime[repeat_id],
+                    "vlm_single_step": latency_summary(repeat_vlm_times_ms),
+                    "program_single_step": latency_summary(
+                        repeat_program_times_ms
+                    ),
                 },
             }
         )
@@ -772,23 +888,8 @@ def main() -> None:
                 "eval_process": eval_gpu_monitor.summary(),
             },
             "model_load_seconds": vlm_metrics["model_load_seconds"],
-            "vlm_single_step": latency_summary(
-                vlm_step_times_ms,
-                scope=(
-                    "One Qwen3.8-27B engine.infer call, timed after InferRequest "
-                    "construction until raw model output returns inside the VLM "
-                    "server. Image saving, WebSocket transfer, path transfer, "
-                    "and request unpacking are excluded; batch size is 1."
-                ),
-            ),
-            "action_single_step": latency_summary(
-                action_step_times_ms,
-                scope=(
-                    "One action request from handing the prepared image request "
-                    "to the VLM through JSON validation and subgoal-to-action "
-                    "mapping. Robot/MPLib execution is excluded."
-                ),
-            ),
+            "vlm_single_step": latency_summary(vlm_step_times_ms),
+            "program_single_step": latency_summary(program_step_times_ms),
         },
     }
     _write_json(run_dir / "summary.json", summary)

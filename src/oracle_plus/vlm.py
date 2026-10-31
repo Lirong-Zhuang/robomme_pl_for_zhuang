@@ -227,8 +227,8 @@ class VLMSubgoalPlanner27B:
                 f"Prompt/image mismatch: {placeholder_count} placeholders for "
                 f"{len(images)} images"
             )
-        request = self.InferRequest(messages=messages, images=images)
         started_at = time.perf_counter()
+        request = self.InferRequest(messages=messages, images=images)
         responses = self.engine.infer(
             [request],
             request_config=self.request_config,
