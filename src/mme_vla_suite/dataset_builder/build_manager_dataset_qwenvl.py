@@ -14,20 +14,17 @@ import imageio
 import numpy as np
 
 from mme_vla_suite.dataset_builder.manager_dataset_base import BaseManagerDatasetBuilder
+from mme_vla_suite.prompts import DEFAULT_MANAGER_PROMPT_VERSION
+from mme_vla_suite.prompts import get_manager_prompt
 
 
 # -----------------------------------------------------------------------------
 # Prompts
 # -----------------------------------------------------------------------------
 
-SIMPLE_SUBGOAL_SYSTEM_PROMPT = (
-    "You are a helpful assistant to help guide the robot to complete the task "
-    "by predicting a sequence of language subgoals"
-)
-GROUNDED_SUBGOAL_SYSTEM_PROMPT = (
-    "You are a helpful assistant to help guide the robot to complete the task "
-    "by predicting a sequence of grounded language subgoals"
-)
+_DEFAULT_MANAGER_PROMPT = get_manager_prompt(DEFAULT_MANAGER_PROMPT_VERSION)
+SIMPLE_SUBGOAL_SYSTEM_PROMPT = _DEFAULT_MANAGER_PROMPT.simple_system_prompt
+GROUNDED_SUBGOAL_SYSTEM_PROMPT = _DEFAULT_MANAGER_PROMPT.grounded_system_prompt
 
 
 # -----------------------------------------------------------------------------
@@ -36,26 +33,23 @@ GROUNDED_SUBGOAL_SYSTEM_PROMPT = (
 
 
 class DatasetBuilder(BaseManagerDatasetBuilder):
-    def _format_reporter_result(
+    def __init__(
         self,
-        reporter_result: bool | None,
-        subgoal_name: str,
-    ) -> str:
-        """Format the Reporter result exactly as it is formatted at eval time."""
-        if reporter_result is True:
-            return (
-                f"The Reporter determined that the last predicted {subgoal_name} "
-                "has been completed."
-            )
-        if reporter_result is False:
-            return (
-                f"The Reporter determined that the last predicted {subgoal_name} "
-                "has not been completed."
-            )
-        return (
-            f"The Reporter did not provide a result for the last predicted "
-            f"{subgoal_name}."
-        )
+        *args,
+        manager_prompt_version: str = DEFAULT_MANAGER_PROMPT_VERSION,
+        **kwargs,
+    ) -> None:
+        manager_prompt = get_manager_prompt(manager_prompt_version)
+        super().__init__(*args, **kwargs)
+        self.manager_prompt = manager_prompt
+
+    def run(self) -> list:
+        results = super().run()
+        metadata_path = os.path.join(self.data_dir, "prompt_metadata.json")
+        with open(metadata_path, "w", encoding="utf-8") as file:
+            json.dump(self.manager_prompt.metadata(), file, indent=2)
+            file.write("\n")
+        return results
 
     # -------------------------------------------------------------------------
     # Simple subgoal data
@@ -69,35 +63,28 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
         video_path: str | None = None,
         reporter_result: bool | None = None,
     ) -> dict:
-        video_prefix = "<video>" if video_path else ""
-        if len(self.history_simple_subgoals) == 0:
-            user_prompt = (
-                f"{video_prefix}The task goal is: {task_goal}\n"
-                "This is the initial turn for prediction\n"
-                "<image>What's the next language subgoal based on current observation?"
-            )
-        else:
-            reporter_text = self._format_reporter_result(
-                reporter_result,
-                "language subgoal",
-            )
-            user_prompt = (
-                f"{video_prefix}The task goal is: {task_goal}\n"
-                f"The history of previous predicted language subgoals are: {self._wrap_history_subgoals(self.history_simple_subgoals)}\n"
-                f"{reporter_text}\n"
-                "<image>What's the next language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
-            )
+        messages = self.manager_prompt.build_messages(
+            subgoal_type="simple_subgoal",
+            task_goal=task_goal,
+            history_subgoals=self.history_simple_subgoals,
+            reporter_result=reporter_result,
+            has_video=bool(video_path),
+        )
 
         result = {
             "messages": [
-                {"role": "system", "content": SIMPLE_SUBGOAL_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                *messages,
                 {"role": "assistant", "content": subgoal},
             ],
             "images": [image_path],
         }
         if video_path:
             result["videos"] = [video_path]
+        self.manager_prompt.validate_media_alignment(
+            messages,
+            image_count=len(result["images"]),
+            video_count=len(result.get("videos", [])),
+        )
 
         if self.history_simple_subgoals:
             if self.history_simple_subgoals[-1] != subgoal:
@@ -119,31 +106,18 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
         video_path: str | None = None,
         reporter_result: bool | None = None,
     ) -> dict:
-        video_prefix = "<video>" if video_path else ""
         assistant_prompt, bbox = self._preprocess_grounded_subgoal(subgoal)
-
-        if len(self.history_grounded_subgoals) == 0:
-            user_prompt = (
-                f"{video_prefix}The task goal is: {task_goal}\n"
-                "This is the initial turn for prediction\n"
-                "<image>What's the next grounded language subgoal based on current observation?"
-            )
-        else:
-            reporter_text = self._format_reporter_result(
-                reporter_result,
-                "grounded language subgoal",
-            )
-            user_prompt = (
-                f"{video_prefix}The task goal is: {task_goal}\n"
-                f"The history of previous predicted grounded language subgoals are: {self._wrap_history_subgoals(self.history_grounded_subgoals)}\n"
-                f"{reporter_text}\n"
-                "<image>What's the next grounded language subgoal based on current observation and the result from the Reporter? If the Reporter determines that the last subgoal is not complete, output the same subgoal."
-            )
+        messages = self.manager_prompt.build_messages(
+            subgoal_type="grounded_subgoal",
+            task_goal=task_goal,
+            history_subgoals=self.history_grounded_subgoals,
+            reporter_result=reporter_result,
+            has_video=bool(video_path),
+        )
 
         result = {
             "messages": [
-                {"role": "system", "content": GROUNDED_SUBGOAL_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                *messages,
                 {"role": "assistant", "content": assistant_prompt},
             ],
             "objects": {
@@ -154,6 +128,11 @@ class DatasetBuilder(BaseManagerDatasetBuilder):
         }
         if video_path:
             result["videos"] = [video_path]
+        self.manager_prompt.validate_media_alignment(
+            messages,
+            image_count=len(result["images"]),
+            video_count=len(result.get("videos", [])),
+        )
 
         if self.history_grounded_subgoals:
             if self.history_grounded_subgoals[-1] != assistant_prompt:

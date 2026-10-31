@@ -17,7 +17,7 @@ import numpy as np
 from mme_vla_suite.dataset_builder.robomme_h5_utils import (
     add_noise_to_bbox,
     first_execution_step,
-    get_env_id_from_filename,
+    get_env_id,
     get_episode_indices,
     preprocess_grounded_subgoal,
     wrap_history_subgoals,
@@ -58,11 +58,12 @@ class BaseManagerDatasetBuilder:
             else None
         )
 
-        available_tasks = {
-            get_env_id_from_filename(file)
-            for file in os.listdir(self.raw_data_path)
-            if file.endswith(".h5")
-        }
+        available_tasks = set()
+        for file in os.listdir(self.raw_data_path):
+            if not file.endswith(".h5"):
+                continue
+            with h5py.File(os.path.join(self.raw_data_path, file), "r") as data:
+                available_tasks.add(get_env_id(data, file))
         if not available_tasks:
             raise ValueError(
                 f"No .h5 files found directly under {self.raw_data_path!r}"
@@ -103,14 +104,11 @@ class BaseManagerDatasetBuilder:
         for file in os.listdir(self.raw_data_path):
             if not file.endswith(".h5"):
                 continue
-            if (
-                self.task_names is not None
-                and get_env_id_from_filename(file) not in self.task_names
-            ):
-                continue
-            print(f"\nprocessing file: {file}")
             with h5py.File(os.path.join(self.raw_data_path, file), "r") as data:
-                env_id = get_env_id_from_filename(file)
+                env_id = get_env_id(data, file)
+                if self.task_names is not None and env_id not in self.task_names:
+                    continue
+                print(f"\nprocessing file: {file}")
                 episode_indices = get_episode_indices(data, self.max_episodes)
                 if self.episode_indices_by_task is not None:
                     selected = self.episode_indices_by_task.get(env_id, set())

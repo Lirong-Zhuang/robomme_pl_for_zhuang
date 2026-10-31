@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
 # Fine-tune the Trinity Manager.
 # More usage of Swift, please refer to https://swift.readthedocs.io/en/latest/BestPractices/Qwen3-VL-Best-Practice.html
 
@@ -7,9 +11,25 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/qwen_backbone.sh"
+
 MANAGER_DATASET_PATH='data/trinity_preprocessed_data/manager_binfill_data_1/qwenvl/simple_subgoal_train.jsonl'
 MANAGER_RUN_NAME='qwen_manager_v2_simple_subgoal'
 MANAGER_OUTPUT_DIR="runs/ckpts/manager/${MANAGER_RUN_NAME}"
+QWEN_BACKBONE_NAME="${QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
+resolve_qwen_backbone
+
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+
+if [[ ! -d "$QWEN_BACKBONE_PATH" ]]; then
+    echo "ERROR: Qwen backbone directory not found: $QWEN_BACKBONE_PATH" >&2
+    exit 1
+fi
+
+echo "Qwen backbone: $QWEN_BACKBONE_NAME ($QWEN_BACKBONE_PATH)"
 
 PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
 IMAGE_MAX_TOKEN_NUM=256 \
@@ -18,7 +38,7 @@ FPS_MAX_FRAMES=10 \
 NPROC_PER_NODE=2 \
 CUDA_VISIBLE_DEVICES=0,1 \
 swift sft \
-    --model 'Qwen/Qwen3-VL-4B-Instruct' \
+    --model "$QWEN_BACKBONE_PATH" \
     --dataset $MANAGER_DATASET_PATH \
     --split_dataset_ratio 0.1 \
     --eval_strategy steps \

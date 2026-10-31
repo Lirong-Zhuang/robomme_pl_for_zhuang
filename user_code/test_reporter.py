@@ -23,17 +23,39 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from mme_vla_suite.prompts import DEFAULT_REPORTER_PROMPT_VERSION
+from mme_vla_suite.prompts import available_reporter_prompt_versions
+from mme_vla_suite.prompts import get_reporter_prompt
+from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_NAME
+from mme_vla_suite.qwen_backbone import DEFAULT_QWEN_BACKBONE_ROOT
+from mme_vla_suite.qwen_backbone import SUPPORTED_QWEN_BACKBONES
+from mme_vla_suite.qwen_backbone import resolve_qwen_backbone_path
+
 CUDA_VISIBLE_DEVICES = "0"
 
-DEFAULT_REPORTER_MODEL_PATH = "Qwen/Qwen3-VL-4B-Instruct"
-DEFAULT_REPORTER_ADAPTER_PATH = "runs/ckpts/reporter/qwen_reporter_v4.1_simple_subgoal/v0-20260901-043235/checkpoint-900"
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-DEFAULT_TESTSET_PATH = "data/trinity_preprocessed_data/reporter_binfill_data_2"
+QWEN_BACKBONE_NAME = os.environ.get(
+    "QWEN_BACKBONE_NAME", DEFAULT_QWEN_BACKBONE_NAME
+)
+QWEN_BACKBONE_ROOT = os.environ.get(
+    "QWEN_BACKBONE_ROOT", DEFAULT_QWEN_BACKBONE_ROOT
+)
+QWEN_BACKBONE_PATH = os.environ.get("QWEN_BACKBONE_PATH", "")
+DEFAULT_REPORTER_ADAPTER_PATH = os.environ.get("REPORTER_ADAPTER_PATH", "")
+
+DEFAULT_TESTSET_PATH = (
+    "data/trinity_preprocessed_data/reporter_binfill_data_7/"
+    "testset/reporter_qwenvl"
+)
 DEFAULT_SUBGOAL_TYPE = "simple"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs" / "reporter_evaluation"
-DEFAULT_RESULT_NAME = "reporter_qwen_v4.1_ckpt900"
+DEFAULT_RESULT_NAME = "reporter_dual_view_v3"
 # False exactly matches dev_trinity: every parsed result is applied directly.
 REPORTER_DEBOUNCE = True
+REPORTER_HISTORY_SIZE = 3
+REPORTER_PROMPT_VERSION = DEFAULT_REPORTER_PROMPT_VERSION
 
 # Completion-scoring tolerance, measured in Reporter calls.
 EARLY_TOLERANCE_CALLS = 1
@@ -142,19 +164,14 @@ def _export_errors(
 
         error_index = len(errors) + 1
         error_type = _error_type(record["expected"], record["predicted"])
-        used_init_source = Path(record["used_init_image"])
-        current_source = Path(record["current_image"])
+        current_sources = [Path(path) for path in record["current_images"]]
 
         error_record = dict(record)
         error_record.update(
             {
                 "error_index": error_index,
                 "error_type": error_type,
-                "dataset_init_frame_name": Path(
-                    record["dataset_init_image"]
-                ).name,
-                "used_init_frame_name": used_init_source.name,
-                "error_frame_name": current_source.name,
+                "error_frame_names": [source.name for source in current_sources],
             }
         )
         errors.append(error_record)
@@ -206,14 +223,25 @@ def _print_completion_summary(completion_report: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate one Reporter frame by frame while using its own success "
-            "predictions to update the next init frame."
+            "Evaluate one dual-view Reporter frame by frame while using its own "
+            "success predictions to advance the active subgoal."
         )
     )
     parser.add_argument(
+        "--qwen-backbone-name",
+        choices=SUPPORTED_QWEN_BACKBONES,
+        default=QWEN_BACKBONE_NAME,
+        help="Qwen backbone name used to resolve the local model directory.",
+    )
+    parser.add_argument(
+        "--qwen-backbone-root",
+        default=QWEN_BACKBONE_ROOT,
+        help="Directory containing the supported Qwen backbone directories.",
+    )
+    parser.add_argument(
         "--model-path",
-        default=DEFAULT_REPORTER_MODEL_PATH,
-        help="Reporter base model path.",
+        default=QWEN_BACKBONE_PATH,
+        help="Optional explicit model path overriding name-based resolution.",
     )
     parser.add_argument(
         "--adapter-path",
@@ -269,6 +297,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--reporter-prompt-version",
+        default=REPORTER_PROMPT_VERSION,
+        help=(
+            "Prompt applied to every offline request; available: "
+            + ", ".join(available_reporter_prompt_versions())
+        ),
+    )
+    parser.add_argument(
+        "--reporter-history-size",
+        type=int,
+        default=REPORTER_HISTORY_SIZE,
+        help="Maximum paired-view observations retained for the current subgoal (default: 3).",
+    )
+    parser.add_argument(
         "--early-tolerance-calls",
         type=int,
         default=EARLY_TOLERANCE_CALLS,
@@ -293,6 +335,8 @@ def main() -> None:
     args = parse_args()
     if args.early_tolerance_calls < 0:
         raise ValueError("--early-tolerance-calls must be non-negative")
+    if args.reporter_history_size < 1:
+        raise ValueError("--reporter-history-size must be at least 1")
     if args.full_credit_delay_calls < 0:
         raise ValueError("--full-credit-delay-calls must be non-negative")
     if args.maximum_delay_calls < args.full_credit_delay_calls:
@@ -300,6 +344,12 @@ def main() -> None:
             "--maximum-delay-calls must be at least --full-credit-delay-calls"
         )
     dataset_path = resolve_reporter_test_dataset(args.testset_path, args.subgoal_type)
+    reporter_prompt = get_reporter_prompt(args.reporter_prompt_version)
+    model_path = resolve_qwen_backbone_path(
+        args.qwen_backbone_name,
+        model_root=args.qwen_backbone_root,
+        model_path=args.model_path or None,
+    )
     adapter_path = "" if args.no_adapter else _resolve_repo_path(args.adapter_path)
     if adapter_path and not Path(adapter_path).is_dir():
         raise FileNotFoundError(f"Reporter adapter not found: {adapter_path}")
@@ -313,7 +363,7 @@ def main() -> None:
     engine = None
     try:
         engine, infer_request_type, request_config = _build_engine(
-            args.model_path,
+            model_path,
             adapter_path,
         )
         result = evaluate_reporter_sequence(
@@ -322,13 +372,15 @@ def main() -> None:
             engine=engine,
             infer_request_type=infer_request_type,
             request_config=request_config,
-            model_path=args.model_path,
+            model_path=model_path,
             adapter_path=adapter_path,
             predictions_path=predictions_path,
             image_root=args.image_root,
             max_samples=args.max_samples,
             progress_every=args.progress_every,
             reporter_debounce=args.reporter_debounce,
+            reporter_history_size=args.reporter_history_size,
+            reporter_prompt_version=reporter_prompt.version,
             prediction_records_out=prediction_records,
         )
     finally:
@@ -366,8 +418,16 @@ def main() -> None:
     summary = {
         "name": result.name,
         "dataset_path": result.dataset_path,
+        "qwen_backbone_name": args.qwen_backbone_name,
         "model_path": result.model_path,
         "adapter_path": result.adapter_path,
+        "reporter_history_size": (
+            prediction_records[0]["reporter_history_size"]
+            if prediction_records
+            else None
+        ),
+        "reporter_prompt_version": reporter_prompt.version,
+        "reporter_prompt_sha256": reporter_prompt.content_hash,
         "completion": {
             key: value
             for key, value in completion_report.items()

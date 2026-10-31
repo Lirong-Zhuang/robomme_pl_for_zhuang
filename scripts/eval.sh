@@ -6,6 +6,10 @@ set -Eeuo pipefail
 # the directory from which this script is launched.
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/qwen_backbone.sh"
+
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 #
 # The Executer policy server is started as a managed background process because eval.py
 # must run at the same time. eval.py itself runs in the foreground, so all
@@ -28,9 +32,9 @@ EVAL_PRESET="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started Executer server.
-EXECUTER_SEEDS=(0 42 7)
-NUM_REPEATS=3
-EXECUTER_CKPT_ID=20000
+EXECUTER_SEEDS=(0)
+NUM_REPEATS=1
+EXECUTER_CKPT_ID=79999
 EXECUTER_GPU_ID=0
 MANAGER_REPORTER_GPU_ID=0
 
@@ -54,20 +58,18 @@ MAX_STEPS=1300
 SUBGOAL_KEEP_PERIOD=1
 SAVE_DIR="runs/evaluation"
 # The final directory name is composed as <FRAMEWORK_VERSION>.<RUN_NAME>.
-# Include the base framework in FRAMEWORK_VERSION so other frameworks can be
-# added later. For example, FRAMEWORK_VERSION="trinity_v0" and RUN_NAME="11"
-# preserve the former EVAL_RUN_NAME="trinity_v0.11" result path.
-# FRAMEWORK_VERSION also selects framework behavior: trinity_v0 disables
-# Reporter debounce (the original dev_trinity behavior), while trinity_v1
-# enables it.
-FRAMEWORK_VERSION="trinity_v0"
-RUN_NAME="14"
+# FRAMEWORK_VERSION is only a free-form result label; it does not select any
+# evaluation behavior. For example, FRAMEWORK_VERSION="trinity_v2.2" and
+# RUN_NAME="1" produce EVAL_RUN_NAME="trinity_v2.2.1".
+FRAMEWORK_VERSION="trinity_v2.2"
+RUN_NAME="2"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
 # Save the per-episode Manager trace under
-# <SAVE_DIR>/.../<TASK_NAME>/manager_logs/, while still displaying it in the
-# terminal. Reporter requests have their own reporter_logs directory.
+# <SAVE_DIR>/.../<TASK_NAME>/manager_logs/. Raw Manager output stays in that
+# file; the terminal shows only global episode progress plus the current seed
+# and repeat. Reporter requests keep their own reporter_logs directory.
 SAVE_MANAGER_LOGS=true
 
 # Keep MemER's per-step images after an episode finishes. MemER keyframes are
@@ -80,18 +82,33 @@ MANAGER_SAVE_MEMER_KF=true
 EXECUTER_USE_HISTORY="auto"
 
 # Manager configuration.
+MANAGER_PROMPT_VERSION="qwenvl_v1"
+MANAGER_QWEN_BACKBONE_NAME="${MANAGER_QWEN_BACKBONE_NAME:-Qwen3-VL-4B-Instruct}"
+MANAGER_QWEN_BACKBONE_ROOT="${MANAGER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
+MANAGER_QWEN_BACKBONE_PATH="${MANAGER_QWEN_BACKBONE_PATH:-}"
 MANAGER_SIMPLE_ADAPTER_PATH="runs/ckpts/manager/qwen_manager_v1_simple_subgoal/v2-20260817-165056/checkpoint-150"
 MANAGER_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 
 # Executer configuration
-EXECUTER_CONFIG="mme_vla_suite_lora"
-EXECUTER_DIR="runs/ckpts/executer/excuter_pi0.5_v2/$EXECUTER_CKPT_ID"
+EXECUTER_CONFIG="mme_vla_suite"
+EXECUTER_DIR="/data/public/RoboMME/checkpoints/mme_vla_suite/symbolic-simple-subgoal/$EXECUTER_CKPT_ID"
 
 # Reporter configuration.
 REPORTER_TYPE="qwenvl"
-REPORTER_MODEL_PATH="Qwen/Qwen3-VL-4B-Instruct"
-# Empty means the original, non-fine-tuned Qwen3-VL Reporter.
-REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v4_simple_subgoal/v1-20260821-142554/checkpoint-950"
+REPORTER_PROMPT_VERSION="dual_view_temporal_v3"
+REPORTER_QWEN_BACKBONE_NAME="${REPORTER_QWEN_BACKBONE_NAME:-Qwen3-VL-8B-Instruct}"
+REPORTER_QWEN_BACKBONE_ROOT="${REPORTER_QWEN_BACKBONE_ROOT:-/data/public/qwen}"
+REPORTER_QWEN_BACKBONE_PATH="${REPORTER_QWEN_BACKBONE_PATH:-}"
+REPORTER_ADAPTER_PATH="runs/ckpts/reporter/qwen_reporter_v10_simple_subgoal/v0-20261021-001545/checkpoint-1284"
+REPORTER_HISTORY_SIZE=3
+REPORTER_DEBOUNCE=false
+# Optional deterministic veto for Reporter true on subgoals containing
+# "pick up". RoboMME reports one observed finger opening in [0.0, 0.04].
+# With the defaults below, only the strict interval (0.002, 0.038) passes.
+REPORTER_GRIPPER_GATE=false
+REPORTER_GRIPPER_CLOSED_POSITION=0.0
+REPORTER_GRIPPER_OPEN_POSITION=0.04
+REPORTER_GRIPPER_ENDPOINT_BUFFER=0.002
 
 # micromamba server 117
 MAMBA_ENV="robomme"
@@ -109,6 +126,15 @@ SERVER_LOG_DIR="runs/evaluation/server_logs"
 # =============================================================================
 # Implementation
 # =============================================================================
+
+MANAGER_QWEN_BACKBONE_PATH=$(resolve_qwen_backbone_path \
+    "$MANAGER_QWEN_BACKBONE_NAME" \
+    "$MANAGER_QWEN_BACKBONE_ROOT" \
+    "$MANAGER_QWEN_BACKBONE_PATH")
+REPORTER_QWEN_BACKBONE_PATH=$(resolve_qwen_backbone_path \
+    "$REPORTER_QWEN_BACKBONE_NAME" \
+    "$REPORTER_QWEN_BACKBONE_ROOT" \
+    "$REPORTER_QWEN_BACKBONE_PATH")
 
 find_free_port() {
     local min=${1:-2000}
@@ -142,23 +168,18 @@ bool_arg() {
     esac
 }
 
-case "$FRAMEWORK_VERSION" in
-    trinity_v0)
-        REPORTER_DEBOUNCE=false
-        ;;
-    trinity_v1)
-        REPORTER_DEBOUNCE=true
-        ;;
-    *)
-        echo "ERROR: unsupported FRAMEWORK_VERSION '$FRAMEWORK_VERSION'; expected trinity_v0 or trinity_v1." >&2
-        exit 1
-        ;;
-esac
-
+if [[ -z "$FRAMEWORK_VERSION" ]]; then
+    echo "ERROR: FRAMEWORK_VERSION must not be empty." >&2
+    exit 1
+fi
 if [[ -z "$RUN_NAME" ]]; then
     echo "ERROR: RUN_NAME must not be empty." >&2
     exit 1
 fi
+# Validate this independently from FRAMEWORK_VERSION before starting either
+# GPU process. bool_arg is also used below to emit the matching tyro flag.
+bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce >/dev/null
+bool_arg "$REPORTER_GRIPPER_GATE" --args.reporter-gripper-gate --args.no-reporter-gripper-gate >/dev/null
 EVAL_RUN_NAME="${FRAMEWORK_VERSION}.${RUN_NAME}"
 
 resolve_repo_path() {
@@ -265,11 +286,15 @@ REPORTER_ADAPTER_PATH=$(resolve_repo_path "$REPORTER_ADAPTER_PATH")
 
 require_local_dir "Executer checkpoint" "$EXECUTER_DIR"
 if [[ "$MANAGER_TYPE" == "qwenvl" || "$MANAGER_TYPE" == "memer" ]]; then
+    require_local_dir "Manager Qwen backbone" "$MANAGER_QWEN_BACKBONE_PATH"
     if [[ "$SUBGOAL_TYPE" == "simple_subgoal" ]]; then
         require_local_dir "Manager adapter" "$MANAGER_SIMPLE_ADAPTER_PATH"
     else
         require_local_dir "Manager adapter" "$MANAGER_GROUNDED_ADAPTER_PATH"
     fi
+fi
+if [[ "$REPORTER_TYPE" == "qwenvl" ]]; then
+    require_local_dir "Reporter Qwen backbone" "$REPORTER_QWEN_BACKBONE_PATH"
 fi
 if [[ -n "$REPORTER_ADAPTER_PATH" ]]; then
     require_local_dir "Reporter adapter" "$REPORTER_ADAPTER_PATH"
@@ -318,11 +343,18 @@ trap cleanup EXIT INT TERM
 
 echo "Evaluation:      $REQUESTED_EVAL_PRESET"
 echo "Manager:         $MANAGER_TYPE"
+echo "Manager Qwen:    $MANAGER_QWEN_BACKBONE_NAME ($MANAGER_QWEN_BACKBONE_PATH)"
+echo "Manager prompt:  $MANAGER_PROMPT_VERSION"
 echo "Executer:        $EXECUTER_NAME"
 echo "Reporter:        $REPORTER_TYPE"
+echo "Reporter Qwen:   $REPORTER_QWEN_BACKBONE_NAME ($REPORTER_QWEN_BACKBONE_PATH)"
+echo "Reporter prompt: $REPORTER_PROMPT_VERSION"
 echo "Reporter adapter: ${REPORTER_ADAPTER_PATH:-<none; original base model>}"
+echo "Reporter input: 2 init images + up to $REPORTER_HISTORY_SIZE paired-view calls"
 echo "Framework version: $FRAMEWORK_VERSION"
 echo "Reporter debounce: $REPORTER_DEBOUNCE"
+echo "Reporter gripper gate: $REPORTER_GRIPPER_GATE"
+echo "Reporter gripper range: closed=$REPORTER_GRIPPER_CLOSED_POSITION, open=$REPORTER_GRIPPER_OPEN_POSITION, endpoint buffer=$REPORTER_GRIPPER_ENDPOINT_BUFFER"
 echo "Subgoal type:    $SUBGOAL_TYPE"
 echo "Executer config: $EXECUTER_CONFIG"
 echo "Executer ckpt:   $EXECUTER_DIR"
@@ -341,6 +373,7 @@ run_evaluation() {
     local executer_port=$EXECUTER_PORT
     local server_log
     local start_time
+    local gpu_start_snapshot
     local -a eval_args
     local -a server_env
 
@@ -361,6 +394,8 @@ run_evaluation() {
         --args.repeat-id "$repeat_id"
         --args.eval-seeds "$EVAL_SEEDS_CSV"
         --args.num-repeats "$NUM_REPEATS"
+        --args.executer-gpu-id "$EXECUTER_GPU_ID"
+        --args.manager-reporter-gpu-id "$MANAGER_REPORTER_GPU_ID"
         --args.only-tasks "$ONLY_TASKS"
         --args.exclude-tasks "$EXCLUDE_TASKS"
         --args.re-eval-tasks "$RE_EVAL_TASKS"
@@ -370,9 +405,20 @@ run_evaluation() {
         --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
         --args.manager-simple-adapter-path "$MANAGER_SIMPLE_ADAPTER_PATH"
         --args.manager-grounded-adapter-path "$MANAGER_GROUNDED_ADAPTER_PATH"
+        --args.manager-prompt-version "$MANAGER_PROMPT_VERSION"
+        --args.manager-qwen-backbone-name "$MANAGER_QWEN_BACKBONE_NAME"
+        --args.manager-qwen-backbone-root "$MANAGER_QWEN_BACKBONE_ROOT"
+        --args.manager-qwen-backbone-path "$MANAGER_QWEN_BACKBONE_PATH"
         --args.reporter-type "$REPORTER_TYPE"
-        --args.reporter-model-path "$REPORTER_MODEL_PATH"
+        --args.reporter-prompt-version "$REPORTER_PROMPT_VERSION"
+        --args.reporter-qwen-backbone-name "$REPORTER_QWEN_BACKBONE_NAME"
+        --args.reporter-qwen-backbone-root "$REPORTER_QWEN_BACKBONE_ROOT"
+        --args.reporter-qwen-backbone-path "$REPORTER_QWEN_BACKBONE_PATH"
         --args.reporter-adapter-path "$REPORTER_ADAPTER_PATH"
+        --args.reporter-history-size "$REPORTER_HISTORY_SIZE"
+        --args.reporter-gripper-closed-position "$REPORTER_GRIPPER_CLOSED_POSITION"
+        --args.reporter-gripper-open-position "$REPORTER_GRIPPER_OPEN_POSITION"
+        --args.reporter-gripper-endpoint-buffer "$REPORTER_GRIPPER_ENDPOINT_BUFFER"
     )
 
     eval_args+=("$(bool_arg "$OVERWRITE" --args.overwrite --args.no-overwrite)")
@@ -380,6 +426,7 @@ run_evaluation() {
     eval_args+=("$(bool_arg "$EXECUTER_USE_HISTORY" --args.executer-use-history --args.no-executer-use-history)")
     eval_args+=("$(bool_arg "$MANAGER_SAVE_MEMER_KF" --args.manager-save-memer-kf --args.no-manager-save-memer-kf)")
     eval_args+=("$(bool_arg "$REPORTER_DEBOUNCE" --args.reporter-debounce --args.no-reporter-debounce)")
+    eval_args+=("$(bool_arg "$REPORTER_GRIPPER_GATE" --args.reporter-gripper-gate --args.no-reporter-gripper-gate)")
 
     case "$MANAGER_TYPE" in
         oracle)
@@ -408,6 +455,16 @@ run_evaluation() {
     echo "Executer endpoint: $EXECUTER_HOST:$executer_port"
     echo "Server log: $server_log"
     echo "======================================================================"
+
+    # Capture other jobs' occupancy before either process belonging to this
+    # seed/repeat evaluation starts. eval.py receives the raw rows and uses the
+    # same physical-device selectors when writing this run's GPU metrics.
+    gpu_start_snapshot=""
+    if command -v nvidia-smi &>/dev/null; then
+        gpu_start_snapshot=$(nvidia-smi \
+            --query-gpu=index,uuid,memory.total,memory.used \
+            --format=csv,noheader,nounits 2>/dev/null || true)
+    fi
 
     server_env=(
         CUDA_VISIBLE_DEVICES="$EXECUTER_GPU_ID"
@@ -446,6 +503,8 @@ run_evaluation() {
     printf '\n\n'
 
     CUDA_VISIBLE_DEVICES="$MANAGER_REPORTER_GPU_ID" \
+    ROBOMME_GPU_START_SNAPSHOT="$gpu_start_snapshot" \
+    ROBOMME_EXECUTER_LAUNCH_PID="$SERVER_PID" \
     PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
     PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
     MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \

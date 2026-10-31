@@ -64,11 +64,12 @@ runs/
                     ├── log.json
                     └── <TaskName>/
                         ├── frames/
-                        │   └── ep<episode_id>/
-                        │       └── step_<step>_image.png
-                        ├── init_frames/
-                        │   └── ep<episode_id>/
-                        │       └── step_<step>_image.png
+                        │   ├── overall/
+                        │   │   └── ep<episode_id>/
+                        │   │       └── step_<step>.png
+                        │   └── wrist/
+                        │       └── ep<episode_id>/
+                        │           └── step_<step>.png
                         ├── manager_logs/
                         │   └── <TaskName>_ep<episode_id>.log
                         ├── reporter_logs/
@@ -76,6 +77,10 @@ runs/
                         └── videos/
                             └── <evaluation_video>.mp4
 ```
+
+During an episode, Reporter also creates
+`<TaskName>/init_frames/ep<episode_id>/{overall,wrist}/` for the active init
+pair. That episode directory is deleted when evaluation of the episode ends.
 
 ### Build all `.h5` files
 
@@ -118,37 +123,73 @@ as the QwenVL Manager builder. Within each subgoal span, the first observation
 is the subgoal start frame. Selected intermediate observations are labelled
 `{"success": false}` and the subgoal transition observation is labelled
 `{"success": true}`. The terminal episode frame is excluded because the live
-Reporter is not called after the environment terminates.
+Reporter is not called after the environment terminates. Each subgoal owns a
+capacity-`k` sliding window containing only Reporter-call observations, not
+adjacent raw timesteps. The default is `k=3`. Every observation contains an
+overall/wrist pair. The window grows naturally from one pair to three pairs,
+then rolls at capacity. It is cleared immediately when the subgoal completes.
 
 ```bash
 uv run python scripts/build_dataset.py \
   --dataset_type reporter_qwenvl \
   --raw_data_path /data/public/RoboMME \
-  --preprocessed_data_path /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data
+  --preprocessed_data_path /home/zhuanglr/robomme_pl_for_zhuang/data/trinity_preprocessed_data/reporter_data \
+  --reporter_history_size 3
 ```
 
 The builder writes:
 
 ```text
 reporter_data/reporter_qwenvl/images/
+reporter_data/reporter_qwenvl/images/overall/
+reporter_data/reporter_qwenvl/images/wrist/
 reporter_data/reporter_qwenvl/simple_subgoal_train.jsonl
 reporter_data/reporter_qwenvl/grounded_subgoal_train.jsonl
 ```
 
-Each JSONL row contains `system`, `user`, and `assistant` messages plus two
-images. The prompt is imported from the same shared module as live Reporter
-inference, preventing training/inference prompt drift.
+Each JSONL row contains `system`, `user`, and `assistant` messages plus 4, 6,
+or 8 images by default: init overall/wrist, followed by one to three
+Reporter-call overall/wrist pairs ordered oldest to newest with the current
+observation last. The prompt is imported from the same shared module as live
+Reporter inference, preventing training/inference prompt drift.
 
 Before training, select the simple or grounded JSONL and GPU settings near the
-top of `scripts/finetune_reporter.sh`, then run:
+top of `scripts/finetune_reporter.sh`. `REPORTER_HISTORY_SIZE` must match data
+generation; the script validates the first row before starting training.
+Then run:
 
 ```bash
 bash scripts/finetune_reporter.sh
 ```
 
-To evaluate a trained LoRA, set `reporter_adapter_path` in
-`examples/robomme/eval.py` to the generated checkpoint directory. Leave it
-empty to continue using the original Qwen3-VL model.
+To evaluate a trained LoRA, set `REPORTER_ADAPTER_PATH` in `scripts/eval.sh`
+to the generated checkpoint directory and keep `REPORTER_HISTORY_SIZE` equal
+to the training value. Adapters trained with the old single-view media layout
+should not be reused.
+
+### Select the Qwen backbone
+
+Manager/Reporter fine-tuning and evaluation support these local backbones:
+
+- `Qwen3-VL-4B-Instruct`
+- `Qwen3-VL-8B-Instruct`
+
+Select one by name; its path is resolved as
+`/data/public/qwen/<QWEN_BACKBONE_NAME>`:
+
+```bash
+QWEN_BACKBONE_NAME=Qwen3-VL-8B-Instruct bash scripts/finetune_manager.sh
+QWEN_BACKBONE_NAME=Qwen3-VL-8B-Instruct bash scripts/finetune_reporter.sh
+```
+
+Set `QWEN_BACKBONE_ROOT` to change the common parent directory, or set
+`QWEN_BACKBONE_PATH` as an explicit full-path override. Make sure each LoRA
+adapter is evaluated with the same backbone size used for its training.
+
+During evaluation, Manager and Reporter are independent. Set
+`MANAGER_QWEN_BACKBONE_NAME` and `REPORTER_QWEN_BACKBONE_NAME` separately in
+`scripts/eval.sh`; each also has its own `*_ROOT` and optional `*_PATH`
+override next to the corresponding Manager or Reporter configuration.
 
 ## 2. Train the VLM subgoal predictor with tmux
 
@@ -219,6 +260,7 @@ of `scripts/eval.sh`. In particular, check:
 - the Manager and Reporter adapter paths
 - `EXECUTER_GPU_ID` and `MANAGER_REPORTER_GPU_ID`
 - `FRAMEWORK_VERSION`, `RUN_NAME`, and `SAVE_DIR`
+- `REPORTER_DEBOUNCE` (`true`/`false`, independent of `FRAMEWORK_VERSION`)
 
 Run the evaluation from the repository root:
 
@@ -231,3 +273,8 @@ a fresh policy server for each pair, writes the individual result under
 `<SAVE_DIR>/<executer_name>/<evaluation_run_name>/seed<seed>/repeat<repeat>/`,
 updates `summary.json` in the evaluation-run directory, and stops the server
 automatically. Re-running with `OVERWRITE=false` resumes incomplete episodes.
+Each completed run's `log.json`, and its corresponding item in the aggregate
+summary's `runs` array, records only the GPU ID, total memory, pre-launch
+occupied memory, and that eval's average process memory as one-decimal `GB`
+strings. GPU statistics are not averaged across evals, and a GPU metadata
+collection failure does not stop evaluation.
