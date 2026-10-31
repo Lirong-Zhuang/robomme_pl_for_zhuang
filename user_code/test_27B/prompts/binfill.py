@@ -13,7 +13,10 @@ TASK_NAME = "BinFill"
 NOTES = """1. The bin is a box with black holes on the top. It sucks in cubes
 placed into it, so count how many cubes have already been inserted.
 2. Use the task goal to determine the required cube color, order, and total count.
-3. Press the button only after all requested cubes have been placed into the bin."""
+3. A pick-up subgoal is complete only when the correct cube is securely grasped
+and visibly lifted clear of the supporting surface by a noticeable height.
+Closing the gripper, touching the cube, or grasping without lifting is not enough.
+4. Press the button only after all requested cubes have been placed into the bin."""
 
 SUBGOALS = """- pick up the [first/second/third/...] [red/blue/green] cube
 - put it into the bin
@@ -59,7 +62,7 @@ COMBINED_EXAMPLE = """If the task goal is "put two red cubes into the bin", a ty
 
 PROMPT = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_action_v2_no_thinking",
+    version="binfill_subgoal_action_v3_lift_completion_no_thinking",
     system_prompt=SYSTEM_TEMPLATE.format(
         subgoals=SUBGOALS,
         actions=ACTION_LIST,

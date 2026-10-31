@@ -1,4 +1,4 @@
-"""Shared ordinary (non-grounded) prompts for task-specific 2.7B tests."""
+"""Shared ordinary (non-grounded) prompts for task-specific 27B tests."""
 
 from __future__ import annotations
 

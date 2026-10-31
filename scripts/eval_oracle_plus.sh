@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+
+# Run from the repository root:
+#   bash scripts/eval_oracle_plus.sh
+
+set -Eeuo pipefail
+
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO_ROOT"
+
+# Oracle Plus follows Trinity's VLA server pattern: Qwen3.8-27B is served from
+# robomme-qwen38, while RoboMME and MPLib run from the robomme environment.
+TASKS="BinFill"
+EPISODE_IDS=""
+NUM_EPISODES=1
+# Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
+# tied to each episode's test metadata; this measures repeated-run variance.
+NUM_REPEATS=1
+MAX_STEPS=1300
+MAX_DECISIONS=20
+HISTORY_SIZE=3
+# true: use the prompt that requires a visual description in every VLM output.
+# false: use the compact prompt with completed, next_subgoal, and point only.
+VLM_INCLUDE_DESCRIPTION=true
+
+MODEL_PATH="${QWEN_MODEL_PATH:-/data/public/qwen/Qwen3.8-27B-FP8}"
+ATTN_IMPL="flash_attention_2"
+MAX_TOKENS=256
+IMAGE_MAX_TOKEN_NUM=256
+CUDA_VISIBLE_DEVICES_ORACLE_PLUS="${CUDA_VISIBLE_DEVICES_ORACLE_PLUS:-0}"
+VLM_HOST="127.0.0.1"
+VLM_BIND_HOST="0.0.0.0"
+# Set to 0 to select a free localhost port, matching the existing VLA launcher.
+VLM_PORT=0
+VLM_STARTUP_TIMEOUT=600
+
+SAVE_DIR="runs/evaluation/oracle-plus"
+RUN_NAME="test_1"
+OVERWRITE=false
+
+VLM_MAMBA_ENV="robomme-qwen38"
+EVAL_MAMBA_ENV="robomme"
+MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-/data/zhuanglr/micromamba}"
+MAMBA_EXE="${MAMBA_EXE:-$MAMBA_ROOT_PREFIX/bin/micromamba}"
+SERVER_LOG_DIR="runs/evaluation/oracle-plus/server_logs"
+VLM_PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
+EVAL_PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/third_party/robomme_benchmark/src:$REPO_ROOT/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
+export MAMBA_ROOT_PREFIX
+
+if [[ ! -x "$MAMBA_EXE" ]]; then
+    echo "ERROR: micromamba is not executable: $MAMBA_EXE" >&2
+    exit 1
+fi
+if [[ ! -d "$MODEL_PATH" ]]; then
+    echo "ERROR: Qwen3.8-27B model directory does not exist: $MODEL_PATH" >&2
+    exit 1
+fi
+if [[ -z "$RUN_NAME" ]]; then
+    echo "ERROR: RUN_NAME must not be empty." >&2
+    exit 1
+fi
+if ((NUM_REPEATS < 1)); then
+    echo "ERROR: NUM_REPEATS must be at least 1." >&2
+    exit 1
+fi
+if ((VLM_PORT == 0)); then
+    VLM_PORT=$(python3 -c \
+        'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+fi
+if lsof -iTCP:"$VLM_PORT" -sTCP:LISTEN &>/dev/null; then
+    echo "ERROR: VLM_PORT $VLM_PORT is already in use." >&2
+    exit 1
+fi
+
+PYTHONPATH="$VLM_PYTHONPATH" \
+"$MAMBA_EXE" run -n "$VLM_MAMBA_ENV" python -c \
+    'import msgpack, numpy, swift, torch, transformers, websockets' \
+    || {
+        echo "ERROR: $VLM_MAMBA_ENV lacks a VLM WebSocket dependency." >&2
+        exit 1
+    }
+PYTHONPATH="$EVAL_PYTHONPATH" \
+"$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" python -c \
+    'import cv2, gymnasium, imageio, mani_skill, mplib, msgpack, sapien, websockets' \
+    || {
+        echo "ERROR: $EVAL_MAMBA_ENV lacks an eval/WebSocket dependency." >&2
+        exit 1
+    }
+case "$OVERWRITE" in
+    true) overwrite_arg="--overwrite" ;;
+    false) overwrite_arg="--no-overwrite" ;;
+    *)
+        echo "ERROR: OVERWRITE must be true or false, got '$OVERWRITE'" >&2
+        exit 1
+        ;;
+esac
+if [[ -e "$SAVE_DIR/$RUN_NAME" && "$OVERWRITE" == "false" ]]; then
+    echo "ERROR: Result directory already exists: $SAVE_DIR/$RUN_NAME" >&2
+    echo "Set OVERWRITE=true or choose a new RUN_NAME before loading 27B." >&2
+    exit 1
+fi
+case "$VLM_INCLUDE_DESCRIPTION" in
+    true) description_arg="--include-description" ;;
+    false) description_arg="--no-include-description" ;;
+    *)
+        echo "ERROR: VLM_INCLUDE_DESCRIPTION must be true or false, got '$VLM_INCLUDE_DESCRIPTION'" >&2
+        exit 1
+        ;;
+esac
+
+args=(
+    --vlm-host "$VLM_HOST"
+    --vlm-port "$VLM_PORT"
+    --tasks "$TASKS"
+    --episode-ids "$EPISODE_IDS"
+    --num-episodes "$NUM_EPISODES"
+    --num-repeats "$NUM_REPEATS"
+    --max-steps "$MAX_STEPS"
+    --max-decisions "$MAX_DECISIONS"
+    --history-size "$HISTORY_SIZE"
+    --save-dir "$SAVE_DIR"
+    --run-name "$RUN_NAME"
+    "$overwrite_arg"
+    "$description_arg"
+)
+
+mkdir -p "$SERVER_LOG_DIR"
+SERVER_LOG="$SERVER_LOG_DIR/${RUN_NAME}_vlm_port${VLM_PORT}.log"
+SERVER_PID=""
+
+stop_server() {
+    if [[ -n "$SERVER_PID" ]]; then
+        if kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "Stopping Oracle Plus VLM server (PID $SERVER_PID)..."
+            kill "$SERVER_PID" 2>/dev/null || true
+        fi
+        wait "$SERVER_PID" 2>/dev/null || true
+    fi
+    SERVER_PID=""
+}
+
+cleanup() {
+    local exit_code=$?
+    trap - EXIT INT TERM
+    stop_server
+    exit "$exit_code"
+}
+trap cleanup EXIT INT TERM
+
+echo "VLM environment: $VLM_MAMBA_ENV"
+echo "Evaluation environment: $EVAL_MAMBA_ENV"
+echo "Qwen model: $MODEL_PATH"
+echo "VLM endpoint: $VLM_HOST:$VLM_PORT"
+echo "Tasks: $TASKS"
+echo "VLM description output: $VLM_INCLUDE_DESCRIPTION"
+echo "Results: $SAVE_DIR/$RUN_NAME"
+echo "VLM server log: $SERVER_LOG"
+
+export USE_HF=1
+export HF_HUB_OFFLINE=0
+export TRANSFORMERS_OFFLINE=0
+export IMAGE_MAX_TOKEN_NUM
+
+CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_ORACLE_PLUS" \
+PYTHONPATH="$VLM_PYTHONPATH" \
+"$MAMBA_EXE" run -n "$VLM_MAMBA_ENV" \
+    python "$REPO_ROOT/scripts/serve_oracle_plus_vlm.py" \
+    --host "$VLM_BIND_HOST" \
+    --port "$VLM_PORT" \
+    --model-path "$MODEL_PATH" \
+    --attn-impl "$ATTN_IMPL" \
+    --max-tokens "$MAX_TOKENS" \
+    >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+
+echo "Starting Oracle Plus VLM server (PID $SERVER_PID)..."
+start_time=$SECONDS
+until lsof -iTCP:"$VLM_PORT" -sTCP:LISTEN &>/dev/null; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "ERROR: Oracle Plus VLM server exited before listening." >&2
+        tail -n 100 "$SERVER_LOG" >&2
+        exit 1
+    fi
+    if ((SECONDS - start_time >= VLM_STARTUP_TIMEOUT)); then
+        echo "ERROR: VLM server did not start within ${VLM_STARTUP_TIMEOUT}s." >&2
+        tail -n 100 "$SERVER_LOG" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+echo "Oracle Plus VLM server is ready. Starting RoboMME evaluation..."
+CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_ORACLE_PLUS" \
+PYTHONPATH="$EVAL_PYTHONPATH" \
+"$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
+    python "$REPO_ROOT/examples/robomme/eval_oracle_plus.py" "${args[@]}"

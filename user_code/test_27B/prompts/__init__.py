@@ -1,4 +1,4 @@
-"""Task-specific prompt registry for the Qwen 2.7B feasibility test."""
+"""Task-specific prompt registry for the Qwen3.8-27B feasibility test."""
 
 from __future__ import annotations
 

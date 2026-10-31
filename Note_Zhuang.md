@@ -1,6 +1,6 @@
 # Trinity
 
-**Current version: Trinity v2.2.**
+**Base version: Trinity v2.2. Current development branch: Oracle Plus.**
 
 This branch implements the Trinity pipeline for memory-based robot tasks. The
 pipeline has three cooperating components: a Manager that predicts the current
@@ -48,6 +48,103 @@ In this diagram, $O_t$ denotes the current-frame **overall observation**.
 `OBS_init` is the paired observation captured when the current subgoal starts,
 and `k-OBS` is the rolling window of the latest $k$ paired observations. The
 current v2.2 configuration uses $k=3$.
+
+## Oracle Plus: 27B VLM high-level action control
+
+Oracle Plus replaces Trinity's Manager, Reporter, and VLA Executer at inference
+time with one Qwen3.8-27B VLM. The VLM observes the task goal plus paired
+overall/wrist images and returns strict JSON containing `completed`,
+`next_subgoal`, an optional target `point=[y, x]`, and optionally a visual
+`description`. The VLM does not output a Python function name. A task-specific
+keyword matcher deterministically maps the subgoal to a trusted RoboMME MPLib
+function, which produces the robot's low-level trajectory.
+
+This implementation deliberately does **not** use `multi_choice`. Each task has
+its own prompt, subgoal-keyword mapping, and parameter-binding
+adapter. The adapter turns the program-resolved function name and pixel target
+into a concrete simulator object. This prevents the model from invoking
+arbitrary Python functions or passing fabricated simulator objects.
+
+### Current execution path
+
+```text
+task goal + overall/wrist observations
+                |
+ robomme eval WebSocket client
+                |
+      msgpack request (image paths)
+                |
+ robomme-qwen38 Qwen3.8-27B server
+                |
+ description? + completed + next_subgoal + point (JSON)
+                |
+ task-specific subgoal keyword matcher
+                |
+ task-specific validated action adapter
+                |
+     RoboMME MPLib high-level function
+                |
+       dense simulator observations
+```
+
+The initial call predicts a complete proposed subgoal sequence and its first
+subgoal. After execution, each follow-up call compares the pre-action image
+pair with up to three recent overall/wrist pairs, judges whether the active
+subgoal completed, and either repeats it or advances. Every response is parsed
+as JSON; the active subgoal must match exactly one trusted keyword rule before
+execution. For grounded actions, the VLM point is expressed as `[y, x]` in the latest overall
+image. As in Oracle Planner, RoboMME projects candidate-object world positions
+into the image and selects the candidate whose projected center is closest to
+the requested point.
+
+### Implemented scope
+
+The new live eval currently supports `BinFill`, because this is the task for
+which a special prompt, keyword mapper, and parameter adapter have been added.
+The mapper currently resolves to:
+
+- `solve_pickup`, with a required VLM target point matched against all current cubes;
+- `solve_putonto_whenhold_binspecial`, bound to the BinFill board/bin;
+- `solve_button`, bound to the task button.
+
+RoboMME contains 22 public high-level functions in
+`subgoal_planner_func.py`, but they are not all safe drop-in actions: several
+are helpers, recovery operations, intentional failures, or require different
+object parameters. The remaining 15 tasks must therefore each add a prompt,
+an explicit keyword-to-function mapping, and an adapter before they become
+selectable. An
+unsupported task fails at startup instead of silently falling back to Oracle
+choices.
+
+| Component | Oracle Plus implementation |
+| --- | --- |
+| Model | Qwen3.8-27B FP8 through ms-swift, thinking disabled |
+| Model environment | micromamba `robomme-qwen38`; dedicated WebSocket process |
+| Evaluation environment | micromamba `robomme`; RoboMME, ManiSkill, SAPIEN, and MPLib |
+| Simulator action space | `joint_angle`; trajectories are emitted internally by MPLib |
+| Process connection | WebSocket + msgpack, following the existing VLA server/client lifecycle |
+| Action selection | Program maps VLM subgoal keywords to a trusted function; VLM emits no action name |
+| Description variants | `VLM_INCLUDE_DESCRIPTION=true/false` selects one of two strict prompt/output schemas |
+| Target grounding | VLM pixel `[y, x]`; nearest projected candidate object, matching Oracle Planner |
+| Views | Current overall + wrist pair; follow-up temporal window uses up to three pairs |
+| Current task coverage | `BinFill` only |
+| Logs | Prompts, image paths, raw/parsed response, selected function, execution info, final status, other-process/eval GPU memory, VLM single-step latency, and VLM-to-mapped-action request time |
+
+Run the evaluation from the repository root with:
+
+```bash
+bash scripts/eval_oracle_plus.sh
+```
+
+The launcher uses `/data/public/qwen/Qwen3.8-27B-FP8` by default. It starts
+`scripts/serve_oracle_plus_vlm.py` inside `robomme-qwen38`, waits for the
+WebSocket port, then runs `examples/robomme/eval_oracle_plus.py` inside
+`robomme`. Configure task, episode IDs, repeats, GPU, model path, endpoint,
+result name, and `VLM_INCLUDE_DESCRIPTION` at the top of the shell script.
+Results are stored under `runs/evaluation/oracle-plus/<run-name>/` as one JSON
+record per episode plus `summary.json`; the exact VLM input images are retained
+beside each episode log for auditing. The VLM server log is stored under
+`runs/evaluation/oracle-plus/server_logs/`.
 
 ## 1. Build the dataset
 

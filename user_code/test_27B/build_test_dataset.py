@@ -1,4 +1,4 @@
-"""Build fixed-episode Qwen 2.7B feasibility-test datasets from RoboMME HDF5.
+"""Build fixed-episode Qwen3.8-27B feasibility-test datasets from RoboMME HDF5.
 
 The builder creates ``subgoal_action_test.jsonl``. Every response contains the
 completion decision, next subgoal, and matching BinFill MPLib wrapper name.
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
-DEFAULT_OUTPUT_ROOT = REPO_ROOT / "data" / "test_2.7B"
+DEFAULT_OUTPUT_ROOT = REPO_ROOT / "data" / "test_27B"
 
 
 @dataclass(frozen=True)
@@ -441,7 +441,7 @@ def parse_args() -> argparse.Namespace:
         "--output-root",
         type=Path,
         default=DEFAULT_OUTPUT_ROOT,
-        help="Dataset parent directory (default: data/test_2.7B).",
+        help="Dataset parent directory (default: data/test_27B).",
     )
     parser.add_argument(
         "--dataset-name",

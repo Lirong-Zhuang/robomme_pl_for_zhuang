@@ -1,4 +1,4 @@
-"""Run the joint Qwen 2.7B subgoal-and-action feasibility test."""
+"""Run the joint Qwen3.8-27B subgoal-and-action feasibility test."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ from runtime_metrics import timing_summary
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
-DEFAULT_DATA_ROOT = REPO_ROOT / "data" / "test_2.7B"
-DEFAULT_RUN_ROOT = REPO_ROOT / "runs" / "test_2.7B"
+DEFAULT_DATA_ROOT = REPO_ROOT / "data" / "test_27B"
+DEFAULT_RUN_ROOT = REPO_ROOT / "runs" / "test_27B"
 
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -156,7 +156,7 @@ def _build_engine(
     except ImportError as error:
         raise RuntimeError(
             "A recent ms-swift with Qwen3.8 support is required. Activate the "
-            "server inference environment or update ms-swift."
+            "robomme-qwen38 environment or update ms-swift."
         ) from error
 
     model, processor = get_model_processor(
@@ -241,7 +241,7 @@ def parse_args() -> argparse.Namespace:
         "--data-root",
         type=Path,
         default=DEFAULT_DATA_ROOT,
-        help="Dataset parent directory (default: data/test_2.7B).",
+        help="Dataset parent directory (default: data/test_27B).",
     )
     parser.add_argument(
         "--dataset",
@@ -249,7 +249,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Explicit JSONL path; otherwise uses "
-            "data/test_2.7B/<dataset-name>/subgoal_action_test.jsonl."
+            "data/test_27B/<dataset-name>/subgoal_action_test.jsonl."
         ),
     )
     parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
@@ -269,7 +269,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Required run name; results are written to "
-            "runs/test_2.7B/<result-name>."
+            "runs/test_27B/<result-name>."
         ),
     )
     parser.add_argument("--cuda-visible-devices", default="0")

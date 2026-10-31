@@ -1,4 +1,4 @@
-# Qwen 2.7B feasibility test
+# Qwen3.8-27B feasibility test
 
 This directory is an isolated offline experiment. It does not call RoboMME or
 MPLib actions.
@@ -23,20 +23,20 @@ Run from the repository root. `--episode-count` is applied independently to
 each selected task; no percentage split is calculated.
 
 ```bash
-python user_code/test_2.7B/build_test_dataset.py \
+python user_code/test_27B/build_test_dataset.py \
   --raw-data-path data/h5_data/merged \
   --dataset-name binfill_1 \
   --episode-count 1
 ```
 
-The default output directory is `data/test_2.7B/<dataset-name>`, so the command above
-writes `data/test_2.7B/binfill_10`.
+The default output directory is `data/test_27B/<dataset-name>`, so the command above
+writes `data/test_27B/binfill_10`.
 
 Change `--episode-count 10` to `--episode-count 20` for twenty episodes. To
 use known IDs instead of random fixed-count selection:
 
 ```bash
-python user_code/test_2.7B/build_test_dataset.py \
+python user_code/test_27B/build_test_dataset.py \
   --raw-data-path data/h5_data/merged \
   --dataset-name binfill_explicit \
   --episode-ids 6 16 22 36 42 64 66 69 75 89
@@ -71,7 +71,7 @@ At terminal completion the expected output is `next_subgoal="STOP"` and
 ## Validate without loading the model
 
 ```bash
-python user_code/test_2.7B/run_test.py \
+python user_code/test_27B/run_test.py \
   --dataset-name binfill_10 \
   --result-name binfill_10_dry_run \
   --dry-run
@@ -79,10 +79,10 @@ python user_code/test_2.7B/run_test.py \
 
 ## Run joint subgoal and action prediction
 
-Activate the server environment containing `ms-swift`, then run:
+Activate the `robomme-qwen38` environment containing `ms-swift`, then run:
 
 ```bash
-python user_code/test_2.7B/run_test.py \
+python user_code/test_27B/run_test.py \
   --dataset-name binfill_1 \
   --result-name test_1.1 \
   --cuda-visible-devices 0 \
@@ -121,7 +121,7 @@ CUDA memory caching: enabled
 
 `batch_size=1` measures true request latency rather than maximizing aggregate
 throughput. CUDA allocation caching remains enabled because disabling it is a
-debugging option that increases allocation overhead. If the server environment
+debugging option that increases allocation overhead. If `robomme-qwen38`
 does not contain FlashAttention, use `--attn-impl sdpa`; this is more compatible
 but may be slower.
 
@@ -130,7 +130,7 @@ under `inference_config`, including `enable_thinking=false`, so the effective
 test configuration can be audited afterward.
 
 `--result-name` is required for every launch. The launcher writes all test
-results under `runs/test_2.7B/<result-name>/`:
+results under `runs/test_27B/<result-name>/`:
 
 ```text
 predictions.jsonl
@@ -211,7 +211,7 @@ episode. Continuous `completed=true` predictions use the same Reporter
 debounce/retrigger rule. Override the defaults with:
 
 ```bash
-python user_code/test_2.7B/run_test.py \
+python user_code/test_27B/run_test.py \
   --dataset-name binfill_10 \
   --result-name binfill_10_joint \
   --early-tolerance-calls 1 \
@@ -279,7 +279,7 @@ To aggregate the first 30 completed BinFill episode timing files without
 waiting for the full evaluation run:
 
 ```bash
-python user_code/test_2.7B/summarize_partial_timing.py
+python user_code/test_27B/summarize_partial_timing.py
 ```
 
 The default source directory is:
@@ -293,7 +293,7 @@ Component averages are weighted over all calls using
 `sum(total_ms) / sum(call_count)`. To use another partial count or directory:
 
 ```bash
-python user_code/test_2.7B/summarize_partial_timing.py \
+python user_code/test_27B/summarize_partial_timing.py \
   --num-episodes 20 \
   --timing-dir runs/evaluation/other_run/seed0/repeat1/BinFill/timing_logs
 ```
