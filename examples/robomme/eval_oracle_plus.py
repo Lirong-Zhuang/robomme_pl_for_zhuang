@@ -682,7 +682,7 @@ def run_episode(
         goal = _task_goal(reset_info)
         record["task_goal"] = goal
         record["task_goal_candidates"] = goal_candidates
-        recorder = RolloutRecorder(video_dir, goal, fps=30)
+        recorder = RolloutRecorder(video_dir, goal, fps=30, streaming=True)
         _record_video_observations(
             recorder,
             obs,
@@ -755,18 +755,23 @@ def run_episode(
                 raise RuntimeError("Non-STOP subgoal unexpectedly resolved to no action")
 
             active_subgoal = decision.next_subgoal
+
+            def record_dense_step(step: Any) -> None:
+                observations = step[0]
+                _record_video_observations(
+                    recorder,
+                    observations,
+                    subgoal=active_subgoal,
+                )
+
             execution = adapter.execute(
                 resolved_action_name,
                 active_subgoal,
                 decision.point,
+                step_callback=record_dense_step,
             )
             action_frame_count = execution.simulator_frame_count
             recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
-            _record_video_observations(
-                recorder,
-                execution.obs_batch,
-                subgoal=active_subgoal,
-            )
             _release_dense_observation_batch(execution.obs_batch)
             gpu_monitor.sample()
             last_status = execution.status
@@ -861,7 +866,15 @@ def run_episode(
         record["traceback"] = traceback.format_exc()
     finally:
         try:
-            if recorder is not None and recorder.total_images:
+            if recorder is not None:
+                record["video_frame_count"] = recorder.frame_count
+                record["video_fps"] = recorder.fps
+                record["video_duration_seconds"] = (
+                    recorder.frame_count / recorder.fps
+                )
+            if recorder is not None and (
+                recorder.has_frames or recorder.stream_error is not None
+            ):
                 video_filename = (
                     f"{task}_ep_{episode_id}_{record['status']}_"
                     f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
@@ -879,6 +892,7 @@ def run_episode(
                 _release_dense_observation_batch(execution.obs_batch)
             if recorder is not None:
                 recorder.total_images.clear()
+                recorder.close()
             try:
                 runtime.close()
             except Exception as cleanup_error:

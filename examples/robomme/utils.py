@@ -4,6 +4,8 @@ import cv2
 import imageio
 import re
 import collections
+import uuid
+from pathlib import Path
 from typing import Tuple, Optional
 
 from mme_vla_suite.prompts import get_manager_prompt
@@ -103,12 +105,54 @@ class EpisodeState:
 
 
 class RolloutRecorder:
-    def __init__(self, save_dir: str, task_goal: str, fps: int = 30):
-        self.save_dir = save_dir
-        save_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        save_dir: str,
+        task_goal: str,
+        fps: int = 30,
+        streaming: bool = False,
+    ):
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
         self.total_images = []
         self.fps = fps
         self.task_goal = task_goal
+        self.streaming = streaming
+        self.frame_count = 0
+        self._writer = None
+        self._stream_error = None
+        self._stream_path = (
+            self.save_dir / f".rollout-{uuid.uuid4().hex}.mp4"
+            if streaming
+            else None
+        )
+
+    @property
+    def has_frames(self) -> bool:
+        return self.frame_count > 0
+
+    @property
+    def stream_error(self) -> Exception | None:
+        return self._stream_error
+
+    def _append_frame(self, frame: np.ndarray) -> None:
+        if not self.streaming:
+            self.total_images.append(frame)
+            self.frame_count += 1
+            return
+        if self._stream_error is not None:
+            return
+        try:
+            if self._writer is None:
+                self._writer = imageio.get_writer(
+                    str(self._stream_path),
+                    fps=self.fps,
+                )
+            self._writer.append_data(frame)
+            self.frame_count += 1
+        except Exception as error:
+            self._stream_error = error
+            self._close_writer()
         
     def _extract_points(self, subgoal: str):
         match = re.findall(r'<(\d+), (\d+)>', subgoal)
@@ -123,7 +167,7 @@ class RolloutRecorder:
         if is_video_demo: # add a red border
             concat_image = cv2.rectangle(concat_image, (0, 0), (concat_image.shape[1], concat_image.shape[0]), (255, 0, 0), 10)
         
-        frame_text = "Frame: " + str(len(self.total_images))
+        frame_text = "Frame: " + str(self.frame_count)
         frame_text_area = self.add_text_area(frame_text, concat_image.shape)
         
         goal_text = "Task Goal: " + self.task_goal
@@ -146,7 +190,7 @@ class RolloutRecorder:
         action_text_area = self.add_text_area(action_text, concat_image.shape)
         # Concatenate text area on top of image
         concat_image = np.concatenate([frame_text_area, goal_text_area, action_text_area, state_text_area, concat_image], axis=0)
-        self.total_images.append(concat_image)
+        self._append_frame(concat_image)
     
     def add_text_area(self, text: str, concat_image_shape: tuple):        
         # Calculate text wrapping
@@ -182,4 +226,37 @@ class RolloutRecorder:
         return text_area
              
     def save_video(self, filename: str):
-        imageio.mimsave(os.path.join(self.save_dir, filename), self.total_images, fps=self.fps)
+        final_path = self.save_dir / filename
+        if self.streaming:
+            if self._stream_error is not None:
+                raise RuntimeError(
+                    f"streaming video writer failed: {self._stream_error}"
+                ) from self._stream_error
+            if not self.has_frames:
+                raise RuntimeError("cannot save an empty streaming video")
+            self._close_writer(raise_errors=True)
+            os.replace(self._stream_path, final_path)
+            self._stream_path = None
+            return
+        imageio.mimsave(str(final_path), self.total_images, fps=self.fps)
+
+    def _close_writer(self, *, raise_errors: bool = False) -> None:
+        writer = self._writer
+        self._writer = None
+        if writer is None:
+            return
+        try:
+            writer.close()
+        except Exception:
+            if raise_errors:
+                raise
+
+    def close(self) -> None:
+        """Close an unfinished stream and remove its temporary output."""
+        self._close_writer()
+        if self._stream_path is not None:
+            try:
+                self._stream_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self._stream_path = None

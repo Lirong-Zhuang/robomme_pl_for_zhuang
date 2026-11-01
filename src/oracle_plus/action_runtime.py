@@ -36,6 +36,7 @@ def _run_with_bounded_dense_collection(
     *,
     max_retained_steps: int,
     planner_dense_step: Any,
+    step_callback: Callable[[Any], None] | None = None,
 ) -> tuple[Any, int] | int:
     """Execute a planner action while retaining only its recent native steps.
 
@@ -55,6 +56,9 @@ def _run_with_bounded_dense_collection(
         steps = planner_dense_step._output_to_steps(out)
         total_step_count += len(steps)
         retained.extend(steps)
+        if step_callback is not None:
+            for step in steps:
+                step_callback(step)
         if steps:
             _, _, terminated, truncated, info = steps[-1]
             status = info.get("status") if isinstance(info, dict) else None
@@ -303,7 +307,12 @@ class OraclePlusPlannerRuntime:
             pass
         return bool(value)
 
-    def execute(self, solve: Callable[[], Any]) -> ActionExecution:
+    def execute(
+        self,
+        solve: Callable[[], Any],
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
         if self.planner is None:
             raise RuntimeError("OraclePlusPlannerRuntime.reset() must be called first")
         from robomme.robomme_env.utils import planner_denseStep
@@ -313,6 +322,7 @@ class OraclePlusPlannerRuntime:
             solve,
             max_retained_steps=self.max_retained_steps,
             planner_dense_step=planner_denseStep,
+            step_callback=step_callback,
         )
         if collected == -1:
             raise RuntimeError("High-level action returned planning failure")
@@ -380,6 +390,8 @@ class BinFillActionAdapter:
         action_name: str,
         next_subgoal: str,
         point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
     ) -> ActionExecution:
         from robomme.robomme_env.utils.subgoal_planner_func import solve_button
         from robomme.robomme_env.utils.subgoal_planner_func import solve_pickup
@@ -399,7 +411,8 @@ class BinFillActionAdapter:
             )
             target = selected["obj"]
             execution = self.runtime.execute(
-                lambda: solve_pickup(env, planner, obj=target)
+                lambda: solve_pickup(env, planner, obj=target),
+                step_callback=step_callback,
             )
             execution.info["selected_target"] = {
                 key: value for key, value in selected.items() if key != "obj"
@@ -414,11 +427,13 @@ class BinFillActionAdapter:
                     env,
                     planner,
                     target=base.board_with_hole,
-                )
+                ),
+                step_callback=step_callback,
             )
         if action_name == "solve_button":
             return self.runtime.execute(
-                lambda: solve_button(env, planner, obj=base.button)
+                lambda: solve_button(env, planner, obj=base.button),
+                step_callback=step_callback,
             )
         raise RuntimeError(
             f"Subgoal mapper returned an unsupported BinFill action: {action_name!r}"
