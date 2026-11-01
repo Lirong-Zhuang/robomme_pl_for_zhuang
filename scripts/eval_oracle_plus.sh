@@ -38,6 +38,8 @@ VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
 RUN_NAME="test_6"
+# false resumes an existing partial run, preserving completed episodes and
+# retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false
 
 VLM_MAMBA_ENV="robomme-qwen38"
@@ -97,11 +99,6 @@ case "$OVERWRITE" in
         exit 1
         ;;
 esac
-if [[ -e "$SAVE_DIR/$RUN_NAME" && "$OVERWRITE" == "false" ]]; then
-    echo "ERROR: Result directory already exists: $SAVE_DIR/$RUN_NAME" >&2
-    echo "Set OVERWRITE=true or choose a new RUN_NAME before loading 27B." >&2
-    exit 1
-fi
 case "$VLM_INCLUDE_DESCRIPTION" in
     true) description_arg="--include-description" ;;
     false) description_arg="--no-include-description" ;;
@@ -156,6 +153,9 @@ echo "VLM endpoint: $VLM_HOST:$VLM_PORT"
 echo "Tasks: $TASKS"
 echo "VLM description output: $VLM_INCLUDE_DESCRIPTION"
 echo "Results: $SAVE_DIR/$RUN_NAME"
+if [[ -e "$SAVE_DIR/$RUN_NAME" && "$OVERWRITE" == "false" ]]; then
+    echo "Resume: enabled; completed episodes will be preserved and skipped"
+fi
 echo "VLM server log: $SERVER_LOG"
 
 export USE_HF=1

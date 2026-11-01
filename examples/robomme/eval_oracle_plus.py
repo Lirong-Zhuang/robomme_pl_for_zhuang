@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 import traceback
@@ -100,7 +101,10 @@ def parse_args() -> argparse.Namespace:
         "--overwrite",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Allow writing into an existing run directory.",
+        help=(
+            "Delete an existing run and start again. With --no-overwrite, an "
+            "existing partial run is resumed and completed episodes are skipped."
+        ),
     )
     parser.add_argument(
         "--include-description",
@@ -222,6 +226,190 @@ def _write_json(path: Path, value: Any) -> None:
         encoding="utf-8",
     )
     os.replace(temporary_path, path)
+
+
+EpisodeKey = tuple[int, str, int]
+
+
+def _episode_key(record: dict[str, Any]) -> EpisodeKey:
+    """Return the stable identity of one repeat/task/episode record."""
+
+    repeat_id = record.get("repeat_id")
+    task = record.get("task")
+    episode_id = record.get("episode_id")
+    if (
+        isinstance(repeat_id, bool)
+        or not isinstance(repeat_id, int)
+        or repeat_id < 1
+        or not isinstance(task, str)
+        or not task
+        or isinstance(episode_id, bool)
+        or not isinstance(episode_id, int)
+        or episode_id < 0
+    ):
+        raise ValueError(f"Invalid Oracle Plus episode record identity: {record!r}")
+    return repeat_id, task, episode_id
+
+
+def _load_episode_records(path: Path) -> dict[EpisodeKey, dict[str, Any]]:
+    """Load the latest canonical record for every completed/attempted episode."""
+
+    if not path.exists():
+        return {}
+    records: dict[EpisodeKey, dict[str, Any]] = {}
+    with path.open("r", encoding="utf-8") as source:
+        lines = source.readlines()
+        last_nonempty_line = max(
+            (index for index, line in enumerate(lines, start=1) if line.strip()),
+            default=0,
+        )
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                if line_number == last_nonempty_line:
+                    print(
+                        f"[oracle_plus] Ignoring interrupted trailing record in "
+                        f"{path} line {line_number}: {error}",
+                        file=sys.stderr,
+                    )
+                    break
+                raise ValueError(
+                    f"Cannot resume from malformed {path} line {line_number}: {error}"
+                ) from error
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"Cannot resume from non-object {path} line {line_number}"
+                )
+            if not isinstance(record.get("status"), str):
+                raise ValueError(
+                    f"Cannot resume from {path} line {line_number}: "
+                    "record status must be text"
+                )
+            records[_episode_key(record)] = record
+    return records
+
+
+def _ordered_episode_records(
+    records: dict[EpisodeKey, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [records[key] for key in sorted(records)]
+
+
+def _write_episode_records(
+    path: Path,
+    records: dict[EpisodeKey, dict[str, Any]],
+) -> None:
+    """Atomically persist one latest record per repeat/task/episode."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    with temporary_path.open("w", encoding="utf-8") as output:
+        for record in _ordered_episode_records(records):
+            output.write(json.dumps(_jsonable(record), ensure_ascii=False) + "\n")
+    os.replace(temporary_path, path)
+
+
+def _record_is_complete(record: dict[str, Any]) -> bool:
+    """Match the original eval: retry only records explicitly marked error."""
+
+    return record.get("status") != "error"
+
+
+def _progress_from_records(
+    records: dict[EpisodeKey, dict[str, Any]],
+) -> dict[str, dict[str, dict[str, bool | str]]]:
+    progress: dict[str, dict[str, dict[str, bool | str]]] = {}
+    for (repeat_id, task, episode_id), record in sorted(records.items()):
+        repeat_progress = progress.setdefault(f"repeat_{repeat_id}", {})
+        task_progress = repeat_progress.setdefault(task, {})
+        status = record.get("status")
+        task_progress[str(episode_id)] = True if status == "success" else str(status)
+    return progress
+
+
+def _requested_run_config(
+    *,
+    args: argparse.Namespace,
+    tasks: list[str],
+    episode_ids: list[int],
+    server_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the behavior-defining configuration used to validate a resume."""
+
+    return {
+        "schema_version": 1,
+        "tasks": tasks,
+        "episode_ids": episode_ids,
+        "num_repeats": args.num_repeats,
+        "max_steps": args.max_steps,
+        "max_decisions": args.max_decisions,
+        "history_size": args.history_size,
+        "include_description": args.include_description,
+        "prompts": {
+            task: get_prompt(
+                task,
+                include_description=args.include_description,
+            ).metadata()
+            for task in tasks
+        },
+        "model": {
+            "protocol": server_metadata.get("protocol"),
+            "model_family": server_metadata.get("model_family"),
+            "model_path": server_metadata.get("model_path"),
+            "inference_config": server_metadata.get("inference_config", {}),
+        },
+    }
+
+
+def _setup_resume_config(
+    *,
+    run_dir: Path,
+    requested_config: dict[str, Any],
+    records: dict[EpisodeKey, dict[str, Any]],
+    requested_keys: set[EpisodeKey],
+) -> None:
+    """Persist a run contract and reject mixed-configuration resumes."""
+
+    unexpected = sorted(set(records) - requested_keys)
+    if unexpected:
+        raise ValueError(
+            "Cannot resume because episodes.jsonl contains entries outside the "
+            f"requested run: {unexpected[:10]}"
+        )
+
+    prompt_metadata = requested_config["prompts"]
+    for key, record in records.items():
+        expected_prompt = prompt_metadata[key[1]]
+        if record.get("prompt") != expected_prompt:
+            raise ValueError(
+                "Cannot resume with different prompt configuration for "
+                f"repeat/task/episode={key}: existing={record.get('prompt')}, "
+                f"requested={expected_prompt}"
+            )
+
+    config_path = run_dir / "run_config.json"
+    if config_path.exists():
+        existing_config = json.loads(config_path.read_text(encoding="utf-8"))
+        if existing_config != requested_config:
+            raise ValueError(
+                "Cannot resume an Oracle Plus run with different settings. "
+                f"Existing configuration: {existing_config}; requested: "
+                f"{requested_config}. Choose a new RUN_NAME or use overwrite."
+            )
+        return
+
+    progress_path = run_dir / "progress.json"
+    if progress_path.exists() and not records:
+        existing_progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        if existing_progress:
+            raise ValueError(
+                "Cannot safely resume: progress.json contains results but "
+                "episodes.jsonl is missing or empty."
+            )
+    _write_json(config_path, requested_config)
 
 
 def _write_vlm_log(path: Path, value: Any) -> None:
@@ -718,10 +906,12 @@ def main() -> None:
     episode_ids = selected_episode_ids or list(range(args.num_episodes))
 
     run_dir = (args.save_dir / args.run_name).expanduser().resolve()
-    if run_dir.exists() and not args.overwrite:
-        raise FileExistsError(
-            f"Run directory already exists: {run_dir}. Use --overwrite to continue."
-        )
+    resuming = run_dir.exists() and not args.overwrite
+    if run_dir.exists() and args.overwrite:
+        shutil.rmtree(run_dir)
+        print(f"[oracle_plus] Overwriting the evaluation at {run_dir}")
+    elif resuming:
+        print(f"[oracle_plus] Resuming the evaluation at {run_dir}")
     run_dir.mkdir(parents=True, exist_ok=True)
     eval_gpu_monitor = GpuMemoryMonitor(
         os.environ.get("CUDA_VISIBLE_DEVICES", "0")
@@ -733,17 +923,62 @@ def main() -> None:
             f"{model.server_metadata!r}"
         )
 
-    records: list[dict[str, Any]] = []
-    repeat_runtime: dict[int, dict[str, Any]] = {}
-    progress_state: dict[str, dict[str, dict[str, bool | str]]] = {}
     predictions_path = run_dir / "episodes.jsonl"
+    records_by_key = _load_episode_records(predictions_path)
+    requested_keys = {
+        (repeat_id, task, episode_id)
+        for repeat_id in range(1, args.num_repeats + 1)
+        for task in tasks
+        for episode_id in episode_ids
+    }
+    requested_config = _requested_run_config(
+        args=args,
+        tasks=tasks,
+        episode_ids=episode_ids,
+        server_metadata=model.server_metadata,
+    )
+    _setup_resume_config(
+        run_dir=run_dir,
+        requested_config=requested_config,
+        records=records_by_key,
+        requested_keys=requested_keys,
+    )
+    completed_keys = {
+        key for key, record in records_by_key.items() if _record_is_complete(record)
+    }
+    if resuming:
+        retry_count = len(records_by_key) - len(completed_keys)
+        print(
+            f"[oracle_plus] Resume found {len(completed_keys)} completed episode "
+            f"run(s) and {retry_count} error episode run(s) to retry."
+        )
+
+    total_episode_runs = len(requested_keys)
+    if (
+        len(completed_keys) == total_episode_runs
+        and (run_dir / "summary.json").exists()
+    ):
+        print(
+            f"[oracle_plus] Evaluation is already complete at "
+            f"{run_dir / 'summary.json'}; leaving existing results unchanged."
+        )
+        model.close()
+        eval_gpu_monitor.close()
+        return
+
+    repeat_runtime: dict[int, dict[str, Any]] = {}
+    progress_state = _progress_from_records(records_by_key)
     eval_log_path = run_dir / "eval.log"
-    total_episode_runs = args.num_repeats * len(tasks) * len(episode_ids)
     terminal_stderr = sys.stderr
-    success_count = 0
+    success_count = sum(
+        record.get("status") == "success"
+        for key, record in records_by_key.items()
+        if key in completed_keys
+    )
     error_count = 0
     progress = tqdm(
         total=total_episode_runs,
+        initial=len(completed_keys),
         desc="oracle_plus",
         unit="episode",
         dynamic_ncols=True,
@@ -755,18 +990,26 @@ def main() -> None:
             "{rate_fmt}] {postfix}"
         ),
     )
-    with (
-        predictions_path.open("w", encoding="utf-8") as output,
-        eval_log_path.open("a", encoding="utf-8") as eval_log,
-    ):
+    with eval_log_path.open("a", encoding="utf-8") as eval_log:
         for repeat_id in range(1, args.num_repeats + 1):
+            pending_repeat_keys = {
+                (repeat_id, task, episode_id)
+                for task in tasks
+                for episode_id in episode_ids
+                if (repeat_id, task, episode_id) not in completed_keys
+            }
+            if not pending_repeat_keys:
+                continue
             eval_gpu_sample, eval_gpu_start = eval_gpu_monitor.begin_interval()
             server_gpu_start = model.start_repeat(repeat_id)["gpu_start"]
             repeat_key = f"repeat_{repeat_id}"
-            progress_state[repeat_key] = {}
+            progress_state.setdefault(repeat_key, {})
             for task in tasks:
-                progress_state[repeat_key][task] = {}
+                progress_state[repeat_key].setdefault(task, {})
                 for episode_id in episode_ids:
+                    episode_key = (repeat_id, task, episode_id)
+                    if episode_key in completed_keys:
+                        continue
                     with redirect_stdout(eval_log), redirect_stderr(eval_log):
                         record = run_episode(
                             task=task,
@@ -777,11 +1020,8 @@ def main() -> None:
                             gpu_monitor=eval_gpu_monitor,
                             run_dir=run_dir,
                         )
-                    records.append(record)
-                    output.write(
-                        json.dumps(_jsonable(record), ensure_ascii=False) + "\n"
-                    )
-                    output.flush()
+                    records_by_key[episode_key] = record
+                    _write_episode_records(predictions_path, records_by_key)
                     eval_log.flush()
                     progress_state[repeat_key][task][str(episode_id)] = (
                         True
@@ -791,6 +1031,8 @@ def main() -> None:
                     _write_json(run_dir / "progress.json", progress_state)
                     success_count += int(record["status"] == "success")
                     error_count += int(record["status"] == "error")
+                    if _record_is_complete(record):
+                        completed_keys.add(episode_key)
                     progress.set_postfix(
                         success=success_count,
                         error=error_count,
@@ -805,10 +1047,13 @@ def main() -> None:
                     eval_start=eval_gpu_start,
                     server_interval=server_gpu_interval,
                     eval_interval=eval_gpu_interval,
-                )
+                ),
+                "measurement_scope": "current_invocation_resume_segment",
+                "measured_episode_runs": len(pending_repeat_keys),
             }
     progress.close()
 
+    records = _ordered_episode_records(records_by_key)
     successes = sum(record["status"] == "success" for record in records)
     vlm_step_times_ms = [
         float(decision["vlm_latency_ms"])
@@ -849,7 +1094,19 @@ def main() -> None:
                     else 0.0
                 ),
                 "gpu_and_timing": {
-                    **repeat_runtime[repeat_id],
+                    **repeat_runtime.get(
+                        repeat_id,
+                        {
+                            "gpu": {
+                                "error": (
+                                    "Repeat was completed by an earlier invocation; "
+                                    "repeat-level GPU interval is unavailable here."
+                                )
+                            },
+                            "measurement_scope": "previous_invocation",
+                            "measured_episode_runs": 0,
+                        },
+                    ),
                     "vlm_single_step": latency_summary(repeat_vlm_times_ms),
                     "program_single_step": latency_summary(
                         repeat_program_times_ms

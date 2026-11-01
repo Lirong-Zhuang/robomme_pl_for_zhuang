@@ -146,6 +146,13 @@ record per episode plus `summary.json`; the exact VLM input images are retained
 beside each episode log for auditing. The VLM server log is stored under
 `runs/evaluation/oracle-plus/server_logs/`.
 
+With `OVERWRITE=false`, rerunning the launcher with the same run name resumes a
+partial evaluation: completed repeat/task/episode entries in `episodes.jsonl`
+are preserved and skipped, while entries whose latest status is `error` are
+retried. `run_config.json` prevents results from different model, prompt, or
+evaluation settings from being mixed. Set `OVERWRITE=true` only to delete the
+existing run directory and start that run name again from scratch.
+
 During evaluation the terminal shows one global episode progress bar. Detailed
 planner output is redirected to `<run-name>/eval.log`. Each task/repeat stores
 annotated rollout videos under `videos/`, one complete raw/parsed VLM trace per
