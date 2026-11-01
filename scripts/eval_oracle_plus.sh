@@ -37,7 +37,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_6"
+RUN_NAME="test_8"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false
@@ -193,6 +193,7 @@ done
 
 echo "Oracle Plus VLM server is ready. Starting RoboMME evaluation..."
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_ORACLE_PLUS" \
+PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
 PYTHONPATH="$EVAL_PYTHONPATH" \
 "$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
     python "$REPO_ROOT/examples/robomme/eval_oracle_plus.py" "${args[@]}"

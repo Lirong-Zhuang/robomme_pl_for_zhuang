@@ -13,6 +13,7 @@ Direct invocation inside the server environment:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import shutil
@@ -46,7 +47,9 @@ from oracle_plus.prompts import get_point_action_names
 from oracle_plus.prompts import get_prompt
 from oracle_plus.prompts import resolve_action_name
 from oracle_plus.runtime_metrics import GpuMemoryMonitor
+from oracle_plus.runtime_metrics import cgroup_memory_snapshot
 from oracle_plus.runtime_metrics import latency_summary
+from oracle_plus.runtime_metrics import process_memory_snapshot
 from oracle_plus.vlm import SubgoalDecision
 from oracle_plus.vlm_client import VLMSubgoalPlannerClient
 from robomme.env_record_wrapper import BenchmarkEnvBuilder
@@ -544,6 +547,14 @@ def _record_video_observations(
     return frame_count
 
 
+def _release_dense_observation_batch(observations: dict[str, Any]) -> None:
+    """Release dense native-step arrays after retaining request/video frames."""
+
+    for value in observations.values():
+        if isinstance(value, list):
+            value.clear()
+
+
 def _filename_text(value: str, *, limit: int = 100) -> str:
     normalized = "_".join(value.strip().split())
     safe = "".join(
@@ -660,6 +671,7 @@ def run_episode(
         ).metadata(),
     }
     try:
+        execution = None
         obs, reset_info = runtime.reset()
         goal_candidates = _task_goal_candidates(reset_info)
         goal = _task_goal(reset_info)
@@ -743,21 +755,22 @@ def run_episode(
                 active_subgoal,
                 decision.point,
             )
+            action_frame_count = len(
+                execution.obs_batch.get("front_rgb_list", [])
+            )
+            recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
             _record_video_observations(
                 recorder,
                 execution.obs_batch,
                 subgoal=active_subgoal,
             )
+            _release_dense_observation_batch(execution.obs_batch)
             gpu_monitor.sample()
             last_status = execution.status
-            action_frame_count = len(
-                execution.obs_batch.get("front_rgb_list", [])
-            )
             current_simulator_frame = _simulator_frame(
                 execution.info,
                 fallback=current_simulator_frame + action_frame_count,
             )
-            recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
             if not recent_pairs:
                 recent_pairs = [current_pair]
                 recent_pair_paths = [current_pair_paths]
@@ -844,20 +857,36 @@ def run_episode(
         record["error"] = f"{type(error).__name__}: {error}"
         record["traceback"] = traceback.format_exc()
     finally:
-        if recorder is not None and recorder.total_images:
-            video_filename = (
-                f"{task}_ep_{episode_id}_{record['status']}_"
-                f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
-            )
-            video_path = video_dir / video_filename
-            try:
-                recorder.save_video(video_filename)
-                record["artifacts"]["video"] = str(video_path.resolve())
-            except Exception as video_error:
-                record["video_error"] = (
-                    f"{type(video_error).__name__}: {video_error}"
+        try:
+            if recorder is not None and recorder.total_images:
+                video_filename = (
+                    f"{task}_ep_{episode_id}_{record['status']}_"
+                    f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
                 )
-        runtime.close()
+                video_path = video_dir / video_filename
+                try:
+                    recorder.save_video(video_filename)
+                    record["artifacts"]["video"] = str(video_path.resolve())
+                except Exception as video_error:
+                    record["video_error"] = (
+                        f"{type(video_error).__name__}: {video_error}"
+                    )
+        finally:
+            if execution is not None:
+                _release_dense_observation_batch(execution.obs_batch)
+            if recorder is not None:
+                recorder.total_images.clear()
+            try:
+                runtime.close()
+            except Exception as cleanup_error:
+                record["cleanup_error"] = (
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+            gc.collect()
+            record["memory_after_cleanup"] = {
+                "eval_process": process_memory_snapshot(),
+                "cgroup": cgroup_memory_snapshot(),
+            }
 
     output_path = episode_dir / "episode.json"
     _write_vlm_log(
@@ -1033,9 +1062,14 @@ def main() -> None:
                     error_count += int(record["status"] == "error")
                     if _record_is_complete(record):
                         completed_keys.add(episode_key)
+                    memory = record.get("memory_after_cleanup", {})
+                    eval_memory = memory.get("eval_process", {})
+                    cgroup_memory = memory.get("cgroup", {})
                     progress.set_postfix(
                         success=success_count,
                         error=error_count,
+                        rss_gb=eval_memory.get("rss_gb"),
+                        cgroup_gb=cgroup_memory.get("current_gb"),
                         refresh=False,
                     )
                     progress.update(1)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 
@@ -22,6 +23,64 @@ def latency_summary(values_ms: list[float]) -> dict[str, Any]:
             round(sum(values_ms) / len(values_ms), 3) if values_ms else None
         ),
     }
+
+
+def process_memory_snapshot() -> dict[str, Any]:
+    """Return current/peak host RAM for this process from Linux procfs."""
+
+    status_path = Path("/proc/self/status")
+    try:
+        values: dict[str, int] = {}
+        for line in status_path.read_text(encoding="utf-8").splitlines():
+            key, separator, raw_value = line.partition(":")
+            if separator and key in {"VmRSS", "VmHWM"}:
+                values[key] = int(raw_value.split()[0]) * 1024
+        return {
+            "rss_gb": _gib(values.get("VmRSS")),
+            "peak_rss_gb": _gib(values.get("VmHWM")),
+        }
+    except (OSError, ValueError, IndexError) as error:
+        return {"error": f"{type(error).__name__}: {error}"}
+
+
+def cgroup_memory_snapshot() -> dict[str, Any]:
+    """Return current cgroup RAM and OOM counters when cgroup v2 is available."""
+
+    try:
+        cgroup_path = None
+        for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
+            hierarchy, _, relative_path = line.partition("::")
+            if hierarchy == "0" and relative_path:
+                cgroup_path = Path("/sys/fs/cgroup") / relative_path.lstrip("/")
+                break
+        if cgroup_path is None:
+            return {"error": "cgroup v2 path is unavailable"}
+
+        def read_counter(name: str) -> int | str | None:
+            path = cgroup_path / name
+            if not path.exists():
+                return None
+            value = path.read_text(encoding="utf-8").strip()
+            return value if value == "max" else int(value)
+
+        events: dict[str, int] = {}
+        events_path = cgroup_path / "memory.events"
+        if events_path.exists():
+            for line in events_path.read_text(encoding="utf-8").splitlines():
+                key, value = line.split(maxsplit=1)
+                events[key] = int(value)
+        current = read_counter("memory.current")
+        peak = read_counter("memory.peak")
+        maximum = read_counter("memory.max")
+        return {
+            "current_gb": _gib(current) if isinstance(current, int) else current,
+            "peak_gb": _gib(peak) if isinstance(peak, int) else peak,
+            "max_gb": _gib(maximum) if isinstance(maximum, int) else maximum,
+            "oom": events.get("oom"),
+            "oom_kill": events.get("oom_kill"),
+        }
+    except (OSError, ValueError, IndexError) as error:
+        return {"error": f"{type(error).__name__}: {error}"}
 
 
 class GpuMemoryMonitor:

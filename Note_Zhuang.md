@@ -128,7 +128,7 @@ choices.
 | Target grounding | VLM pixel `[y, x]`; nearest projected candidate object, matching Oracle Planner |
 | Views | Current overall + wrist pair; follow-up temporal window uses up to three pairs |
 | Current task coverage | `BinFill` only |
-| Logs | Prompts, image paths, raw/parsed response, selected function, execution info, final status, other-process/eval GPU memory, VLM single-step latency, and VLM-to-mapped-action request time |
+| Logs | Prompts, image paths, raw/parsed response, selected function, execution info, final status, eval-process RSS/cgroup OOM counters, other-process/eval GPU memory, VLM single-step latency, and VLM-to-mapped-action request time |
 
 Run the evaluation from the repository root with:
 

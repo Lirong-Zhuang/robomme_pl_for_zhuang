@@ -259,8 +259,18 @@ class OraclePlusPlannerRuntime:
         )
 
     def close(self) -> None:
-        if self.env is not None:
-            self.env.close()
+        env = self.env
+        try:
+            if env is not None:
+                env.close()
+        finally:
+            # Match the original EnvRunner.close_env lifecycle: do not leave the
+            # MPLib planner holding an environment/native scene across episodes.
+            self.planner = None
+            self.env = None
+            self.front_camera_intrinsic = None
+            self.front_camera_extrinsic = None
+            self.front_image_shape = None
 
 
 class BinFillActionAdapter:
