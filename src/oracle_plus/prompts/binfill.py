@@ -55,7 +55,7 @@ POINT_ACTION_NAMES: tuple[str, ...] = ("solve_pickup",)
 
 PROMPT_WITH_DESCRIPTION = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_point_v3_with_description",
+    version="binfill_subgoal_point_v4_sliding_window_with_description",
     include_description=True,
     system_prompt=build_system_prompt(
         subgoals=SUBGOALS,
@@ -67,7 +67,7 @@ PROMPT_WITH_DESCRIPTION = TaskPromptSpec(
 
 PROMPT_WITHOUT_DESCRIPTION = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_point_v3_without_description",
+    version="binfill_subgoal_point_v4_sliding_window_without_description",
     include_description=False,
     system_prompt=build_system_prompt(
         subgoals=SUBGOALS,

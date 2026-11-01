@@ -101,17 +101,14 @@ The history of previously active subgoals is: {history}
 The current subgoal is: {current_subgoal}
 The overall image resolution is height={image_height}, width={image_width} pixels.
 
-Observation before executing the current subgoal:
-  Overall image: <image>
-  Wrist image: <image>
-Recent paired observations after execution, oldest to newest:
+Temporal paired observations, oldest to newest:
 {observation_lines}
 
-Compare the pre-execution pair with the recent temporal observations. Do not infer
-success merely because the robot stopped moving. Decide whether the current subgoal
-is complete, then return the subgoal that should be active now. If incomplete, keep
-the same subgoal. Any target point must refer to the newest overall image in original
-pixel coordinates. Do not use normalized 0-1000 coordinates.
+Use the temporal changes across these observations to decide whether the current
+subgoal is complete; do not infer success merely because the robot stopped moving.
+Then return the subgoal that should be active now. If incomplete, keep the same
+subgoal. Any target point must refer to the newest overall image in original pixel
+coordinates. Do not use normalized 0-1000 coordinates.
 Start directly with the JSON object. Output JSON only.
 """
 

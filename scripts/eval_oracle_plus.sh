@@ -12,7 +12,7 @@ cd "$REPO_ROOT"
 # robomme-qwen38, while RoboMME and MPLib run from the robomme environment.
 TASKS="BinFill"
 EPISODE_IDS=""
-NUM_EPISODES=50
+NUM_EPISODES=1
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
 # tied to each episode's test metadata; this measures repeated-run variance.
 NUM_REPEATS=1
@@ -22,6 +22,8 @@ NUM_REPEATS=1
 MAX_STEPS=3000
 MAX_DECISIONS=50
 HISTORY_SIZE=3
+# Sample VLM temporal observations at this native simulator-frame interval.
+HISTORY_STRIDE=16
 # true: use the prompt that requires a visual description in every VLM output.
 # false: use the compact prompt with completed, next_subgoal, and point only.
 VLM_INCLUDE_DESCRIPTION=true
@@ -40,7 +42,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_10"
+RUN_NAME="test_13"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false
@@ -121,6 +123,7 @@ args=(
     --max-steps "$MAX_STEPS"
     --max-decisions "$MAX_DECISIONS"
     --history-size "$HISTORY_SIZE"
+    --history-stride "$HISTORY_STRIDE"
     --save-dir "$SAVE_DIR"
     --run-name "$RUN_NAME"
     "$overwrite_arg"

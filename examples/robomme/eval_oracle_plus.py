@@ -20,6 +20,7 @@ import shutil
 import sys
 import time
 import traceback
+from collections import deque
 from contextlib import redirect_stderr
 from contextlib import redirect_stdout
 from dataclasses import asdict
@@ -98,6 +99,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=1300)
     parser.add_argument("--max-decisions", type=int, default=20)
     parser.add_argument("--history-size", type=int, default=3)
+    parser.add_argument(
+        "--history-stride",
+        type=int,
+        default=16,
+        help="Native simulator-frame spacing between temporal VLM observations.",
+    )
     parser.add_argument("--save-dir", type=Path, default=Path("runs/evaluation/oracle-plus"))
     parser.add_argument("--run-name", type=_safe_name, default="oracle_plus_27b.1")
     parser.add_argument(
@@ -152,50 +159,81 @@ def _current_pair(obs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     return _to_rgb(obs["front_rgb_list"]), _to_rgb(obs["wrist_rgb_list"])
 
 
-def _recent_pairs(
-    obs_batch: dict[str, list[Any]],
-    limit: int,
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    fronts = obs_batch.get("front_rgb_list", [])
-    wrists = obs_batch.get("wrist_rgb_list", [])
-    if not isinstance(fronts, list):
-        fronts = [fronts]
-    if not isinstance(wrists, list):
-        wrists = [wrists]
-    count = min(len(fronts), len(wrists))
-    if count == 0:
+ObservationPair = tuple[np.ndarray, np.ndarray]
+TimedObservation = tuple[int, ObservationPair]
+
+
+def _sample_temporal_window(
+    observations: deque[TimedObservation],
+    *,
+    history_size: int,
+    history_stride: int,
+) -> list[TimedObservation]:
+    """Sample a tail-aligned temporal window from the native-frame ring.
+
+    For example, a latest frame of 132 with size=3 and stride=16 yields
+    frames 100, 116, and 132. If the episode is too young to fill every target,
+    return the available distinct observations in chronological order.
+    """
+    if not observations:
         return []
-    indices = list(range(max(0, count - limit), count))
-    return [(_to_rgb(fronts[index]), _to_rgb(wrists[index])) for index in indices]
+    by_frame = {frame: pair for frame, pair in observations}
+    available_frames = sorted(by_frame)
+    end_frame = available_frames[-1]
+    target_frames = [
+        end_frame - history_stride * offset
+        for offset in range(history_size - 1, -1, -1)
+    ]
+    selected_frames: list[int] = []
+    for target in target_frames:
+        eligible = [frame for frame in available_frames if frame <= target]
+        if not eligible:
+            continue
+        frame = eligible[-1]
+        if frame not in selected_frames:
+            selected_frames.append(frame)
+    if end_frame not in selected_frames:
+        selected_frames.append(end_frame)
+    selected_frames = selected_frames[-history_size:]
+    return [(frame, by_frame[frame]) for frame in selected_frames]
 
 
-def _write_pair(
+def _prepare_episode_image_directories(episode_dir: Path) -> None:
+    """Remove stale VLM-call image folders when retrying one episode."""
+    for child in episode_dir.iterdir():
+        if child.is_dir() and (
+            child.name.startswith("call_") or child.name in {"overall", "wrist"}
+        ):
+            shutil.rmtree(child)
+
+
+def _write_vlm_call_images(
     episode_dir: Path,
-    step_index: int,
-    pair: tuple[np.ndarray, np.ndarray],
+    *,
+    call_index: int,
+    observations: list[TimedObservation],
 ) -> list[str]:
-    overall_dir = episode_dir / "overall"
-    wrist_dir = episode_dir / "wrist"
+    """Save exactly the paired images supplied to one VLM call."""
+    call_dir = episode_dir / f"call_{call_index}"
+    overall_dir = call_dir / "overall"
+    wrist_dir = call_dir / "wrist"
     overall_dir.mkdir(parents=True, exist_ok=True)
     wrist_dir.mkdir(parents=True, exist_ok=True)
-    overall_path = overall_dir / f"step_{step_index}.png"
-    wrist_path = wrist_dir / f"step_{step_index}.png"
-    iio.imwrite(overall_path, pair[0])
-    iio.imwrite(wrist_path, pair[1])
-    return [str(overall_path.resolve()), str(wrist_path.resolve())]
+    for image_dir in (overall_dir, wrist_dir):
+        for stale_path in image_dir.glob("*.png"):
+            stale_path.unlink()
 
-
-def _write_observation_steps(
-    episode_dir: Path,
-    pairs: list[tuple[np.ndarray, np.ndarray]],
-    *,
-    start_step: int,
-) -> tuple[list[list[str]], int]:
-    paths_by_step = [
-        _write_pair(episode_dir, start_step + offset, pair)
-        for offset, pair in enumerate(pairs)
-    ]
-    return paths_by_step, start_step + len(pairs)
+    image_paths: list[str] = []
+    for position, (simulator_frame, pair) in enumerate(observations):
+        filename = f"obs_{position}_frame_{simulator_frame}.png"
+        overall_path = overall_dir / filename
+        wrist_path = wrist_dir / filename
+        iio.imwrite(overall_path, pair[0])
+        iio.imwrite(wrist_path, pair[1])
+        image_paths.extend(
+            [str(overall_path.resolve()), str(wrist_path.resolve())]
+        )
+    return image_paths
 
 
 def _jsonable(value: Any) -> Any:
@@ -343,13 +381,14 @@ def _requested_run_config(
     """Build the behavior-defining configuration used to validate a resume."""
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
         "max_steps": args.max_steps,
         "max_decisions": args.max_decisions,
         "history_size": args.history_size,
+        "history_stride": args.history_stride,
         "include_description": args.include_description,
         "prompts": {
             task: get_prompt(
@@ -434,7 +473,9 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "step": decision_record["step"],
+        "call_index": decision_record["call_index"],
         "simulator_frame": decision_record["simulator_frame"],
+        "observation_frames": decision_record["observation_frames"],
         "messages": decision_record["messages"],
         "images": decision_record["images"],
         "raw_response": decision_record["raw_response"],
@@ -648,13 +689,16 @@ def run_episode(
         env,
         task,
         gui_render=False,
-        max_retained_steps=args.history_size,
+        # Temporal VLM sampling is maintained separately by a bounded native-
+        # frame ring; the runtime itself only needs the final action step.
+        max_retained_steps=1,
     )
     repeat_dir = run_dir / task / f"repeat_{repeat_id}"
     episode_dir = repeat_dir / f"ep_{episode_id}"
     video_dir = repeat_dir / "videos"
     vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
     episode_dir.mkdir(parents=True, exist_ok=True)
+    _prepare_episode_image_directories(episode_dir)
     recorder: RolloutRecorder | None = None
     record: dict[str, Any] = {
         "task": task,
@@ -696,16 +740,19 @@ def run_episode(
                 f"adapter={adapter.point_actions}"
             )
         current_pair = _current_pair(obs)
-        image_step = 0
-        initial_pair_paths, image_step = _write_observation_steps(
-            episode_dir,
-            [current_pair],
-            start_step=image_step,
+        current_simulator_frame = _simulator_frame(reset_info, fallback=0)
+        raw_window_size = (args.history_size - 1) * args.history_stride + 1
+        native_observation_ring: deque[TimedObservation] = deque(
+            [(current_simulator_frame, current_pair)],
+            maxlen=raw_window_size,
         )
-        current_pair_paths = initial_pair_paths[0]
-        current_image_step = 0
-        current_simulator_frame = 0
-        initial_paths = list(current_pair_paths)
+        native_frame_cursor = current_simulator_frame
+        initial_window = [(current_simulator_frame, current_pair)]
+        initial_paths = _write_vlm_call_images(
+            episode_dir,
+            call_index=0,
+            observations=initial_window,
+        )
         messages = build_messages(
             task=task,
             call_type="initial",
@@ -728,8 +775,10 @@ def run_episode(
         gpu_monitor.sample()
         record["decisions"].append(
             {
-                "step": current_image_step,
+                "step": 0,
+                "call_index": 0,
                 "simulator_frame": current_simulator_frame,
+                "observation_frames": [current_simulator_frame],
                 "decision_index": 0,
                 "call_type": "initial",
                 "messages": messages,
@@ -757,11 +806,20 @@ def run_episode(
             active_subgoal = decision.next_subgoal
 
             def record_dense_step(step: Any) -> None:
+                nonlocal native_frame_cursor
                 observations = step[0]
                 _record_video_observations(
                     recorder,
                     observations,
                     subgoal=active_subgoal,
+                )
+                step_info = step[4] if len(step) > 4 else {}
+                native_frame_cursor = _simulator_frame(
+                    step_info if isinstance(step_info, dict) else {},
+                    fallback=native_frame_cursor + 1,
+                )
+                native_observation_ring.append(
+                    (native_frame_cursor, _current_pair(observations))
                 )
 
             execution = adapter.execute(
@@ -771,7 +829,6 @@ def run_episode(
                 step_callback=record_dense_step,
             )
             action_frame_count = execution.simulator_frame_count
-            recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
             _release_dense_observation_batch(execution.obs_batch)
             gpu_monitor.sample()
             last_status = execution.status
@@ -779,18 +836,18 @@ def run_episode(
                 execution.info,
                 fallback=current_simulator_frame + action_frame_count,
             )
-            if not recent_pairs:
-                recent_pairs = [current_pair]
-                recent_pair_paths = [current_pair_paths]
-                current_image_step_after = current_image_step
-            else:
-                recent_pair_paths, image_step = _write_observation_steps(
-                    episode_dir,
-                    recent_pairs,
-                    start_step=image_step,
+            if native_observation_ring:
+                frame_offset = (
+                    current_simulator_frame - native_observation_ring[-1][0]
                 )
-                current_image_step_after = image_step - 1
-            current_pair_after = recent_pairs[-1]
+                if frame_offset:
+                    shifted_observations = [
+                        (frame + frame_offset, pair)
+                        for frame, pair in native_observation_ring
+                    ]
+                    native_observation_ring.clear()
+                    native_observation_ring.extend(shifted_observations)
+                native_frame_cursor = current_simulator_frame
             record["decisions"][-1]["execution"] = {
                 "resolved_action_name": resolved_action_name,
                 "next_subgoal": active_subgoal,
@@ -804,9 +861,20 @@ def run_episode(
                 record["status"] = execution.status
                 break
 
-            image_paths = list(current_pair_paths)
-            for pair_paths in recent_pair_paths:
-                image_paths.extend(pair_paths)
+            temporal_window = _sample_temporal_window(
+                native_observation_ring,
+                history_size=args.history_size,
+                history_stride=args.history_stride,
+            )
+            if not temporal_window:
+                temporal_window = [(current_simulator_frame, current_pair)]
+            observation_frames = [frame for frame, _ in temporal_window]
+            current_pair_after = temporal_window[-1][1]
+            image_paths = _write_vlm_call_images(
+                episode_dir,
+                call_index=decision_index,
+                observations=temporal_window,
+            )
             messages = build_messages(
                 task=task,
                 call_type="followup",
@@ -814,7 +882,7 @@ def run_episode(
                 include_description=args.include_description,
                 history_subgoals=history,
                 current_subgoal=active_subgoal,
-                observation_count=len(recent_pairs),
+                observation_count=len(temporal_window),
                 overall_image_shape=current_pair_after[0].shape[:2],
             )
             (
@@ -839,8 +907,10 @@ def run_episode(
                 history.append(active_subgoal)
             record["decisions"].append(
                 {
-                    "step": current_image_step_after,
+                    "step": decision_index,
+                    "call_index": decision_index,
                     "simulator_frame": current_simulator_frame,
+                    "observation_frames": observation_frames,
                     "decision_index": decision_index,
                     "call_type": "followup",
                     "messages": messages,
@@ -856,8 +926,6 @@ def run_episode(
             decision = next_decision
             resolved_action_name = next_resolved_action_name
             current_pair = current_pair_after
-            current_pair_paths = recent_pair_paths[-1]
-            current_image_step = current_image_step_after
         else:
             record["status"] = "decision_limit"
     except Exception as error:
@@ -944,9 +1012,10 @@ def main() -> None:
         or args.num_repeats < 1
         or args.max_decisions < 1
         or args.history_size < 1
+        or args.history_stride < 1
     ):
         raise ValueError(
-            "Episode, repeat, decision, and history counts must all be positive"
+            "Episode, repeat, decision, history, and stride counts must all be positive"
         )
     selected_episode_ids = _episode_ids(args.episode_ids)
     episode_ids = selected_episode_ids or list(range(args.num_episodes))
