@@ -24,6 +24,7 @@ from collections import deque
 from contextlib import redirect_stderr
 from contextlib import redirect_stdout
 from dataclasses import asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,9 @@ from oracle_plus.vlm import SubgoalDecision
 from oracle_plus.vlm_client import VLMSubgoalPlannerClient
 from robomme.env_record_wrapper import BenchmarkEnvBuilder
 from utils import RolloutRecorder
+
+
+MAX_PICKUP_POINT_ATTEMPTS = 3
 
 
 def _csv(value: str) -> list[str]:
@@ -381,7 +385,7 @@ def _requested_run_config(
     """Build the behavior-defining configuration used to validate a resume."""
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
@@ -389,6 +393,7 @@ def _requested_run_config(
         "max_decisions": args.max_decisions,
         "history_size": args.history_size,
         "history_stride": args.history_stride,
+        "pickup_point_max_attempts": MAX_PICKUP_POINT_ATTEMPTS,
         "include_description": args.include_description,
         "prompts": {
             task: get_prompt(
@@ -436,10 +441,27 @@ def _setup_resume_config(
     if config_path.exists():
         existing_config = json.loads(config_path.read_text(encoding="utf-8"))
         if existing_config != requested_config:
-            raise ValueError(
-                "Cannot resume an Oracle Plus run with different settings. "
-                f"Existing configuration: {existing_config}; requested: "
-                f"{requested_config}. Choose a new RUN_NAME or use overwrite."
+            existing_base = dict(existing_config)
+            requested_base = dict(requested_config)
+            existing_schema = existing_base.pop("schema_version", None)
+            requested_schema = requested_base.pop("schema_version", None)
+            existing_base.pop("pickup_point_max_attempts", None)
+            requested_base.pop("pickup_point_max_attempts", None)
+            retry_policy_only_upgrade = (
+                existing_schema == 2
+                and requested_schema == 3
+                and existing_base == requested_base
+            )
+            if not retry_policy_only_upgrade:
+                raise ValueError(
+                    "Cannot resume an Oracle Plus run with different settings. "
+                    f"Existing configuration: {existing_config}; requested: "
+                    f"{requested_config}. Choose a new RUN_NAME or use overwrite."
+                )
+            _write_json(config_path, requested_config)
+            print(
+                "[oracle_plus] Upgraded run config to schema 3: pickup decisions "
+                "missing point now receive up to three VLM attempts"
             )
         return
 
@@ -481,6 +503,8 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
         "raw_response": decision_record["raw_response"],
         "decision": decision_record["decision"],
         "resolved_action_name": decision_record["resolved_action_name"],
+        "vlm_attempts": decision_record.get("vlm_attempts", []),
+        "validation_error": decision_record.get("validation_error"),
     }
 
 
@@ -640,6 +664,10 @@ def _infer(
     )
 
 
+class MissingPickupPointError(ValueError):
+    """A pickup decision omitted its required target point."""
+
+
 def _resolve_decision_action(task: str, decision: SubgoalDecision) -> str | None:
     for planned_subgoal in decision.subgoal_sequence:
         resolve_action_name(task, planned_subgoal)
@@ -650,7 +678,7 @@ def _resolve_decision_action(task: str, decision: SubgoalDecision) -> str | None
         return None
     requires_point = action_name in get_point_action_names(task)
     if requires_point and decision.point is None:
-        raise ValueError(
+        raise MissingPickupPointError(
             f"Subgoal {decision.next_subgoal!r} resolves to {action_name}, "
             "which requires point=[y, x]"
         )
@@ -660,6 +688,116 @@ def _resolve_decision_action(task: str, decision: SubgoalDecision) -> str | None
             "which requires point=null"
         )
     return action_name
+
+
+@dataclass(frozen=True)
+class ValidatedInference:
+    decision: SubgoalDecision
+    raw_response: str
+    messages: list[dict[str, str]]
+    resolved_action_name: str | None
+    vlm_latency_ms: float
+    action_request_ms: float
+    attempts: list[dict[str, Any]]
+    validation_error: str | None = None
+
+
+def _infer_with_pickup_point_retry(
+    planner: VLMSubgoalPlannerClient,
+    *,
+    task: str,
+    messages: list[dict[str, str]],
+    images: list[str],
+    include_description: bool,
+    max_missing_point_attempts: int = MAX_PICKUP_POINT_ATTEMPTS,
+) -> ValidatedInference:
+    """Retry a pickup decision up to three total times when point is missing."""
+    request_started = time.perf_counter()
+    request_messages = list(messages)
+    attempts: list[dict[str, Any]] = []
+    total_vlm_latency_ms = 0.0
+
+    for attempt_index in range(1, max_missing_point_attempts + 1):
+        (
+            decision,
+            raw_response,
+            latency_ms,
+            request_to_decision_ms,
+        ) = _infer(
+            planner,
+            messages=request_messages,
+            images=images,
+            include_description=include_description,
+        )
+        total_vlm_latency_ms += latency_ms
+        try:
+            resolved_action_name = _resolve_decision_action(task, decision)
+        except MissingPickupPointError as error:
+            validation_error = f"{type(error).__name__}: {error}"
+            attempts.append(
+                {
+                    "attempt": attempt_index,
+                    "messages": request_messages,
+                    "raw_response": raw_response,
+                    "decision": asdict(decision),
+                    "vlm_latency_ms": latency_ms,
+                    "request_to_decision_ms": request_to_decision_ms,
+                    "validation_error": validation_error,
+                }
+            )
+            if attempt_index >= max_missing_point_attempts:
+                return ValidatedInference(
+                    decision=decision,
+                    raw_response=raw_response,
+                    messages=request_messages,
+                    resolved_action_name=None,
+                    vlm_latency_ms=total_vlm_latency_ms,
+                    action_request_ms=(
+                        time.perf_counter() - request_started
+                    ) * 1000,
+                    attempts=attempts,
+                    validation_error=validation_error,
+                )
+            correction = {
+                "role": "user",
+                "content": (
+                    "Your previous JSON is invalid because next_subgoal "
+                    f"{decision.next_subgoal!r} is a pickup but point is null. "
+                    "Return the same completed value and next_subgoal, but add "
+                    "point=[y, x] at the center of the intended cube in the "
+                    "newest overall image. Do not change the subgoal or include "
+                    "analysis. Return JSON only."
+                ),
+            }
+            request_messages = [
+                *request_messages,
+                {"role": "assistant", "content": raw_response},
+                correction,
+            ]
+            continue
+
+        attempts.append(
+            {
+                "attempt": attempt_index,
+                "messages": request_messages,
+                "raw_response": raw_response,
+                "decision": asdict(decision),
+                "vlm_latency_ms": latency_ms,
+                "request_to_decision_ms": request_to_decision_ms,
+                "validation_error": None,
+            }
+        )
+        return ValidatedInference(
+            decision=decision,
+            raw_response=raw_response,
+            messages=request_messages,
+            resolved_action_name=resolved_action_name,
+            vlm_latency_ms=total_vlm_latency_ms,
+            action_request_ms=(time.perf_counter() - request_started) * 1000,
+            attempts=attempts,
+        )
+
+    raise AssertionError("pickup-point retry loop exited unexpectedly")
 
 
 def run_episode(
@@ -760,18 +898,15 @@ def run_episode(
             include_description=args.include_description,
             overall_image_shape=current_pair[0].shape[:2],
         )
-        decision, raw_response, latency_ms, request_to_decision_ms = _infer(
+        inference = _infer_with_pickup_point_retry(
             model,
+            task=task,
             messages=messages,
             images=initial_paths,
             include_description=args.include_description,
         )
-        mapping_started = time.perf_counter()
-        resolved_action_name = _resolve_decision_action(task, decision)
-        action_request_ms = (
-            request_to_decision_ms
-            + (time.perf_counter() - mapping_started) * 1000
-        )
+        decision = inference.decision
+        resolved_action_name = inference.resolved_action_name
         gpu_monitor.sample()
         record["decisions"].append(
             {
@@ -781,16 +916,23 @@ def run_episode(
                 "observation_frames": [current_simulator_frame],
                 "decision_index": 0,
                 "call_type": "initial",
-                "messages": messages,
+                "messages": inference.messages,
                 "images": initial_paths,
-                "raw_response": raw_response,
+                "raw_response": inference.raw_response,
                 "decision": asdict(decision),
                 "resolved_action_name": resolved_action_name,
-                "vlm_latency_ms": latency_ms,
-                "action_request_ms": action_request_ms,
+                "vlm_latency_ms": inference.vlm_latency_ms,
+                "action_request_ms": inference.action_request_ms,
+                "vlm_attempts": inference.attempts,
+                "validation_error": inference.validation_error,
                 "execution": None,
             }
         )
+        if inference.validation_error is not None:
+            raise MissingPickupPointError(
+                "Pickup point was missing in three consecutive VLM responses. "
+                f"Last validation error: {inference.validation_error}"
+            )
         history: list[str] = []
         last_status = "ongoing"
 
@@ -885,26 +1027,16 @@ def run_episode(
                 observation_count=len(temporal_window),
                 overall_image_shape=current_pair_after[0].shape[:2],
             )
-            (
-                next_decision,
-                raw_response,
-                latency_ms,
-                request_to_decision_ms,
-            ) = _infer(
+            inference = _infer_with_pickup_point_retry(
                 model,
+                task=task,
                 messages=messages,
                 images=image_paths,
                 include_description=args.include_description,
             )
-            mapping_started = time.perf_counter()
-            next_resolved_action_name = _resolve_decision_action(task, next_decision)
-            action_request_ms = (
-                request_to_decision_ms
-                + (time.perf_counter() - mapping_started) * 1000
-            )
+            next_decision = inference.decision
+            next_resolved_action_name = inference.resolved_action_name
             gpu_monitor.sample()
-            if next_decision.completed:
-                history.append(active_subgoal)
             record["decisions"].append(
                 {
                     "step": decision_index,
@@ -913,16 +1045,25 @@ def run_episode(
                     "observation_frames": observation_frames,
                     "decision_index": decision_index,
                     "call_type": "followup",
-                    "messages": messages,
+                    "messages": inference.messages,
                     "images": image_paths,
-                    "raw_response": raw_response,
+                    "raw_response": inference.raw_response,
                     "decision": asdict(next_decision),
                     "resolved_action_name": next_resolved_action_name,
-                    "vlm_latency_ms": latency_ms,
-                    "action_request_ms": action_request_ms,
+                    "vlm_latency_ms": inference.vlm_latency_ms,
+                    "action_request_ms": inference.action_request_ms,
+                    "vlm_attempts": inference.attempts,
+                    "validation_error": inference.validation_error,
                     "execution": None,
                 }
             )
+            if inference.validation_error is not None:
+                raise MissingPickupPointError(
+                    "Pickup point was missing in three consecutive VLM responses. "
+                    f"Last validation error: {inference.validation_error}"
+                )
+            if next_decision.completed:
+                history.append(active_subgoal)
             decision = next_decision
             resolved_action_name = next_resolved_action_name
             current_pair = current_pair_after
