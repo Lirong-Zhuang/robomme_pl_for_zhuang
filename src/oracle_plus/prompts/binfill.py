@@ -11,7 +11,9 @@ from .base import build_system_prompt
 TASK_NAME = "BinFill"
 
 NOTES = """1. The bin is a box with black holes on the top. It sucks in cubes
-placed into it, so count how many cubes have already been inserted.
+placed into it, so count how many cubes have already been inserted. A black hole
+becoming visible again after placement is expected and, by itself, does not mean
+the bin is empty or that a previously completed placement failed.
 2. Use the task goal to determine the required cube color, order, and total count.
 3. Treat a pick-up subgoal as complete when the correct cube appears to be held
 by the gripper and there is visual evidence that it has been lifted or moved
@@ -53,7 +55,7 @@ POINT_ACTION_NAMES: tuple[str, ...] = ("solve_pickup",)
 
 PROMPT_WITH_DESCRIPTION = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_point_v2_with_description",
+    version="binfill_subgoal_point_v3_with_description",
     include_description=True,
     system_prompt=build_system_prompt(
         subgoals=SUBGOALS,
@@ -65,7 +67,7 @@ PROMPT_WITH_DESCRIPTION = TaskPromptSpec(
 
 PROMPT_WITHOUT_DESCRIPTION = TaskPromptSpec(
     task=TASK_NAME,
-    version="binfill_subgoal_point_v2_without_description",
+    version="binfill_subgoal_point_v3_without_description",
     include_description=False,
     system_prompt=build_system_prompt(
         subgoals=SUBGOALS,

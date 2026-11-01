@@ -49,7 +49,7 @@ Do not output analysis, reasoning, think tags, action_name, or action_sequence.
 
 INITIAL_SCHEMA_WITH_DESCRIPTION = """```json
 {
-  "description": "briefly describe the visible initial state",
+  "description": "visible initial-state evidence only; at most 50 English words and two short sentences",
   "subgoal_sequence": ["ordered subgoal 1", "ordered subgoal 2"],
   "completed": false,
   "next_subgoal": "the first subgoal",
@@ -59,7 +59,7 @@ INITIAL_SCHEMA_WITH_DESCRIPTION = """```json
 
 FOLLOWUP_SCHEMA_WITH_DESCRIPTION = """```json
 {
-  "description": "briefly describe completion evidence for the current subgoal",
+  "description": "visible completion evidence only; at most 50 English words and two short sentences",
   "completed": true or false,
   "next_subgoal": "the next subgoal, or the current one if it is incomplete",
   "point": [y, x] or null
@@ -125,7 +125,12 @@ def build_system_prompt(
 ) -> str:
     if include_description:
         description_rule = (
-            "Include a non-empty description with concise visual evidence for your decision."
+            "Include a non-empty description of no more than 50 English words and "
+            "at most two short sentences. State only directly visible evidence about "
+            "whether the current subgoal completed. Do not reconsider prior subgoals, "
+            "plan future actions, list alternatives, or include step-by-step reasoning. "
+            "Do not use phrases such as 'wait', 'actually', 'let me re-examine', "
+            "'I need to reconsider', or 'looking more carefully'."
         )
         initial_schema = INITIAL_SCHEMA_WITH_DESCRIPTION
         followup_schema = FOLLOWUP_SCHEMA_WITH_DESCRIPTION
