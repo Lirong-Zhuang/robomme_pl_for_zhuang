@@ -2,8 +2,84 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable
+
+
+class _DenseCollectionStopped(Exception):
+    """Internal signal used to stop a planner after the env has stopped."""
+
+
+def _flag_any(value: Any) -> bool:
+    """Return whether a scalar/array/tensor termination flag contains true."""
+    try:
+        import torch
+
+        if isinstance(value, torch.Tensor):
+            return bool(value.detach().bool().any().item())
+    except ImportError:
+        pass
+    try:
+        import numpy as np
+
+        if isinstance(value, np.ndarray):
+            return bool(value.any())
+    except ImportError:
+        pass
+    return bool(value)
+
+
+def _run_with_bounded_dense_collection(
+    planner: Any,
+    solve: Callable[[], Any],
+    *,
+    max_retained_steps: int,
+    planner_dense_step: Any,
+) -> tuple[Any, int] | int:
+    """Execute a planner action while retaining only its recent native steps.
+
+    The benchmark's regular dense collector deep-copies every camera frame in a
+    high-level motion.  A long path can therefore consume tens of gigabytes
+    before the episode-level cleanup runs.  This Oracle Plus collector keeps a
+    bounded tail for the VLM history and stops the remaining path as soon as the
+    environment reports that the episode has ended.
+    """
+    retained: deque[Any] = deque(maxlen=max_retained_steps)
+    total_step_count = 0
+    original_step = planner.env.step
+
+    def _step(action: Any) -> Any:
+        nonlocal total_step_count
+        out = original_step(action)
+        steps = planner_dense_step._output_to_steps(out)
+        total_step_count += len(steps)
+        retained.extend(steps)
+        if steps:
+            _, _, terminated, truncated, info = steps[-1]
+            status = info.get("status") if isinstance(info, dict) else None
+            if (
+                _flag_any(terminated)
+                or _flag_any(truncated)
+                or status in {"success", "fail", "timeout", "error"}
+            ):
+                raise _DenseCollectionStopped
+        return out
+
+    planner.env.step = _step
+    try:
+        try:
+            result = solve()
+        except _DenseCollectionStopped:
+            result = None
+        if result == -1:
+            return -1
+        return (
+            planner_dense_step.to_step_batch(list(retained)),
+            total_step_count,
+        )
+    finally:
+        planner.env.step = original_step
 
 
 @dataclass(frozen=True)
@@ -12,15 +88,26 @@ class ActionExecution:
     info: dict[str, Any]
     status: str
     stopped: bool
+    simulator_frame_count: int
 
 
 class OraclePlusPlannerRuntime:
     """Own one RoboMME planner without using the multi_choice action space."""
 
-    def __init__(self, env: Any, env_id: str, *, gui_render: bool = False) -> None:
+    def __init__(
+        self,
+        env: Any,
+        env_id: str,
+        *,
+        gui_render: bool = False,
+        max_retained_steps: int = 3,
+    ) -> None:
+        if max_retained_steps < 1:
+            raise ValueError("max_retained_steps must be at least 1")
         self.env = env
         self.env_id = env_id
         self.gui_render = gui_render
+        self.max_retained_steps = max_retained_steps
         self.planner: Any = None
         self.front_camera_intrinsic: Any = None
         self.front_camera_extrinsic: Any = None
@@ -221,9 +308,15 @@ class OraclePlusPlannerRuntime:
             raise RuntimeError("OraclePlusPlannerRuntime.reset() must be called first")
         from robomme.robomme_env.utils import planner_denseStep
 
-        batch = planner_denseStep._run_with_dense_collection(self.planner, solve)
-        if batch == -1:
+        collected = _run_with_bounded_dense_collection(
+            self.planner,
+            solve,
+            max_retained_steps=self.max_retained_steps,
+            planner_dense_step=planner_denseStep,
+        )
+        if collected == -1:
             raise RuntimeError("High-level action returned planning failure")
+        batch, simulator_frame_count = collected
         obs_batch, _, terminated_batch, truncated_batch, info_batch = batch
         self._update_camera_cache(obs_batch, info_batch)
         self.env.unwrapped.evaluate()
@@ -256,6 +349,7 @@ class OraclePlusPlannerRuntime:
             info=info,
             status=status,
             stopped=stopped,
+            simulator_frame_count=simulator_frame_count,
         )
 
     def close(self) -> None:

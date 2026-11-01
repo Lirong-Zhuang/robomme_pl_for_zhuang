@@ -16,7 +16,9 @@ NUM_EPISODES=50
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
 # tied to each episode's test metadata; this measures repeated-run variance.
 NUM_REPEATS=4
-MAX_STEPS=3000
+# Keep the same episode horizon as the established eval launcher.  The dense
+# motion planner now also stops immediately when this horizon is reached.
+MAX_STEPS=1300
 MAX_DECISIONS=50
 HISTORY_SIZE=3
 # true: use the prompt that requires a visual description in every VLM output.
@@ -37,7 +39,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_8"
+RUN_NAME="test_9"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false

@@ -644,7 +644,12 @@ def run_episode(
         include_front_camera_extrinsic=True,
         include_front_camera_intrinsic=True,
     )
-    runtime = OraclePlusPlannerRuntime(env, task, gui_render=False)
+    runtime = OraclePlusPlannerRuntime(
+        env,
+        task,
+        gui_render=False,
+        max_retained_steps=args.history_size,
+    )
     repeat_dir = run_dir / task / f"repeat_{repeat_id}"
     episode_dir = repeat_dir / f"ep_{episode_id}"
     video_dir = repeat_dir / "videos"
@@ -755,9 +760,7 @@ def run_episode(
                 active_subgoal,
                 decision.point,
             )
-            action_frame_count = len(
-                execution.obs_batch.get("front_rgb_list", [])
-            )
+            action_frame_count = execution.simulator_frame_count
             recent_pairs = _recent_pairs(execution.obs_batch, args.history_size)
             _record_video_observations(
                 recorder,
