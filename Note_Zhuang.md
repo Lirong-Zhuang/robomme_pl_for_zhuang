@@ -52,8 +52,9 @@ current v2.2 configuration uses $k=3$.
 ## Oracle Plus: 27B VLM high-level action control
 
 Oracle Plus replaces Trinity's Manager, Reporter, and VLA Executer at inference
-time with one Qwen3.8-27B VLM. The VLM observes the task goal plus paired
-overall/wrist images and returns strict JSON containing `completed`,
+time with one Qwen3.8-27B VLM. The VLM observes the task goal plus temporal
+overall images (or the original paired overall/wrist images when enabled) and
+returns strict JSON containing `completed`,
 `next_subgoal`, an optional target `point=[y, x]`, and optionally a visual
 `description`. The VLM does not output a Python function name. A task-specific
 keyword matcher deterministically maps the subgoal to a trusted RoboMME MPLib
@@ -68,7 +69,7 @@ arbitrary Python functions or passing fabricated simulator objects.
 ### Current execution path
 
 ```text
-task goal + overall/wrist observations
+task goal + overall observations
                 |
  robomme eval WebSocket client
                 |
@@ -88,8 +89,8 @@ task goal + overall/wrist observations
 ```
 
 The initial call predicts a complete proposed subgoal sequence and its first
-subgoal. After execution, each follow-up call compares the pre-action image
-pair with up to three recent overall/wrist pairs, judges whether the active
+subgoal. After execution, each follow-up call compares up to three recent
+overall observations, judges whether the active
 subgoal completed, and either repeats it or advances. Every response is parsed
 as JSON; the active subgoal must match exactly one trusted keyword rule before
 execution. For grounded actions, the VLM point is expressed as `[y, x]` in the latest overall
@@ -126,7 +127,7 @@ choices.
 | Action selection | Program maps VLM subgoal keywords to a trusted function; VLM emits no action name |
 | Description variants | `VLM_INCLUDE_DESCRIPTION=true/false` selects one of two strict prompt/output schemas |
 | Target grounding | VLM pixel `[y, x]`; nearest projected candidate object, matching Oracle Planner |
-| Views | Current overall + wrist pair; follow-up temporal window uses up to three pairs |
+| Views | Overall-only by default; `VLM_INCLUDE_WRIST=true` restores the original paired overall+wrist prompt and payload |
 | Current task coverage | `BinFill` only |
 | Logs | Prompts, image paths, raw/parsed response, selected function, execution info, final status, eval-process RSS/cgroup OOM counters, other-process/eval GPU memory, VLM single-step latency, and VLM-to-mapped-action request time |
 

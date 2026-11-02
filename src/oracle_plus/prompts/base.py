@@ -96,6 +96,17 @@ Start directly with the JSON object. Output JSON only.
 """
 
 
+INITIAL_USER_TEMPLATE_OVERALL_ONLY = """The task goal is: {task_goal}
+This is the initial call. Observe the initial state, predict the complete subgoal plan,
+then return its first next_subgoal and target point if that subgoal is a pickup.
+The overall image resolution is height={image_height}, width={image_width} pixels.
+Initial overall image: <image>
+Any target point must refer to the initial overall image in original pixel
+coordinates. Do not use normalized 0-1000 coordinates.
+Start directly with the JSON object. Output JSON only.
+"""
+
+
 FOLLOWUP_USER_TEMPLATE = """The task goal is: {task_goal}
 The history of previously active subgoals is: {history}
 The current subgoal is: {current_subgoal}
@@ -109,6 +120,23 @@ subgoal is complete; do not infer success merely because the robot stopped movin
 Then return the subgoal that should be active now. If incomplete, keep the same
 subgoal. Any target point must refer to the newest overall image in original pixel
 coordinates. Do not use normalized 0-1000 coordinates.
+Start directly with the JSON object. Output JSON only.
+"""
+
+
+FOLLOWUP_USER_TEMPLATE_OVERALL_ONLY = """The task goal is: {task_goal}
+The history of previously active subgoals is: {history}
+The current subgoal is: {current_subgoal}
+The overall image resolution is height={image_height}, width={image_width} pixels.
+
+Temporal overall observations, oldest to newest:
+{observation_lines}
+
+Use the temporal changes across these overall observations to decide whether the
+current subgoal is complete; do not infer success merely because the robot stopped
+moving. Then return the subgoal that should be active now. If incomplete, keep the
+same subgoal. Any target point must refer to the newest overall image in original
+pixel coordinates. Do not use normalized 0-1000 coordinates.
 Start directly with the JSON object. Output JSON only.
 """
 
@@ -153,6 +181,7 @@ class TaskPromptSpec:
     system_prompt: str
     initial_user_template: str = INITIAL_USER_TEMPLATE
     followup_user_template: str = FOLLOWUP_USER_TEMPLATE
+    include_wrist: bool = True
 
     @property
     def content_hash(self) -> str:
@@ -172,6 +201,7 @@ class TaskPromptSpec:
             "task": self.task,
             "version": self.version,
             "include_description": self.include_description,
+            "include_wrist": self.include_wrist,
             "sha256": self.content_hash,
         }
 
@@ -208,13 +238,19 @@ class TaskPromptSpec:
                 f"{index}. {subgoal}"
                 for index, subgoal in enumerate(history_subgoals or [], start=1)
             ) or "none"
-            observation_lines = "\n".join(
-                (
-                    f"  Observation {index} overall: <image>\n"
-                    f"  Observation {index} wrist: <image>"
+            if self.include_wrist:
+                observation_lines = "\n".join(
+                    (
+                        f"  Observation {index} overall: <image>\n"
+                        f"  Observation {index} wrist: <image>"
+                    )
+                    for index in range(1, observation_count + 1)
                 )
-                for index in range(1, observation_count + 1)
-            )
+            else:
+                observation_lines = "\n".join(
+                    f"  Observation {index} overall: <image>"
+                    for index in range(1, observation_count + 1)
+                )
             user_prompt = self.followup_user_template.format(
                 task_goal=task_goal,
                 history=history,

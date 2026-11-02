@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from .base import FOLLOWUP_USER_TEMPLATE_OVERALL_ONLY
+from .base import INITIAL_USER_TEMPLATE_OVERALL_ONLY
 from .base import TaskPromptSpec
 from .base import build_system_prompt
 
@@ -75,6 +77,37 @@ PROMPT_WITHOUT_DESCRIPTION = TaskPromptSpec(
         example=COMBINED_EXAMPLE,
         include_description=False,
     ),
+)
+
+
+PROMPT_OVERALL_ONLY_WITH_DESCRIPTION = TaskPromptSpec(
+    task=TASK_NAME,
+    version="binfill_subgoal_point_v5_sliding_window_overall_only_with_description",
+    include_description=True,
+    include_wrist=False,
+    system_prompt=build_system_prompt(
+        subgoals=SUBGOALS,
+        notes=NOTES,
+        example=COMBINED_EXAMPLE,
+        include_description=True,
+    ),
+    initial_user_template=INITIAL_USER_TEMPLATE_OVERALL_ONLY,
+    followup_user_template=FOLLOWUP_USER_TEMPLATE_OVERALL_ONLY,
+)
+
+PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION = TaskPromptSpec(
+    task=TASK_NAME,
+    version="binfill_subgoal_point_v5_sliding_window_overall_only_without_description",
+    include_description=False,
+    include_wrist=False,
+    system_prompt=build_system_prompt(
+        subgoals=SUBGOALS,
+        notes=NOTES,
+        example=COMBINED_EXAMPLE,
+        include_description=False,
+    ),
+    initial_user_template=INITIAL_USER_TEMPLATE_OVERALL_ONLY,
+    followup_user_template=FOLLOWUP_USER_TEMPLATE_OVERALL_ONLY,
 )
 
 

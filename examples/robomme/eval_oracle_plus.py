@@ -129,6 +129,15 @@ def parse_args() -> argparse.Namespace:
             "--no-include-description selects the compact schema."
         ),
     )
+    parser.add_argument(
+        "--include-wrist",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Include wrist images and use the original paired-view prompt. "
+            "The default overall-only mode sends no wrist images."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -216,14 +225,18 @@ def _write_vlm_call_images(
     *,
     call_index: int,
     observations: list[TimedObservation],
+    include_wrist: bool,
 ) -> list[str]:
-    """Save exactly the paired images supplied to one VLM call."""
+    """Save exactly the observation images supplied to one VLM call."""
     call_dir = episode_dir / f"call_{call_index}"
     overall_dir = call_dir / "overall"
-    wrist_dir = call_dir / "wrist"
     overall_dir.mkdir(parents=True, exist_ok=True)
-    wrist_dir.mkdir(parents=True, exist_ok=True)
-    for image_dir in (overall_dir, wrist_dir):
+    image_dirs = [overall_dir]
+    wrist_dir = call_dir / "wrist"
+    if include_wrist:
+        wrist_dir.mkdir(parents=True, exist_ok=True)
+        image_dirs.append(wrist_dir)
+    for image_dir in image_dirs:
         for stale_path in image_dir.glob("*.png"):
             stale_path.unlink()
 
@@ -231,12 +244,12 @@ def _write_vlm_call_images(
     for position, (simulator_frame, pair) in enumerate(observations):
         filename = f"obs_{position}_frame_{simulator_frame}.png"
         overall_path = overall_dir / filename
-        wrist_path = wrist_dir / filename
         iio.imwrite(overall_path, pair[0])
-        iio.imwrite(wrist_path, pair[1])
-        image_paths.extend(
-            [str(overall_path.resolve()), str(wrist_path.resolve())]
-        )
+        image_paths.append(str(overall_path.resolve()))
+        if include_wrist:
+            wrist_path = wrist_dir / filename
+            iio.imwrite(wrist_path, pair[1])
+            image_paths.append(str(wrist_path.resolve()))
     return image_paths
 
 
@@ -385,7 +398,7 @@ def _requested_run_config(
     """Build the behavior-defining configuration used to validate a resume."""
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
@@ -395,10 +408,12 @@ def _requested_run_config(
         "history_stride": args.history_stride,
         "pickup_point_max_attempts": MAX_PICKUP_POINT_ATTEMPTS,
         "include_description": args.include_description,
+        "include_wrist": args.include_wrist,
         "prompts": {
             task: get_prompt(
                 task,
                 include_description=args.include_description,
+                include_wrist=args.include_wrist,
             ).metadata()
             for task in tasks
         },
@@ -855,6 +870,7 @@ def run_episode(
         "prompt": get_prompt(
             task,
             include_description=args.include_description,
+            include_wrist=args.include_wrist,
         ).metadata(),
     }
     try:
@@ -890,12 +906,14 @@ def run_episode(
             episode_dir,
             call_index=0,
             observations=initial_window,
+            include_wrist=args.include_wrist,
         )
         messages = build_messages(
             task=task,
             call_type="initial",
             task_goal=goal,
             include_description=args.include_description,
+            include_wrist=args.include_wrist,
             overall_image_shape=current_pair[0].shape[:2],
         )
         inference = _infer_with_pickup_point_retry(
@@ -1016,12 +1034,14 @@ def run_episode(
                 episode_dir,
                 call_index=decision_index,
                 observations=temporal_window,
+                include_wrist=args.include_wrist,
             )
             messages = build_messages(
                 task=task,
                 call_type="followup",
                 task_goal=goal,
                 include_description=args.include_description,
+                include_wrist=args.include_wrist,
                 history_subgoals=history,
                 current_subgoal=active_subgoal,
                 observation_count=len(temporal_window),

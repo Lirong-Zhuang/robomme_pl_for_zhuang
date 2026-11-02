@@ -5,6 +5,12 @@ from __future__ import annotations
 from .base import CallType
 from .base import TaskPromptSpec
 from .binfill import POINT_ACTION_NAMES as BINFILL_POINT_ACTION_NAMES
+from .binfill import (
+    PROMPT_OVERALL_ONLY_WITH_DESCRIPTION as BINFILL_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+)
+from .binfill import (
+    PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION as BINFILL_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+)
 from .binfill import PROMPT_WITH_DESCRIPTION as BINFILL_PROMPT_WITH_DESCRIPTION
 from .binfill import PROMPT_WITHOUT_DESCRIPTION as BINFILL_PROMPT_WITHOUT_DESCRIPTION
 from .binfill import match_action_name as match_binfill_action_name
@@ -16,6 +22,14 @@ TASK_PROMPTS_WITH_DESCRIPTION: dict[str, TaskPromptSpec] = {
 
 TASK_PROMPTS_WITHOUT_DESCRIPTION: dict[str, TaskPromptSpec] = {
     "BinFill": BINFILL_PROMPT_WITHOUT_DESCRIPTION,
+}
+
+TASK_PROMPTS_OVERALL_ONLY_WITH_DESCRIPTION: dict[str, TaskPromptSpec] = {
+    "BinFill": BINFILL_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+}
+
+TASK_PROMPTS_OVERALL_ONLY_WITHOUT_DESCRIPTION: dict[str, TaskPromptSpec] = {
+    "BinFill": BINFILL_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
 }
 
 ACTION_MATCHERS = {
@@ -31,12 +45,24 @@ def available_tasks() -> tuple[str, ...]:
     return tuple(sorted(TASK_PROMPTS_WITH_DESCRIPTION))
 
 
-def get_prompt(task: str, *, include_description: bool) -> TaskPromptSpec:
-    registry = (
-        TASK_PROMPTS_WITH_DESCRIPTION
-        if include_description
-        else TASK_PROMPTS_WITHOUT_DESCRIPTION
-    )
+def get_prompt(
+    task: str,
+    *,
+    include_description: bool,
+    include_wrist: bool = True,
+) -> TaskPromptSpec:
+    if include_wrist:
+        registry = (
+            TASK_PROMPTS_WITH_DESCRIPTION
+            if include_description
+            else TASK_PROMPTS_WITHOUT_DESCRIPTION
+        )
+    else:
+        registry = (
+            TASK_PROMPTS_OVERALL_ONLY_WITH_DESCRIPTION
+            if include_description
+            else TASK_PROMPTS_OVERALL_ONLY_WITHOUT_DESCRIPTION
+        )
     try:
         return registry[task]
     except KeyError as error:
@@ -82,12 +108,17 @@ def build_messages(
     call_type: CallType,
     task_goal: str,
     include_description: bool,
+    include_wrist: bool = True,
     history_subgoals: list[str] | None = None,
     current_subgoal: str | None = None,
     observation_count: int = 0,
     overall_image_shape: tuple[int, int] | None = None,
 ) -> list[dict[str, str]]:
-    return get_prompt(task, include_description=include_description).build_messages(
+    return get_prompt(
+        task,
+        include_description=include_description,
+        include_wrist=include_wrist,
+    ).build_messages(
         call_type=call_type,
         task_goal=task_goal,
         history_subgoals=history_subgoals,

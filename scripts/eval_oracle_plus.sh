@@ -12,7 +12,7 @@ cd "$REPO_ROOT"
 # robomme-qwen38, while RoboMME and MPLib run from the robomme environment.
 TASKS="BinFill"
 EPISODE_IDS=""
-NUM_EPISODES=1
+NUM_EPISODES=50
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
 # tied to each episode's test metadata; this measures repeated-run variance.
 NUM_REPEATS=1
@@ -27,6 +27,9 @@ HISTORY_STRIDE=16
 # true: use the prompt that requires a visual description in every VLM output.
 # false: use the compact prompt with completed, next_subgoal, and point only.
 VLM_INCLUDE_DESCRIPTION=true
+# false: use the overall-only prompt and send no wrist images to the VLM.
+# true: restore the original paired overall+wrist prompt and request payload.
+VLM_INCLUDE_WRIST=false
 
 MODEL_PATH="${QWEN_MODEL_PATH:-/data/zhuanglr/models/Qwen3.8-27B-FP8-fixed}"
 ATTN_IMPL="flash_attention_2"
@@ -42,7 +45,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_14"
+RUN_NAME="test_16"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false
@@ -112,6 +115,14 @@ case "$VLM_INCLUDE_DESCRIPTION" in
         exit 1
         ;;
 esac
+case "$VLM_INCLUDE_WRIST" in
+  true) wrist_arg="--include-wrist" ;;
+  false) wrist_arg="--no-include-wrist" ;;
+  *)
+    echo "ERROR: VLM_INCLUDE_WRIST must be true or false, got '$VLM_INCLUDE_WRIST'" >&2
+    exit 1
+    ;;
+esac
 
 args=(
     --vlm-host "$VLM_HOST"
@@ -128,6 +139,7 @@ args=(
     --run-name "$RUN_NAME"
     "$overwrite_arg"
     "$description_arg"
+    "$wrist_arg"
 )
 
 mkdir -p "$SERVER_LOG_DIR"
@@ -158,6 +170,7 @@ echo "Qwen model: $MODEL_PATH"
 echo "VLM endpoint: $VLM_HOST:$VLM_PORT"
 echo "Tasks: $TASKS"
 echo "VLM description output: $VLM_INCLUDE_DESCRIPTION"
+echo "VLM wrist input: $VLM_INCLUDE_WRIST"
 echo "Results: $SAVE_DIR/$RUN_NAME"
 if [[ -e "$SAVE_DIR/$RUN_NAME" && "$OVERWRITE" == "false" ]]; then
     echo "Resume: enabled; completed episodes will be preserved and skipped"
