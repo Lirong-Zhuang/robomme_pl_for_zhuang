@@ -633,6 +633,7 @@ def _record_video_observations(
     observations: dict[str, Any],
     *,
     subgoal: str | None,
+    point_yx: tuple[int, int] | None = None,
 ) -> int:
     fronts = _column_values(observations.get("front_rgb_list", []))
     wrists = _column_values(observations.get("wrist_rgb_list", []))
@@ -649,6 +650,7 @@ def _record_video_observations(
             state=state,
             action=None,
             subgoal=subgoal,
+            point_yx=point_yx,
         )
     return frame_count
 
@@ -1003,6 +1005,7 @@ def run_episode(
                     recorder,
                     observations,
                     subgoal=active_subgoal,
+                    point_yx=decision.point,
                 )
                 step_info = step[4] if len(step) > 4 else {}
                 native_frame_cursor = _simulator_frame(

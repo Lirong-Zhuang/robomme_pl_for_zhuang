@@ -161,7 +161,16 @@ class RolloutRecorder:
             points.append((int(m[0]), int(m[1])))
         return points
         
-    def record(self, image: np.ndarray, wrist_image: np.ndarray, state: np.ndarray, action: np.ndarray=None, is_video_demo: bool=False, subgoal: Optional[str] = None):
+    def record(
+        self,
+        image: np.ndarray,
+        wrist_image: np.ndarray,
+        state: np.ndarray,
+        action: np.ndarray = None,
+        is_video_demo: bool = False,
+        subgoal: Optional[str] = None,
+        point_yx: Optional[Tuple[int, int]] = None,
+    ):
         
         concat_image = np.concatenate([image, wrist_image], axis=1)
         if is_video_demo: # add a red border
@@ -174,12 +183,29 @@ class RolloutRecorder:
         goal_text_area = self.add_text_area(goal_text, concat_image.shape)
         
         if subgoal is not None:
-            subgoal_text = "Subgoal: " + subgoal
+            points = self._extract_points(subgoal)
+            displayed_subgoal = subgoal
+            if point_yx is not None:
+                point = (int(point_yx[0]), int(point_yx[1]))
+                if point not in points:
+                    points.append(point)
+                    displayed_subgoal = f"{subgoal} <{point[1]}, {point[0]}>"
+
+            subgoal_text = "Subgoal: " + displayed_subgoal
             subgoal_text_area = self.add_text_area(subgoal_text, concat_image.shape)
-            
-            if self._extract_points(subgoal) is not None:
-                for point in self._extract_points(subgoal):
-                    concat_image = cv2.circle(concat_image, point[::-1], 5, (255, 255, 0), -1)
+
+            # Draw only on the overall image (the left half of concat_image).
+            # concat_image is newly allocated, so this cannot mutate the
+            # observation used by evaluation, grounding, or action execution.
+            for point_y, point_x in points:
+                if 0 <= point_y < image.shape[0] and 0 <= point_x < image.shape[1]:
+                    concat_image = cv2.circle(
+                        concat_image,
+                        (point_x, point_y),
+                        5,
+                        (255, 255, 0),
+                        -1,
+                    )
                     
             concat_image = np.concatenate([subgoal_text_area, concat_image], axis=0)
         
