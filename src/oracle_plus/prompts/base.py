@@ -112,14 +112,21 @@ The history of previously active subgoals is: {history}
 The current subgoal is: {current_subgoal}
 The overall image resolution is height={image_height}, width={image_width} pixels.
 
-Temporal paired observations, oldest to newest:
+Subgoal-init paired observation, captured immediately before this current subgoal
+first became active and before any attempt to execute it:
+  Subgoal-init overall: <image>
+  Subgoal-init wrist: <image>
+
+Recent sliding-window paired observations, oldest to newest. These are continuous
+recent observations captured during or after execution of the current subgoal:
 {observation_lines}
 
-Use the temporal changes across these observations to decide whether the current
-subgoal is complete; do not infer success merely because the robot stopped moving.
-Then return the subgoal that should be active now. If incomplete, keep the same
-subgoal. Any target point must refer to the newest overall image in original pixel
-coordinates. Do not use normalized 0-1000 coordinates.
+Compare the fixed subgoal-init observation with the recent sliding-window
+observations to decide whether the current subgoal is complete; do not infer success
+merely because the robot stopped moving. Then return the subgoal that should be
+active now. If incomplete, keep the same subgoal. Any target point must refer to the
+newest sliding-window overall image in original pixel coordinates. Do not use
+normalized 0-1000 coordinates.
 Start directly with the JSON object. Output JSON only.
 """
 
@@ -129,14 +136,20 @@ The history of previously active subgoals is: {history}
 The current subgoal is: {current_subgoal}
 The overall image resolution is height={image_height}, width={image_width} pixels.
 
-Temporal overall observations, oldest to newest:
+Subgoal-init overall observation, captured immediately before this current subgoal
+first became active and before any attempt to execute it:
+  Subgoal-init overall: <image>
+
+Recent sliding-window overall observations, oldest to newest. These are continuous
+recent observations captured during or after execution of the current subgoal:
 {observation_lines}
 
-Use the temporal changes across these overall observations to decide whether the
-current subgoal is complete; do not infer success merely because the robot stopped
-moving. Then return the subgoal that should be active now. If incomplete, keep the
-same subgoal. Any target point must refer to the newest overall image in original
-pixel coordinates. Do not use normalized 0-1000 coordinates.
+Compare the fixed subgoal-init observation with the recent sliding-window
+observations to decide whether the current subgoal is complete; do not infer success
+merely because the robot stopped moving. Then return the subgoal that should be
+active now. If incomplete, keep the same subgoal. Any target point must refer to the
+newest sliding-window overall image in original pixel coordinates. Do not use
+normalized 0-1000 coordinates.
 Start directly with the JSON object. Output JSON only.
 """
 

@@ -29,7 +29,7 @@ HISTORY_STRIDE=16
 VLM_INCLUDE_DESCRIPTION=true
 # false: use the overall-only prompt and send no wrist images to the VLM.
 # true: restore the original paired overall+wrist prompt and request payload.
-VLM_INCLUDE_WRIST=false
+VLM_INCLUDE_WRIST=true
 
 MODEL_PATH="${QWEN_MODEL_PATH:-/data/zhuanglr/models/Qwen3.8-27B-FP8-fixed}"
 ATTN_IMPL="flash_attention_2"
@@ -45,7 +45,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_16"
+RUN_NAME="test_17"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false

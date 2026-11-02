@@ -89,7 +89,8 @@ task goal + overall observations
 ```
 
 The initial call predicts a complete proposed subgoal sequence and its first
-subgoal. After execution, each follow-up call compares up to three recent
+subgoal. Each follow-up call compares a fixed observation captured immediately
+before the current subgoal first became active with up to three continuous recent
 overall observations, judges whether the active
 subgoal completed, and either repeats it or advances. Every response is parsed
 as JSON; the active subgoal must match exactly one trusted keyword rule before
@@ -127,7 +128,7 @@ choices.
 | Action selection | Program maps VLM subgoal keywords to a trusted function; VLM emits no action name |
 | Description variants | `VLM_INCLUDE_DESCRIPTION=true/false` selects one of two strict prompt/output schemas |
 | Target grounding | VLM pixel `[y, x]`; nearest projected candidate object, matching Oracle Planner |
-| Views | Overall-only by default; `VLM_INCLUDE_WRIST=true` restores the original paired overall+wrist prompt and payload |
+| Views | Fixed subgoal-init observation plus a recent sliding window; overall-only by default, while `VLM_INCLUDE_WRIST=true` also supplies both groups' wrist images |
 | Current task coverage | `BinFill` only |
 | Logs | Prompts, image paths, raw/parsed response, selected function, execution info, final status, eval-process RSS/cgroup OOM counters, other-process/eval GPU memory, VLM single-step latency, and VLM-to-mapped-action request time |
 

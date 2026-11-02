@@ -176,6 +176,14 @@ ObservationPair = tuple[np.ndarray, np.ndarray]
 TimedObservation = tuple[int, ObservationPair]
 
 
+def _snapshot_timed_observation(
+    simulator_frame: int,
+    pair: ObservationPair,
+) -> TimedObservation:
+    """Pin one observation so later simulator steps cannot mutate its arrays."""
+    return simulator_frame, (pair[0].copy(), pair[1].copy())
+
+
 def _sample_temporal_window(
     observations: deque[TimedObservation],
     *,
@@ -226,9 +234,27 @@ def _write_vlm_call_images(
     call_index: int,
     observations: list[TimedObservation],
     include_wrist: bool,
+    subgoal_initial_observation: TimedObservation | None = None,
 ) -> list[str]:
-    """Save exactly the observation images supplied to one VLM call."""
+    """Save subgoal-init images first, followed by the recent sliding window."""
     call_dir = episode_dir / f"call_{call_index}"
+    image_paths: list[str] = []
+    if subgoal_initial_observation is not None:
+        initial_frame, initial_pair = subgoal_initial_observation
+        initial_dir = call_dir / "subgoal_init"
+        initial_overall_dir = initial_dir / "overall"
+        initial_overall_dir.mkdir(parents=True, exist_ok=True)
+        initial_filename = f"frame_{initial_frame}.png"
+        initial_overall_path = initial_overall_dir / initial_filename
+        iio.imwrite(initial_overall_path, initial_pair[0])
+        image_paths.append(str(initial_overall_path.resolve()))
+        if include_wrist:
+            initial_wrist_dir = initial_dir / "wrist"
+            initial_wrist_dir.mkdir(parents=True, exist_ok=True)
+            initial_wrist_path = initial_wrist_dir / initial_filename
+            iio.imwrite(initial_wrist_path, initial_pair[1])
+            image_paths.append(str(initial_wrist_path.resolve()))
+
     overall_dir = call_dir / "overall"
     overall_dir.mkdir(parents=True, exist_ok=True)
     image_dirs = [overall_dir]
@@ -240,7 +266,6 @@ def _write_vlm_call_images(
         for stale_path in image_dir.glob("*.png"):
             stale_path.unlink()
 
-    image_paths: list[str] = []
     for position, (simulator_frame, pair) in enumerate(observations):
         filename = f"obs_{position}_frame_{simulator_frame}.png"
         overall_path = overall_dir / filename
@@ -398,7 +423,7 @@ def _requested_run_config(
     """Build the behavior-defining configuration used to validate a resume."""
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
@@ -406,6 +431,7 @@ def _requested_run_config(
         "max_decisions": args.max_decisions,
         "history_size": args.history_size,
         "history_stride": args.history_stride,
+        "include_subgoal_init": True,
         "pickup_point_max_attempts": MAX_PICKUP_POINT_ATTEMPTS,
         "include_description": args.include_description,
         "include_wrist": args.include_wrist,
@@ -895,6 +921,10 @@ def run_episode(
             )
         current_pair = _current_pair(obs)
         current_simulator_frame = _simulator_frame(reset_info, fallback=0)
+        subgoal_initial_observation = _snapshot_timed_observation(
+            current_simulator_frame,
+            current_pair,
+        )
         raw_window_size = (args.history_size - 1) * args.history_stride + 1
         native_observation_ring: deque[TimedObservation] = deque(
             [(current_simulator_frame, current_pair)],
@@ -932,6 +962,7 @@ def run_episode(
                 "call_index": 0,
                 "simulator_frame": current_simulator_frame,
                 "observation_frames": [current_simulator_frame],
+                "subgoal_init_frame": current_simulator_frame,
                 "decision_index": 0,
                 "call_type": "initial",
                 "messages": inference.messages,
@@ -1035,6 +1066,7 @@ def run_episode(
                 call_index=decision_index,
                 observations=temporal_window,
                 include_wrist=args.include_wrist,
+                subgoal_initial_observation=subgoal_initial_observation,
             )
             messages = build_messages(
                 task=task,
@@ -1063,6 +1095,7 @@ def run_episode(
                     "call_index": decision_index,
                     "simulator_frame": current_simulator_frame,
                     "observation_frames": observation_frames,
+                    "subgoal_init_frame": subgoal_initial_observation[0],
                     "decision_index": decision_index,
                     "call_type": "followup",
                     "messages": inference.messages,
@@ -1084,6 +1117,15 @@ def run_episode(
                 )
             if next_decision.completed:
                 history.append(active_subgoal)
+            subgoal_changed = (
+                next_decision.next_subgoal.strip().casefold()
+                != active_subgoal.strip().casefold()
+            )
+            if next_decision.completed or subgoal_changed:
+                subgoal_initial_observation = _snapshot_timed_observation(
+                    current_simulator_frame,
+                    current_pair_after,
+                )
             decision = next_decision
             resolved_action_name = next_resolved_action_name
             current_pair = current_pair_after
