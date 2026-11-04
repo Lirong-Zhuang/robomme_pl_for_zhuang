@@ -568,6 +568,257 @@ class PickHighlightActionAdapter:
         )
 
 
+class PickXtimesActionAdapter:
+    """Bind PickXtimes decisions to the selected cube, target, and button."""
+
+    point_actions = ("solve_pickup",)
+
+    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+        self.runtime = runtime
+
+    def execute(
+        self,
+        action_name: str,
+        next_subgoal: str,
+        point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_button
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_pickup
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_putonto_whenhold,
+        )
+
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        if action_name == "solve_pickup":
+            if point is None:
+                raise ValueError("PickXtimes cube pickup requires point=[y, x]")
+            selected = self.runtime.select_target_with_point(
+                available=base.all_cubes,
+                point_yx=point,
+            )
+            execution = self.runtime.execute(
+                lambda: solve_pickup(env, planner, obj=selected["obj"]),
+                step_callback=step_callback,
+            )
+            execution.info["selected_target"] = {
+                key: value for key, value in selected.items() if key != "obj"
+            }
+            execution.info["requested_point_yx"] = list(point)
+            return execution
+        if point is not None:
+            raise ValueError(f"PickXtimes {action_name} requires point=null")
+        if action_name == "solve_putonto_whenhold":
+            target = getattr(base, "target", None)
+            if target is None:
+                raise RuntimeError("PickXtimes target object is unavailable")
+            return self.runtime.execute(
+                lambda: solve_putonto_whenhold(env, planner, target=target),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_button":
+            button = getattr(base, "button", None)
+            if button is None:
+                raise RuntimeError("PickXtimes button object is unavailable")
+            return self.runtime.execute(
+                lambda: solve_button(env, planner, obj=button),
+                step_callback=step_callback,
+            )
+        raise RuntimeError(
+            f"Subgoal mapper returned an unsupported PickXtimes action: {action_name!r}"
+        )
+
+
+class SwingXtimesActionAdapter:
+    """Bind SwingXtimes decisions to cubes and the two grounded swing targets."""
+
+    point_actions = ("solve_pickup", "solve_swingonto_whenhold")
+
+    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+        self.runtime = runtime
+
+    def execute(
+        self,
+        action_name: str,
+        next_subgoal: str,
+        point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_button
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_pickup
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_putdown_whenhold,
+        )
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_swingonto_whenhold,
+        )
+
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        if action_name == "solve_pickup":
+            if point is None:
+                raise ValueError("SwingXtimes cube pickup requires point=[y, x]")
+            available = base.all_cubes
+        elif action_name == "solve_swingonto_whenhold":
+            if point is None:
+                raise ValueError("SwingXtimes target move requires point=[y, x]")
+            target_right = getattr(base, "target_right", None)
+            target_left = getattr(base, "target_left", None)
+            if target_right is None or target_left is None:
+                raise RuntimeError("SwingXtimes target objects are unavailable")
+            available = [target_right, target_left]
+        else:
+            available = None
+
+        if available is not None:
+            selected = self.runtime.select_target_with_point(
+                available=available,
+                point_yx=point,
+            )
+            if action_name == "solve_pickup":
+                solve = lambda: solve_pickup(env, planner, obj=selected["obj"])
+            else:
+                solve = lambda: solve_swingonto_whenhold(
+                    env,
+                    planner,
+                    target=selected["obj"],
+                    height=0.1,
+                )
+            execution = self.runtime.execute(solve, step_callback=step_callback)
+            execution.info["selected_target"] = {
+                key: value for key, value in selected.items() if key != "obj"
+            }
+            execution.info["requested_point_yx"] = list(point)
+            return execution
+
+        if point is not None:
+            raise ValueError(f"SwingXtimes {action_name} requires point=null")
+        if action_name == "solve_putdown_whenhold":
+            return self.runtime.execute(
+                lambda: solve_putdown_whenhold(env, planner),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_button":
+            button = getattr(base, "button", None)
+            if button is None:
+                raise RuntimeError("SwingXtimes button object is unavailable")
+            return self.runtime.execute(
+                lambda: solve_button(env, planner, obj=button),
+                step_callback=step_callback,
+            )
+        raise RuntimeError(
+            f"Subgoal mapper returned an unsupported SwingXtimes action: {action_name!r}"
+        )
+
+
+class StopCubeActionAdapter:
+    """Execute StopCube preparation, incremental waiting, and timed press."""
+
+    point_actions: tuple[str, ...] = ()
+
+    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+        self.runtime = runtime
+
+    def _solve_incremental_wait(self, solve_hold_obj_abs_timestep: Any) -> None:
+        """Advance to the next official 100-frame checkpoint before the press."""
+
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        steps_press = getattr(base, "steps_press", None)
+        if steps_press is None:
+            raise RuntimeError("StopCube steps_press is unavailable")
+
+        interval = int(getattr(base, "interval", 30))
+        final_target = max(0, int(steps_press - interval))
+        current_step = int(getattr(env, "elapsed_steps", 0))
+        checkpoints_key = "_stopcube_static_checkpoints"
+        index_key = "_stopcube_static_index"
+        final_target_key = "_stopcube_static_final_target"
+        last_step_key = "_stopcube_static_last_elapsed_step"
+
+        checkpoints = getattr(base, checkpoints_key, None)
+        index = getattr(base, index_key, None)
+        cached_final_target = getattr(base, final_target_key, None)
+        last_step = getattr(base, last_step_key, None)
+        needs_rebuild = (
+            not isinstance(checkpoints, list)
+            or not checkpoints
+            or index is None
+            or cached_final_target is None
+            or int(cached_final_target) != final_target
+            or (last_step is not None and current_step < int(last_step))
+        )
+        if needs_rebuild:
+            checkpoints = list(range(100, final_target, 100))
+            if not checkpoints or checkpoints[-1] != final_target:
+                checkpoints.append(final_target)
+            index = 0
+        else:
+            index = min(max(int(index), 0), len(checkpoints) - 1)
+
+        solve_hold_obj_abs_timestep(
+            env,
+            planner,
+            absTimestep=checkpoints[index],
+        )
+        setattr(base, checkpoints_key, checkpoints)
+        setattr(base, index_key, index + 1)
+        setattr(base, final_target_key, final_target)
+        setattr(base, last_step_key, current_step)
+
+    def execute(
+        self,
+        action_name: str,
+        next_subgoal: str,
+        point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_button
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_button_ready
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_hold_obj_absTimestep,
+        )
+
+        if point is not None:
+            raise ValueError(f"StopCube {action_name} requires point=null")
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        button = getattr(base, "button", None)
+        if button is None:
+            raise RuntimeError("StopCube button object is unavailable")
+        if action_name == "solve_button_ready":
+            return self.runtime.execute(
+                lambda: solve_button_ready(env, planner, obj=button),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_hold_obj_absTimestep":
+            return self.runtime.execute(
+                lambda: self._solve_incremental_wait(solve_hold_obj_absTimestep),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_button":
+            return self.runtime.execute(
+                lambda: solve_button(
+                    env,
+                    planner,
+                    obj=button,
+                    without_hold=True,
+                ),
+                step_callback=step_callback,
+            )
+        raise RuntimeError(
+            f"Subgoal mapper returned an unsupported StopCube action: {action_name!r}"
+        )
+
+
 class MoveCubeActionAdapter:
     """Execute the fixed-object MoveCube strategy inferred from its demo."""
 
@@ -659,6 +910,12 @@ def build_action_adapter(task: str, runtime: OraclePlusPlannerRuntime) -> Any:
         return ButtonUnmaskActionAdapter(runtime)
     if task == "PickHighlight":
         return PickHighlightActionAdapter(runtime)
+    if task == "PickXtimes":
+        return PickXtimesActionAdapter(runtime)
+    if task == "SwingXtimes":
+        return SwingXtimesActionAdapter(runtime)
+    if task == "StopCube":
+        return StopCubeActionAdapter(runtime)
     if task == "MoveCube":
         return MoveCubeActionAdapter(runtime)
     raise ValueError(

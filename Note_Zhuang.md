@@ -101,19 +101,18 @@ the requested point.
 
 ### Implemented scope
 
-The new live eval currently supports `BinFill`, because this is the task for
-which a special prompt, keyword mapper, and parameter adapter have been added.
-The mapper currently resolves to:
-
-- `solve_pickup`, with a required VLM target point matched against all current cubes;
-- `solve_putonto_whenhold_binspecial`, bound to the BinFill board/bin;
-- `solve_button`, bound to the task button.
+The live eval currently supports the four Counting tasks (`BinFill`,
+`PickXtimes`, `SwingXtimes`, and `StopCube`) plus `ButtonUnmask`,
+`PickHighlight`, and `MoveCube`. Each has its own prompt, keyword mapper,
+point-action registry, and concrete environment-object adapter. `StopCube`
+uses the benchmark's incremental absolute-timestep checkpoints so the VLM can
+reassess the moving cube before the timed button press.
 
 RoboMME contains 22 public high-level functions in
 `subgoal_planner_func.py`, but they are not all safe drop-in actions: several
 are helpers, recovery operations, intentional failures, or require different
-object parameters. The remaining 15 tasks must therefore each add a prompt,
-an explicit keyword-to-function mapping, and an adapter before they become
+object parameters. Every additional task must therefore add a prompt, an
+explicit keyword-to-function mapping, and an adapter before it becomes
 selectable. An
 unsupported task fails at startup instead of silently falling back to Oracle
 choices.
@@ -129,7 +128,7 @@ choices.
 | Description variants | `VLM_INCLUDE_DESCRIPTION=true/false` selects one of two strict prompt/output schemas |
 | Target grounding | VLM pixel `[y, x]`; nearest projected candidate object, matching Oracle Planner |
 | Views | Fixed subgoal-init observation plus a recent sliding window; overall-only by default, while `VLM_INCLUDE_WRIST=true` also supplies both groups' wrist images |
-| Current task coverage | `BinFill` only |
+| Current task coverage | `BinFill`, `PickXtimes`, `SwingXtimes`, `StopCube`, `ButtonUnmask`, `PickHighlight`, `MoveCube` |
 | Logs | Prompts, image paths, raw/parsed response, selected function, execution info, final status, eval-process RSS/cgroup OOM counters, other-process/eval GPU memory, VLM single-step latency, and VLM-to-mapped-action request time |
 
 Run the evaluation from the repository root with:
@@ -157,11 +156,36 @@ existing run directory and start that run name again from scratch.
 
 During evaluation the terminal shows one global episode progress bar. Detailed
 planner output is redirected to `<run-name>/eval.log`. Each task/repeat stores
-annotated rollout videos under `videos/`, one complete raw/parsed VLM trace per
-episode under `vlm_logs/`, and the exact overall/wrist request images under the
-corresponding `episode_XXXX/decision_XXX/` directories. `progress.json` is
+the exact overall/wrist request images under `images/ep_<id>/`, annotated
+rollout videos under `videos/`, and one complete raw/parsed VLM trace per episode
+under `vlm_logs/`. Tasks that receive a pre-recorded demonstration additionally
+store that demonstration-only video under the sibling `example/` directory; the
+new-execution initial state is excluded from this video, while the rollout in
+`videos/` starts at that new-execution initial state and excludes demonstration
+frames. The per-repeat layout is:
+
+```text
+<run-name>/<TaskName>/repeat_<repeat_id>/
+├── images/
+│   └── ep_<episode_id>/
+│       ├── call_0/
+│       ├── call_1/
+│       └── episode.json
+├── videos/
+│   └── <TaskName>_ep_<episode_id>_<status>_<goal>.mp4
+├── example/                         # only for tasks that view a demonstration
+│   └── <TaskName>_ep_<episode_id>_example_<goal>.mp4
+└── vlm_logs/
+    └── <TaskName>_ep_<episode_id>.json
+```
+
+`progress.json` is
 updated after every episode; `log.json`, `summary.json`, and `episodes.jsonl`
 provide final aggregate and per-episode machine-readable results.
+`summary.json` and `log.json` report one total `episodes` count, one
+`episodes_per_task` count, the overall `success_rate`, a compact
+`task_success_rates` mapping, and detailed `task_summaries`. Results are
+aggregated by task across repeats; there is no separate repeat summary.
 
 ## 1. Build the dataset
 

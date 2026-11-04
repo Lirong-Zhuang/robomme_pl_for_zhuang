@@ -44,6 +44,42 @@ from .pick_highlight import (
 from .pick_highlight import PROMPT_WITH_DESCRIPTION as PICK_HIGHLIGHT_PROMPT_WITH_DESCRIPTION
 from .pick_highlight import PROMPT_WITHOUT_DESCRIPTION as PICK_HIGHLIGHT_PROMPT_WITHOUT_DESCRIPTION
 from .pick_highlight import match_action_name as match_pick_highlight_action_name
+from .pick_xtimes import POINT_ACTION_NAMES as PICK_XTIMES_POINT_ACTION_NAMES
+from .pick_xtimes import (
+    PROMPT_OVERALL_ONLY_WITH_DESCRIPTION as PICK_XTIMES_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+)
+from .pick_xtimes import (
+    PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION as PICK_XTIMES_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+)
+from .pick_xtimes import PROMPT_WITH_DESCRIPTION as PICK_XTIMES_PROMPT_WITH_DESCRIPTION
+from .pick_xtimes import (
+    PROMPT_WITHOUT_DESCRIPTION as PICK_XTIMES_PROMPT_WITHOUT_DESCRIPTION,
+)
+from .pick_xtimes import match_action_name as match_pick_xtimes_action_name
+from .stop_cube import POINT_ACTION_NAMES as STOP_CUBE_POINT_ACTION_NAMES
+from .stop_cube import (
+    PROMPT_OVERALL_ONLY_WITH_DESCRIPTION as STOP_CUBE_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+)
+from .stop_cube import (
+    PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION as STOP_CUBE_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+)
+from .stop_cube import PROMPT_WITH_DESCRIPTION as STOP_CUBE_PROMPT_WITH_DESCRIPTION
+from .stop_cube import PROMPT_WITHOUT_DESCRIPTION as STOP_CUBE_PROMPT_WITHOUT_DESCRIPTION
+from .stop_cube import match_action_name as match_stop_cube_action_name
+from .swing_xtimes import POINT_ACTION_NAMES as SWING_XTIMES_POINT_ACTION_NAMES
+from .swing_xtimes import (
+    PROMPT_OVERALL_ONLY_WITH_DESCRIPTION as SWING_XTIMES_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+)
+from .swing_xtimes import (
+    PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION as SWING_XTIMES_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+)
+from .swing_xtimes import (
+    PROMPT_WITH_DESCRIPTION as SWING_XTIMES_PROMPT_WITH_DESCRIPTION,
+)
+from .swing_xtimes import (
+    PROMPT_WITHOUT_DESCRIPTION as SWING_XTIMES_PROMPT_WITHOUT_DESCRIPTION,
+)
+from .swing_xtimes import match_action_name as match_swing_xtimes_action_name
 
 
 TASK_PROMPTS_WITH_DESCRIPTION: dict[str, TaskPromptSpec] = {
@@ -51,6 +87,9 @@ TASK_PROMPTS_WITH_DESCRIPTION: dict[str, TaskPromptSpec] = {
     "ButtonUnmask": BUTTON_UNMASK_PROMPT_WITH_DESCRIPTION,
     "MoveCube": MOVE_CUBE_PROMPT_WITH_DESCRIPTION,
     "PickHighlight": PICK_HIGHLIGHT_PROMPT_WITH_DESCRIPTION,
+    "PickXtimes": PICK_XTIMES_PROMPT_WITH_DESCRIPTION,
+    "StopCube": STOP_CUBE_PROMPT_WITH_DESCRIPTION,
+    "SwingXtimes": SWING_XTIMES_PROMPT_WITH_DESCRIPTION,
 }
 
 TASK_PROMPTS_WITHOUT_DESCRIPTION: dict[str, TaskPromptSpec] = {
@@ -58,6 +97,9 @@ TASK_PROMPTS_WITHOUT_DESCRIPTION: dict[str, TaskPromptSpec] = {
     "ButtonUnmask": BUTTON_UNMASK_PROMPT_WITHOUT_DESCRIPTION,
     "MoveCube": MOVE_CUBE_PROMPT_WITHOUT_DESCRIPTION,
     "PickHighlight": PICK_HIGHLIGHT_PROMPT_WITHOUT_DESCRIPTION,
+    "PickXtimes": PICK_XTIMES_PROMPT_WITHOUT_DESCRIPTION,
+    "StopCube": STOP_CUBE_PROMPT_WITHOUT_DESCRIPTION,
+    "SwingXtimes": SWING_XTIMES_PROMPT_WITHOUT_DESCRIPTION,
 }
 
 TASK_PROMPTS_OVERALL_ONLY_WITH_DESCRIPTION: dict[str, TaskPromptSpec] = {
@@ -65,6 +107,9 @@ TASK_PROMPTS_OVERALL_ONLY_WITH_DESCRIPTION: dict[str, TaskPromptSpec] = {
     "ButtonUnmask": BUTTON_UNMASK_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
     "MoveCube": MOVE_CUBE_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
     "PickHighlight": PICK_HIGHLIGHT_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+    "PickXtimes": PICK_XTIMES_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+    "StopCube": STOP_CUBE_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
+    "SwingXtimes": SWING_XTIMES_PROMPT_OVERALL_ONLY_WITH_DESCRIPTION,
 }
 
 TASK_PROMPTS_OVERALL_ONLY_WITHOUT_DESCRIPTION: dict[str, TaskPromptSpec] = {
@@ -72,6 +117,9 @@ TASK_PROMPTS_OVERALL_ONLY_WITHOUT_DESCRIPTION: dict[str, TaskPromptSpec] = {
     "ButtonUnmask": BUTTON_UNMASK_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
     "MoveCube": MOVE_CUBE_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
     "PickHighlight": PICK_HIGHLIGHT_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+    "PickXtimes": PICK_XTIMES_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+    "StopCube": STOP_CUBE_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
+    "SwingXtimes": SWING_XTIMES_PROMPT_OVERALL_ONLY_WITHOUT_DESCRIPTION,
 }
 
 ACTION_MATCHERS = {
@@ -79,6 +127,9 @@ ACTION_MATCHERS = {
     "ButtonUnmask": match_button_unmask_action_name,
     "MoveCube": match_move_cube_action_name,
     "PickHighlight": match_pick_highlight_action_name,
+    "PickXtimes": match_pick_xtimes_action_name,
+    "StopCube": match_stop_cube_action_name,
+    "SwingXtimes": match_swing_xtimes_action_name,
 }
 
 TASK_POINT_ACTION_NAMES: dict[str, tuple[str, ...]] = {
@@ -86,6 +137,9 @@ TASK_POINT_ACTION_NAMES: dict[str, tuple[str, ...]] = {
     "ButtonUnmask": BUTTON_UNMASK_POINT_ACTION_NAMES,
     "MoveCube": MOVE_CUBE_POINT_ACTION_NAMES,
     "PickHighlight": PICK_HIGHLIGHT_POINT_ACTION_NAMES,
+    "PickXtimes": PICK_XTIMES_POINT_ACTION_NAMES,
+    "StopCube": STOP_CUBE_POINT_ACTION_NAMES,
+    "SwingXtimes": SWING_XTIMES_POINT_ACTION_NAMES,
 }
 
 

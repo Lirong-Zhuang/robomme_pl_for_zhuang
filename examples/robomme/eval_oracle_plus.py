@@ -6,7 +6,7 @@ Run from the repository root:
 Direct invocation inside the server environment:
     micromamba run -n robomme python examples/robomme/eval_oracle_plus.py \
         --vlm-host 127.0.0.1 --vlm-port 8021 \
-        --tasks BinFill,ButtonUnmask,PickHighlight,MoveCube \
+        --tasks BinFill,PickXtimes,SwingXtimes,StopCube,ButtonUnmask,PickHighlight,MoveCube \
         --num-episodes 10 --num-repeats 3 \
         --run-name oracle_plus_27b.1
 """
@@ -59,7 +59,7 @@ from robomme.env_record_wrapper import BenchmarkEnvBuilder
 from utils import RolloutRecorder
 
 
-MAX_PICKUP_POINT_ATTEMPTS = 3
+MAX_TARGET_POINT_ATTEMPTS = 3
 MAX_INITIAL_DEMONSTRATION_OBSERVATIONS = 10
 
 
@@ -89,7 +89,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vlm-host", default="127.0.0.1")
     parser.add_argument("--vlm-port", type=int, default=8021)
-    parser.add_argument("--tasks", default="BinFill", help="Comma-separated task names.")
+    parser.add_argument(
+        "--tasks",
+        default=(
+            "BinFill,PickXtimes,SwingXtimes,StopCube,"
+            "ButtonUnmask,PickHighlight,MoveCube"
+        ),
+        help="Comma-separated Oracle Plus task names.",
+    )
     parser.add_argument(
         "--episode-ids",
         default="",
@@ -482,7 +489,9 @@ def _requested_run_config(
         "max_initial_demonstration_observations": (
             MAX_INITIAL_DEMONSTRATION_OBSERVATIONS
         ),
-        "pickup_point_max_attempts": MAX_PICKUP_POINT_ATTEMPTS,
+        # Preserve this config key for compatibility with resumable older runs;
+        # it now applies to every action listed in a task's point registry.
+        "pickup_point_max_attempts": MAX_TARGET_POINT_ATTEMPTS,
         "include_description": args.include_description,
         "include_wrist": args.include_wrist,
         "prompts": {
@@ -623,54 +632,6 @@ def _simulator_frame(
     return int(value)
 
 
-def _repeat_gpu_summary(
-    *,
-    server_start: dict[str, Any],
-    eval_start: dict[str, Any],
-    server_interval: dict[str, Any],
-    eval_interval: dict[str, Any],
-) -> dict[str, Any]:
-    """Combine the two Oracle Plus processes into one repeat-level GPU view."""
-
-    gpu_idx = server_start.get("gpu_idx")
-    if gpu_idx != eval_start.get("gpu_idx"):
-        raise RuntimeError(
-            "VLM server and eval process are not using the same physical GPU: "
-            f"server={gpu_idx!r}, eval={eval_start.get('gpu_idx')!r}"
-        )
-    sources = (server_start, eval_start, server_interval, eval_interval)
-    errors = [source.get("error") for source in sources if source.get("error")]
-    required = (
-        server_start.get("global_used_gb"),
-        server_start.get("current_process_used_gb"),
-        eval_start.get("current_process_used_gb"),
-        server_interval.get("average_current_process_gb"),
-        eval_interval.get("average_current_process_gb"),
-    )
-    if errors or any(value is None for value in required):
-        result: dict[str, Any] = {"gpu_idx": gpu_idx}
-        result["error"] = "; ".join(str(error) for error in errors) or (
-            "Incomplete repeat-level GPU measurements"
-        )
-        return result
-    (
-        global_used,
-        server_used,
-        eval_used,
-        server_average,
-        eval_average,
-    ) = (float(value) for value in required)
-    return {
-        "gpu_idx": gpu_idx,
-        "other_processes_before_repeat_gb": round(
-            max(global_used - server_used - eval_used, 0.0), 3
-        ),
-        "current_program_average_during_repeat_gb": round(
-            server_average + eval_average, 3
-        ),
-    }
-
-
 def _column_values(value: Any) -> list[Any]:
     if isinstance(value, (list, tuple)):
         return list(value)
@@ -691,13 +652,18 @@ def _record_video_observations(
     *,
     subgoal: str | None,
     point_yx: tuple[int, int] | None = None,
+    start_index: int = 0,
+    end_index: int | None = None,
+    is_video_demo: bool = False,
 ) -> int:
     fronts = _column_values(observations.get("front_rgb_list", []))
     wrists = _column_values(observations.get("wrist_rgb_list", []))
     joints = _column_values(observations.get("joint_state_list", []))
     grippers = _column_values(observations.get("gripper_state_list", []))
     frame_count = min(len(fronts), len(wrists), len(joints), len(grippers))
-    for index in range(frame_count):
+    start = min(max(int(start_index), 0), frame_count)
+    end = frame_count if end_index is None else min(max(int(end_index), start), frame_count)
+    for index in range(start, end):
         joint_state = _to_vector(joints[index])
         gripper_state = _to_vector(grippers[index])
         state = np.concatenate([joint_state, gripper_state[:1]]).astype(np.float32)
@@ -706,10 +672,40 @@ def _record_video_observations(
             wrist_image=_to_rgb(wrists[index]),
             state=state,
             action=None,
+            is_video_demo=is_video_demo,
             subgoal=subgoal,
             point_yx=point_yx,
         )
-    return frame_count
+    return end - start
+
+
+def _observation_frame_count(observations: dict[str, Any]) -> int:
+    """Return the number of complete front/wrist/state observation rows."""
+
+    return min(
+        len(_column_values(observations.get("front_rgb_list", []))),
+        len(_column_values(observations.get("wrist_rgb_list", []))),
+        len(_column_values(observations.get("joint_state_list", []))),
+        len(_column_values(observations.get("gripper_state_list", []))),
+    )
+
+
+def _record_reset_demonstration(
+    recorder: RolloutRecorder,
+    observations: dict[str, Any],
+) -> int:
+    """Record only the reset demonstration, excluding the execution initial state."""
+
+    frame_count = _observation_frame_count(observations)
+    if frame_count < 2:
+        return 0
+    return _record_video_observations(
+        recorder,
+        observations,
+        subgoal="[demonstration]",
+        end_index=frame_count - 1,
+        is_video_demo=True,
+    )
 
 
 def _release_dense_observation_batch(observations: dict[str, Any]) -> None:
@@ -764,8 +760,8 @@ def _infer(
     )
 
 
-class MissingPickupPointError(ValueError):
-    """A pickup decision omitted its required target point."""
+class MissingTargetPointError(ValueError):
+    """A grounded decision omitted its required target point."""
 
 
 def _resolve_decision_action(task: str, decision: SubgoalDecision) -> str | None:
@@ -778,7 +774,7 @@ def _resolve_decision_action(task: str, decision: SubgoalDecision) -> str | None
         return None
     requires_point = action_name in get_point_action_names(task)
     if requires_point and decision.point is None:
-        raise MissingPickupPointError(
+        raise MissingTargetPointError(
             f"Subgoal {decision.next_subgoal!r} resolves to {action_name}, "
             "which requires point=[y, x]"
         )
@@ -802,16 +798,16 @@ class ValidatedInference:
     validation_error: str | None = None
 
 
-def _infer_with_pickup_point_retry(
+def _infer_with_target_point_retry(
     planner: VLMSubgoalPlannerClient,
     *,
     task: str,
     messages: list[dict[str, str]],
     images: list[str],
     include_description: bool,
-    max_missing_point_attempts: int = MAX_PICKUP_POINT_ATTEMPTS,
+    max_missing_point_attempts: int = MAX_TARGET_POINT_ATTEMPTS,
 ) -> ValidatedInference:
-    """Retry a pickup decision up to three total times when point is missing."""
+    """Retry a grounded decision up to three times when its point is missing."""
     request_started = time.perf_counter()
     request_messages = list(messages)
     attempts: list[dict[str, Any]] = []
@@ -832,7 +828,7 @@ def _infer_with_pickup_point_retry(
         total_vlm_latency_ms += latency_ms
         try:
             resolved_action_name = _resolve_decision_action(task, decision)
-        except MissingPickupPointError as error:
+        except MissingTargetPointError as error:
             validation_error = f"{type(error).__name__}: {error}"
             attempts.append(
                 {
@@ -862,9 +858,9 @@ def _infer_with_pickup_point_retry(
                 "role": "user",
                 "content": (
                     "Your previous JSON is invalid because next_subgoal "
-                    f"{decision.next_subgoal!r} is a pickup but point is null. "
+                    f"{decision.next_subgoal!r} requires grounding but point is null. "
                     "Return the same completed value and next_subgoal, but add "
-                    "point=[y, x] at the center of the intended object in the "
+                    "point=[y, x] at the center of the intended object or target in the "
                     "newest overall image. Do not change the subgoal or include "
                     "analysis. Return JSON only."
                 ),
@@ -897,7 +893,7 @@ def _infer_with_pickup_point_retry(
             attempts=attempts,
         )
 
-    raise AssertionError("pickup-point retry loop exited unexpectedly")
+    raise AssertionError("target-point retry loop exited unexpectedly")
 
 
 def run_episode(
@@ -932,12 +928,19 @@ def run_episode(
         max_retained_steps=1,
     )
     repeat_dir = run_dir / task / f"repeat_{repeat_id}"
-    episode_dir = repeat_dir / f"ep_{episode_id}"
+    episode_dir = repeat_dir / "images" / f"ep_{episode_id}"
     video_dir = repeat_dir / "videos"
+    example_dir = repeat_dir / "example"
     vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
     episode_dir.mkdir(parents=True, exist_ok=True)
     _prepare_episode_image_directories(episode_dir)
     recorder: RolloutRecorder | None = None
+    example_recorder: RolloutRecorder | None = None
+    prompt = get_prompt(
+        task,
+        include_description=args.include_description,
+        include_wrist=args.include_wrist,
+    )
     record: dict[str, Any] = {
         "task": task,
         "episode_id": episode_id,
@@ -951,12 +954,9 @@ def run_episode(
             "vlm_log": str(vlm_log_path.resolve()),
             "image_dir": str(episode_dir.resolve()),
             "video": None,
+            "example": None,
         },
-        "prompt": get_prompt(
-            task,
-            include_description=args.include_description,
-            include_wrist=args.include_wrist,
-        ).metadata(),
+        "prompt": prompt.metadata(),
     }
     try:
         execution = None
@@ -966,11 +966,43 @@ def run_episode(
         record["task_goal"] = goal
         record["task_goal_candidates"] = goal_candidates
         recorder = RolloutRecorder(video_dir, goal, fps=30, streaming=True)
-        _record_video_observations(
-            recorder,
-            obs,
-            subgoal="[initializing...]",
-        )
+        if prompt.initial_observation_mode == "demonstration":
+            reset_frame_count = _observation_frame_count(obs)
+            if reset_frame_count:
+                _record_video_observations(
+                    recorder,
+                    obs,
+                    subgoal="[initializing...]",
+                    start_index=reset_frame_count - 1,
+                )
+            example_recorder = RolloutRecorder(
+                example_dir,
+                goal,
+                fps=30,
+                streaming=True,
+            )
+            example_frame_count = _record_reset_demonstration(example_recorder, obs)
+            record["example_video_frame_count"] = example_frame_count
+            if example_frame_count:
+                example_filename = (
+                    f"{task}_ep_{episode_id}_example_"
+                    f"{_filename_text(goal)}.mp4"
+                )
+                example_path = example_dir / example_filename
+                try:
+                    example_recorder.save_video(example_filename)
+                    record["artifacts"]["example"] = str(example_path.resolve())
+                except Exception as example_video_error:
+                    record["example_video_error"] = (
+                        f"{type(example_video_error).__name__}: "
+                        f"{example_video_error}"
+                    )
+        else:
+            _record_video_observations(
+                recorder,
+                obs,
+                subgoal="[initializing...]",
+            )
         adapter = build_action_adapter(task, runtime)
         if tuple(adapter.point_actions) != get_point_action_names(task):
             raise RuntimeError(
@@ -990,11 +1022,6 @@ def run_episode(
             maxlen=raw_window_size,
         )
         native_frame_cursor = current_simulator_frame
-        prompt = get_prompt(
-            task,
-            include_description=args.include_description,
-            include_wrist=args.include_wrist,
-        )
         if prompt.initial_observation_mode == "demonstration":
             initial_window = _sample_initial_demonstration(obs)
         else:
@@ -1018,7 +1045,7 @@ def run_episode(
             observation_count=len(initial_window),
             overall_image_shape=current_pair[0].shape[:2],
         )
-        inference = _infer_with_pickup_point_retry(
+        inference = _infer_with_target_point_retry(
             model,
             task=task,
             messages=messages,
@@ -1050,8 +1077,8 @@ def run_episode(
             }
         )
         if inference.validation_error is not None:
-            raise MissingPickupPointError(
-                "Pickup point was missing in three consecutive VLM responses. "
+            raise MissingTargetPointError(
+                "Target point was missing in three consecutive VLM responses. "
                 f"Last validation error: {inference.validation_error}"
             )
         history: list[str] = []
@@ -1152,7 +1179,7 @@ def run_episode(
                 observation_count=len(temporal_window),
                 overall_image_shape=current_pair_after[0].shape[:2],
             )
-            inference = _infer_with_pickup_point_retry(
+            inference = _infer_with_target_point_retry(
                 model,
                 task=task,
                 messages=messages,
@@ -1184,8 +1211,8 @@ def run_episode(
                 }
             )
             if inference.validation_error is not None:
-                raise MissingPickupPointError(
-                    "Pickup point was missing in three consecutive VLM responses. "
+                raise MissingTargetPointError(
+                    "Target point was missing in three consecutive VLM responses. "
                     f"Last validation error: {inference.validation_error}"
                 )
             if next_decision.completed:
@@ -1237,6 +1264,9 @@ def run_episode(
             if recorder is not None:
                 recorder.total_images.clear()
                 recorder.close()
+            if example_recorder is not None:
+                example_recorder.total_images.clear()
+                example_recorder.close()
             try:
                 runtime.close()
             except Exception as cleanup_error:
@@ -1351,13 +1381,9 @@ def main() -> None:
     ):
         print(
             f"[oracle_plus] Evaluation is already complete at "
-            f"{run_dir / 'summary.json'}; leaving existing results unchanged."
+            f"{run_dir / 'summary.json'}; regenerating task-based summary only."
         )
-        model.close()
-        eval_gpu_monitor.close()
-        return
 
-    repeat_runtime: dict[int, dict[str, Any]] = {}
     progress_state = _progress_from_records(records_by_key)
     eval_log_path = run_dir / "eval.log"
     terminal_stderr = sys.stderr
@@ -1391,8 +1417,6 @@ def main() -> None:
             }
             if not pending_repeat_keys:
                 continue
-            eval_gpu_sample, eval_gpu_start = eval_gpu_monitor.begin_interval()
-            server_gpu_start = model.start_repeat(repeat_id)["gpu_start"]
             repeat_key = f"repeat_{repeat_id}"
             progress_state.setdefault(repeat_key, {})
             for task in tasks:
@@ -1435,18 +1459,6 @@ def main() -> None:
                         refresh=False,
                     )
                     progress.update(1)
-            server_gpu_interval = model.end_repeat(repeat_id)["gpu_interval"]
-            eval_gpu_interval = eval_gpu_monitor.end_interval(eval_gpu_sample)
-            repeat_runtime[repeat_id] = {
-                "gpu": _repeat_gpu_summary(
-                    server_start=server_gpu_start,
-                    eval_start=eval_gpu_start,
-                    server_interval=server_gpu_interval,
-                    eval_interval=eval_gpu_interval,
-                ),
-                "measurement_scope": "current_invocation_resume_segment",
-                "measured_episode_runs": len(pending_repeat_keys),
-            }
     progress.close()
 
     records = _ordered_episode_records(records_by_key)
@@ -1461,55 +1473,42 @@ def main() -> None:
         for record in records
         for decision in record["decisions"]
     ]
-    repeat_summaries = []
-    for repeat_id in range(1, args.num_repeats + 1):
-        repeat_records = [
-            record for record in records if record["repeat_id"] == repeat_id
-        ]
-        repeat_successes = sum(
-            record["status"] == "success" for record in repeat_records
+    task_summaries: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        task_records = [record for record in records if record["task"] == task]
+        task_successes = sum(
+            record["status"] == "success" for record in task_records
         )
-        repeat_vlm_times_ms = [
+        task_vlm_times_ms = [
             float(decision["vlm_latency_ms"])
-            for record in repeat_records
+            for record in task_records
             for decision in record["decisions"]
         ]
-        repeat_program_times_ms = [
+        task_program_times_ms = [
             float(decision["action_request_ms"])
-            for record in repeat_records
+            for record in task_records
             for decision in record["decisions"]
         ]
-        repeat_summaries.append(
-            {
-                "repeat_id": repeat_id,
-                "episode_runs": len(repeat_records),
-                "successes": repeat_successes,
-                "success_rate": (
-                    repeat_successes / len(repeat_records)
-                    if repeat_records
-                    else 0.0
+        task_summaries[task] = {
+            "successes": task_successes,
+            "success_rate": (
+                task_successes / len(task_records) if task_records else 0.0
+            ),
+            "status_counts": {
+                status: sum(
+                    record["status"] == status for record in task_records
+                )
+                for status in sorted(
+                    {record["status"] for record in task_records}
+                )
+            },
+            "timing": {
+                "vlm_single_step": latency_summary(task_vlm_times_ms),
+                "program_single_step": latency_summary(
+                    task_program_times_ms
                 ),
-                "gpu_and_timing": {
-                    **repeat_runtime.get(
-                        repeat_id,
-                        {
-                            "gpu": {
-                                "error": (
-                                    "Repeat was completed by an earlier invocation; "
-                                    "repeat-level GPU interval is unavailable here."
-                                )
-                            },
-                            "measurement_scope": "previous_invocation",
-                            "measured_episode_runs": 0,
-                        },
-                    ),
-                    "vlm_single_step": latency_summary(repeat_vlm_times_ms),
-                    "program_single_step": latency_summary(
-                        repeat_program_times_ms
-                    ),
-                },
-            }
-        )
+            },
+        }
     vlm_metrics_error = None
     try:
         vlm_metrics = model.metrics()
@@ -1545,18 +1544,19 @@ def main() -> None:
         },
         "vlm_server_metrics_error": vlm_metrics_error,
         "tasks": tasks,
-        "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
-        "episode_runs_per_repeat": len(tasks) * len(episode_ids),
-        "episode_runs": len(records),
         "episodes": len(records),
+        "episodes_per_task": len(episode_ids) * args.num_repeats,
         "successes": successes,
         "success_rate": successes / len(records) if records else 0.0,
+        "task_success_rates": {
+            task: task_summaries[task]["success_rate"] for task in tasks
+        },
         "status_counts": {
             status: sum(record["status"] == status for record in records)
             for status in sorted({record["status"] for record in records})
         },
-        "repeat_summaries": repeat_summaries,
+        "task_summaries": task_summaries,
         "inference_config": {
             **vlm_metrics["inference_config"],
             "include_description": args.include_description,
