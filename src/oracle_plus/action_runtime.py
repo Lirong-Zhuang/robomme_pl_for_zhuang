@@ -440,9 +440,227 @@ class BinFillActionAdapter:
         )
 
 
+class ButtonUnmaskActionAdapter:
+    """Bind ButtonUnmask decisions to the button and visible containers."""
+
+    point_actions = ("solve_pickup_bin",)
+
+    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+        self.runtime = runtime
+
+    def execute(
+        self,
+        action_name: str,
+        next_subgoal: str,
+        point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_button
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_pickup_bin
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_putdown_whenhold,
+        )
+
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        if action_name == "solve_pickup_bin":
+            if point is None:
+                raise ValueError("ButtonUnmask container pickup requires point=[y, x]")
+            selected = self.runtime.select_target_with_point(
+                available=base.spawned_bins,
+                point_yx=point,
+            )
+            execution = self.runtime.execute(
+                lambda: solve_pickup_bin(env, planner, obj=selected["obj"]),
+                step_callback=step_callback,
+            )
+            execution.info["selected_target"] = {
+                key: value for key, value in selected.items() if key != "obj"
+            }
+            execution.info["requested_point_yx"] = list(point)
+            return execution
+        if point is not None:
+            raise ValueError(f"{action_name} requires point=null")
+        if action_name == "solve_button":
+            button = getattr(base, "button_left", None)
+            if button is None:
+                button = getattr(base, "button", None)
+            if button is None:
+                raise RuntimeError("ButtonUnmask button object is unavailable")
+            return self.runtime.execute(
+                lambda: solve_button(env, planner, obj=button),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_putdown_whenhold":
+            return self.runtime.execute(
+                lambda: solve_putdown_whenhold(env, planner),
+                step_callback=step_callback,
+            )
+        raise RuntimeError(
+            "Subgoal mapper returned an unsupported ButtonUnmask action: "
+            f"{action_name!r}"
+        )
+
+
+class PickHighlightActionAdapter:
+    """Bind PickHighlight decisions to the button and grounded cube."""
+
+    point_actions = ("solve_pickup",)
+
+    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+        self.runtime = runtime
+
+    def execute(
+        self,
+        action_name: str,
+        next_subgoal: str,
+        point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_button
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_pickup
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_putdown_whenhold,
+        )
+
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        if action_name == "solve_pickup":
+            if point is None:
+                raise ValueError("PickHighlight cube pickup requires point=[y, x]")
+            selected = self.runtime.select_target_with_point(
+                available=base.all_cubes,
+                point_yx=point,
+            )
+            execution = self.runtime.execute(
+                lambda: solve_pickup(env, planner, obj=selected["obj"]),
+                step_callback=step_callback,
+            )
+            execution.info["selected_target"] = {
+                key: value for key, value in selected.items() if key != "obj"
+            }
+            execution.info["requested_point_yx"] = list(point)
+            return execution
+        if point is not None:
+            raise ValueError(f"{action_name} requires point=null")
+        if action_name == "solve_button":
+            button = getattr(base, "button", None)
+            if button is None:
+                button = getattr(base, "button_left", None)
+            if button is None:
+                raise RuntimeError("PickHighlight button object is unavailable")
+            return self.runtime.execute(
+                lambda: solve_button(env, planner, obj=button),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_putdown_whenhold":
+            return self.runtime.execute(
+                lambda: solve_putdown_whenhold(env, planner, release_z=0.01),
+                step_callback=step_callback,
+            )
+        raise RuntimeError(
+            "Subgoal mapper returned an unsupported PickHighlight action: "
+            f"{action_name!r}"
+        )
+
+
+class MoveCubeActionAdapter:
+    """Execute the fixed-object MoveCube strategy inferred from its demo."""
+
+    point_actions: tuple[str, ...] = ()
+
+    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+        self.runtime = runtime
+
+    @staticmethod
+    def _require(base: Any, name: str) -> Any:
+        value = getattr(base, name, None)
+        if value is None:
+            raise RuntimeError(f"MoveCube environment attribute {name!r} is unavailable")
+        return value
+
+    def execute(
+        self,
+        action_name: str,
+        next_subgoal: str,
+        point: tuple[int, int] | None,
+        *,
+        step_callback: Callable[[Any], None] | None = None,
+    ) -> ActionExecution:
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            grasp_and_lift_peg_side,
+        )
+        from robomme.robomme_env.utils.subgoal_planner_func import solve_pickup
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_push_to_target,
+        )
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_push_to_target_with_peg,
+        )
+        from robomme.robomme_env.utils.subgoal_planner_func import (
+            solve_putonto_whenhold,
+        )
+
+        if point is not None:
+            raise ValueError(f"MoveCube {action_name} requires point=null")
+        env = self.runtime.env
+        planner = self.runtime.planner
+        base = env.unwrapped
+        cube = self._require(base, "cube")
+        target = self._require(base, "goal_site")
+        if action_name == "grasp_and_lift_peg_side":
+            peg_target = self._require(base, "grasp_target")
+            return self.runtime.execute(
+                lambda: grasp_and_lift_peg_side(env, planner, obj=peg_target),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_push_to_target_with_peg":
+            direction = self._require(base, "direction2")
+            obj_flag = self._require(base, "obj_flag")
+            return self.runtime.execute(
+                lambda: solve_push_to_target_with_peg(
+                    env,
+                    planner,
+                    obj=cube,
+                    target=target,
+                    direction=direction,
+                    obj_flag=obj_flag,
+                ),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_push_to_target":
+            return self.runtime.execute(
+                lambda: solve_push_to_target(env, planner, obj=cube, target=target),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_pickup":
+            return self.runtime.execute(
+                lambda: solve_pickup(env, planner, obj=cube),
+                step_callback=step_callback,
+            )
+        if action_name == "solve_putonto_whenhold":
+            return self.runtime.execute(
+                lambda: solve_putonto_whenhold(env, planner, target=target),
+                step_callback=step_callback,
+            )
+        raise RuntimeError(
+            f"Subgoal mapper returned an unsupported MoveCube action: {action_name!r}"
+        )
+
+
 def build_action_adapter(task: str, runtime: OraclePlusPlannerRuntime) -> Any:
     if task == "BinFill":
         return BinFillActionAdapter(runtime)
+    if task == "ButtonUnmask":
+        return ButtonUnmaskActionAdapter(runtime)
+    if task == "PickHighlight":
+        return PickHighlightActionAdapter(runtime)
+    if task == "MoveCube":
+        return MoveCubeActionAdapter(runtime)
     raise ValueError(
         f"Oracle Plus has no direct high-level action adapter for task {task!r}"
     )

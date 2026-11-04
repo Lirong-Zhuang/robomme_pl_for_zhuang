@@ -6,7 +6,8 @@ Run from the repository root:
 Direct invocation inside the server environment:
     micromamba run -n robomme python examples/robomme/eval_oracle_plus.py \
         --vlm-host 127.0.0.1 --vlm-port 8021 \
-        --tasks BinFill --num-episodes 10 --num-repeats 3 \
+        --tasks BinFill,ButtonUnmask,PickHighlight,MoveCube \
+        --num-episodes 10 --num-repeats 3 \
         --run-name oracle_plus_27b.1
 """
 
@@ -59,6 +60,7 @@ from utils import RolloutRecorder
 
 
 MAX_PICKUP_POINT_ATTEMPTS = 3
+MAX_INITIAL_DEMONSTRATION_OBSERVATIONS = 10
 
 
 def _csv(value: str) -> list[str]:
@@ -174,6 +176,51 @@ def _current_pair(obs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
 
 ObservationPair = tuple[np.ndarray, np.ndarray]
 TimedObservation = tuple[int, ObservationPair]
+
+
+def _observation_pairs(obs: dict[str, Any]) -> list[ObservationPair]:
+    """Convert a reset batch into chronological overall/wrist pairs."""
+
+    fronts = obs["front_rgb_list"]
+    wrists = obs["wrist_rgb_list"]
+    front_values = list(fronts) if isinstance(fronts, (list, tuple)) else [fronts]
+    wrist_values = list(wrists) if isinstance(wrists, (list, tuple)) else [wrists]
+    if len(front_values) != len(wrist_values) or not front_values:
+        raise ValueError(
+            "Reset observations must contain equally sized non-empty overall/wrist lists"
+        )
+    return [
+        (_to_rgb(front), _to_rgb(wrist))
+        for front, wrist in zip(front_values, wrist_values)
+    ]
+
+
+def _sample_initial_demonstration(
+    obs: dict[str, Any],
+    *,
+    max_observations: int = MAX_INITIAL_DEMONSTRATION_OBSERVATIONS,
+) -> list[TimedObservation]:
+    """Uniformly sample demo frames and always append the new initial state."""
+
+    if max_observations < 2:
+        raise ValueError("max_observations must leave room for demo and initial state")
+    pairs = _observation_pairs(obs)
+    if len(pairs) < 2:
+        raise ValueError(
+            "MoveCube reset did not return a pre-recorded demonstration before "
+            "the new execution state"
+        )
+    demonstration_count = len(pairs) - 1
+    sample_count = min(demonstration_count, max_observations - 1)
+    sampled_indices = sorted(
+        {
+            int(round(index))
+            for index in np.linspace(0, demonstration_count - 1, sample_count)
+        }
+    )
+    sampled = [(index, pairs[index]) for index in sampled_indices]
+    sampled.append((len(pairs) - 1, pairs[-1]))
+    return sampled
 
 
 def _snapshot_timed_observation(
@@ -423,7 +470,7 @@ def _requested_run_config(
     """Build the behavior-defining configuration used to validate a resume."""
 
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
@@ -432,6 +479,9 @@ def _requested_run_config(
         "history_size": args.history_size,
         "history_stride": args.history_stride,
         "include_subgoal_init": True,
+        "max_initial_demonstration_observations": (
+            MAX_INITIAL_DEMONSTRATION_OBSERVATIONS
+        ),
         "pickup_point_max_attempts": MAX_PICKUP_POINT_ATTEMPTS,
         "include_description": args.include_description,
         "include_wrist": args.include_wrist,
@@ -493,7 +543,14 @@ def _setup_resume_config(
                 and requested_schema == 3
                 and existing_base == requested_base
             )
-            if not retry_policy_only_upgrade:
+            existing_base.pop("max_initial_demonstration_observations", None)
+            requested_base.pop("max_initial_demonstration_observations", None)
+            demonstration_sampling_upgrade = (
+                existing_schema == 5
+                and requested_schema == 6
+                and existing_base == requested_base
+            )
+            if not (retry_policy_only_upgrade or demonstration_sampling_upgrade):
                 raise ValueError(
                     "Cannot resume an Oracle Plus run with different settings. "
                     f"Existing configuration: {existing_config}; requested: "
@@ -501,8 +558,8 @@ def _setup_resume_config(
                 )
             _write_json(config_path, requested_config)
             print(
-                "[oracle_plus] Upgraded run config to schema 3: pickup decisions "
-                "missing point now receive up to three VLM attempts"
+                f"[oracle_plus] Upgraded run config from schema {existing_schema} "
+                f"to schema {requested_schema}"
             )
         return
 
@@ -807,7 +864,7 @@ def _infer_with_pickup_point_retry(
                     "Your previous JSON is invalid because next_subgoal "
                     f"{decision.next_subgoal!r} is a pickup but point is null. "
                     "Return the same completed value and next_subgoal, but add "
-                    "point=[y, x] at the center of the intended cube in the "
+                    "point=[y, x] at the center of the intended object in the "
                     "newest overall image. Do not change the subgoal or include "
                     "analysis. Return JSON only."
                 ),
@@ -933,19 +990,32 @@ def run_episode(
             maxlen=raw_window_size,
         )
         native_frame_cursor = current_simulator_frame
-        initial_window = [(current_simulator_frame, current_pair)]
+        prompt = get_prompt(
+            task,
+            include_description=args.include_description,
+            include_wrist=args.include_wrist,
+        )
+        if prompt.initial_observation_mode == "demonstration":
+            initial_window = _sample_initial_demonstration(obs)
+        else:
+            initial_window = [(current_simulator_frame, current_pair)]
         initial_paths = _write_vlm_call_images(
             episode_dir,
             call_index=0,
             observations=initial_window,
             include_wrist=args.include_wrist,
         )
+        # MoveCube reset can return an entire dense demonstration trajectory.
+        # The sampled arrays above remain referenced after clearing the large
+        # source batch, as do the final arrays used by the temporal ring.
+        _release_dense_observation_batch(obs)
         messages = build_messages(
             task=task,
             call_type="initial",
             task_goal=goal,
             include_description=args.include_description,
             include_wrist=args.include_wrist,
+            observation_count=len(initial_window),
             overall_image_shape=current_pair[0].shape[:2],
         )
         inference = _infer_with_pickup_point_retry(
@@ -963,7 +1033,7 @@ def run_episode(
                 "step": 0,
                 "call_index": 0,
                 "simulator_frame": current_simulator_frame,
-                "observation_frames": [current_simulator_frame],
+                "observation_frames": [frame for frame, _ in initial_window],
                 "subgoal_init_frame": current_simulator_frame,
                 "decision_index": 0,
                 "call_type": "initial",
