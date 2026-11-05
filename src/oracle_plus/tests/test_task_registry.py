@@ -197,3 +197,39 @@ def test_stop_cube_prompt_marks_each_wait_checkpoint_complete() -> None:
     )
     assert 'completed=true with\nnext_subgoal="remain static"' in prompt.system_prompt
     assert "completed=false" not in prompt.system_prompt
+
+
+@pytest.mark.parametrize("task", ["PickXtimes", "SwingXtimes"])
+@pytest.mark.parametrize("include_description", [True, False])
+@pytest.mark.parametrize("include_wrist", [True, False])
+def test_repeated_manipulation_prompts_use_liberal_pickup_completion(
+    task: str,
+    include_description: bool,
+    include_wrist: bool,
+) -> None:
+    prompt = get_prompt(
+        task,
+        include_description=include_description,
+        include_wrist=include_wrist,
+    )
+    assert "Approximate visual evidence is sufficient" in prompt.system_prompt
+    assert "Do not require a large or clearly measurable lifting height" in (
+        prompt.system_prompt
+    )
+    assert "cube moving upward together with the gripper" in prompt.system_prompt
+
+
+@pytest.mark.parametrize("include_description", [True, False])
+@pytest.mark.parametrize("include_wrist", [True, False])
+def test_swing_prompt_accepts_either_target_completion_cue(
+    include_description: bool,
+    include_wrist: bool,
+) -> None:
+    prompt = get_prompt(
+        "SwingXtimes",
+        include_description=include_description,
+        include_wrist=include_wrist,
+    )
+    assert "Either cue alone is sufficient" in prompt.system_prompt
+    assert "named target has\nturned red" in prompt.system_prompt
+    assert "cube/gripper is visibly positioned directly above" in prompt.system_prompt

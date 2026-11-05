@@ -22,8 +22,15 @@ the button only after the final placement.
 and then placed onto the target. Count completed placements, not grasp attempts.
 4. The same target cube is used for every repetition. After placement it may be
 at a new image position, so ground every pickup from the latest overall image.
-5. Treat pickup as complete on visible grasp-and-lift evidence. Treat placement
-as complete only after the cube has been released onto the purple target.
+5. Treat a pick-up subgoal as complete when the correct cube appears to be held
+by the gripper and there is visual evidence that it has been lifted or moved
+upward with the gripper. Approximate visual evidence is sufficient: a small lift,
+a slight visible separation, or the cube moving upward together with the gripper
+all count as success. Do not require a large or clearly measurable lifting height.
+Only keep the pickup incomplete when the gripper appears empty, the cube remains
+resting without upward movement, or there is clear evidence that it was dropped.
+Treat placement as complete only after the cube has been released onto the purple
+target.
 6. A pickup requires point=[y, x] at the cube center in the latest overall
 image. Placement, button press, and STOP require point=null."""
 
@@ -57,7 +64,7 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     view = "paired" if include_wrist else "overall_only"
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=f"pick_xtimes_oracle_planner_v1_{view}_{suffix}",
+        version=f"pick_xtimes_oracle_planner_v2_liberal_pickup_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         system_prompt=build_system_prompt(
