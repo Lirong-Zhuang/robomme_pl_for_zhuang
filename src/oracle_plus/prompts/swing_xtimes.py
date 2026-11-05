@@ -14,42 +14,28 @@ from .base import build_system_prompt
 
 TASK_NAME = "SwingXtimes"
 
-NOTES_PAIRED = """1. The targets are two white-grey disks.
-2. When the robot reaches a target, that target changes to a red-and-white
-appearance.
-3. Right and left are defined in the robot base frame: the robot-right target
-appears on the camera's left, and the robot-left target appears on camera-right.
-4. Use the task goal to determine the cube color and number of right-left swing
-pairs. Pick the requested cube once, then alternate right-side followed by
-left-side for every repetition.
-5. For a move-to-target subgoal, focus primarily on the wrist images and compare
-the subgoal-init wrist image with the recent wrist images. Count the visit when
-the recent wrist view is broadly consistent with both the held cube being roughly
-above the named target and the target changing from its original grey appearance
-to a red-and-white appearance. Apply this check liberally: approximate alignment
-and a partial color change are enough, and tolerate blur, lighting differences,
-and the cube or gripper partly hiding the disk. Do not require exact centering or
-a perfectly unobstructed target.
-Continuous recent frames showing one visit are not multiple visits.
-6. Pickup and every move-to-target action require point=[y, x] in the latest
-overall image. Putdown, button press, and STOP require point=null.
-7. After all requested pairs, put the cube on the table and press the button."""
+TARGET_SIDE_REMINDER = """Target-side reminder for this call:
+- The robot-right target is the disk on the LEFT side of the overall camera image.
+- The robot-left target is the disk on the RIGHT side of the overall camera image.
+These target identities stay fixed throughout the episode. Use the overall image,
+not the wrist image, to identify left versus right, and never rename a target from
+the image-centric point of view."""
 
-NOTES_OVERALL_ONLY = """1. The targets are two white-grey disks.
-2. When the robot reaches a target, that target changes to a red-and-white
-appearance.
+
+def _with_target_side_reminder(template: str) -> str:
+    marker = "Start directly with the JSON object. Output JSON only."
+    if marker not in template:
+        raise ValueError("SwingXtimes user template is missing the JSON output marker")
+    return template.replace(marker, f"{TARGET_SIDE_REMINDER}\n{marker}")
+
+NOTES = """1. The targets are two white-grey disks.
+2. When the robot reaches a target, that target turns red.
 3. Right and left are defined in the robot base frame: the robot-right target
 appears on the camera's left, and the robot-left target appears on camera-right.
 4. Use the task goal to determine the cube color and number of right-left swing
 pairs. Pick the requested cube once, then alternate right-side followed by
 left-side for every repetition.
-5. For a move-to-target subgoal, compare the subgoal-init overall image with the
-recent overall images. Count the visit when the recent view is broadly consistent
-with both the held cube being roughly above the named target and the target
-changing from its original grey appearance to a red-and-white appearance. Apply
-this check liberally: approximate alignment and a partial color change are enough,
-and tolerate blur, lighting differences, and partial occlusion. Do not require
-exact centering or a perfectly unobstructed target.
+5. Count a target visit only when the held cube visibly reaches that target.
 Continuous recent frames showing one visit are not multiple visits.
 6. Pickup and every move-to-target action require point=[y, x] in the latest
 overall image. Putdown, button press, and STOP require point=null.
@@ -99,23 +85,29 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     )
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=f"swing_xtimes_oracle_planner_v3_wrist_target_check_{view}_{suffix}",
+        version=f"swing_xtimes_oracle_planner_v1_repeated_side_reminder_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         system_prompt=build_system_prompt(
             subgoals=SUBGOALS,
-            notes=NOTES_PAIRED if include_wrist else NOTES_OVERALL_ONLY,
+            notes=NOTES,
             example=COMBINED_EXAMPLE,
             include_description=include_description,
             point_rules=point_rules,
         ),
         initial_user_template=(
-            INITIAL_USER_TEMPLATE if include_wrist else INITIAL_USER_TEMPLATE_OVERALL_ONLY
+            _with_target_side_reminder(
+                INITIAL_USER_TEMPLATE
+                if include_wrist
+                else INITIAL_USER_TEMPLATE_OVERALL_ONLY
+            )
         ),
         followup_user_template=(
-            FOLLOWUP_USER_TEMPLATE
-            if include_wrist
-            else FOLLOWUP_USER_TEMPLATE_OVERALL_ONLY
+            _with_target_side_reminder(
+                FOLLOWUP_USER_TEMPLATE
+                if include_wrist
+                else FOLLOWUP_USER_TEMPLATE_OVERALL_ONLY
+            )
         ),
     )
 

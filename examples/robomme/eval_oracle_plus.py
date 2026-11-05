@@ -61,6 +61,8 @@ from utils import RolloutRecorder
 
 MAX_TARGET_POINT_ATTEMPTS = 3
 MAX_INITIAL_DEMONSTRATION_OBSERVATIONS = 10
+STOP_CUBE_HISTORY_SIZE = 5
+STOP_CUBE_HISTORY_STRIDE = 5
 
 
 def _csv(value: str) -> list[str]:
@@ -1012,11 +1014,17 @@ def run_episode(
             )
         current_pair = _current_pair(obs)
         current_simulator_frame = _simulator_frame(reset_info, fallback=0)
+        history_size = (
+            STOP_CUBE_HISTORY_SIZE if task == "StopCube" else args.history_size
+        )
+        history_stride = (
+            STOP_CUBE_HISTORY_STRIDE if task == "StopCube" else args.history_stride
+        )
         subgoal_initial_observation = _snapshot_timed_observation(
             current_simulator_frame,
             current_pair,
         )
-        raw_window_size = (args.history_size - 1) * args.history_stride + 1
+        raw_window_size = (history_size - 1) * history_stride + 1
         native_observation_ring: deque[TimedObservation] = deque(
             [(current_simulator_frame, current_pair)],
             maxlen=raw_window_size,
@@ -1148,14 +1156,25 @@ def run_episode(
                 "info": _jsonable(execution.info),
                 "simulator_frame_count": action_frame_count,
             }
+            if (
+                task == "StopCube"
+                and resolved_action_name == "solve_hold_obj_absTimestep"
+                and action_frame_count == 0
+            ):
+                record["decisions"][-1]["execution"]["no_progress"] = True
+                record["decisions"][-1]["execution"]["reason"] = (
+                    "StopCube wait reached the final pre-press timestep"
+                )
+                record["status"] = "stalled"
+                break
             if execution.stopped:
                 record["status"] = execution.status
                 break
 
             temporal_window = _sample_temporal_window(
                 native_observation_ring,
-                history_size=args.history_size,
-                history_stride=args.history_stride,
+                history_size=history_size,
+                history_stride=history_stride,
             )
             if not temporal_window:
                 temporal_window = [(current_simulator_frame, current_pair)]

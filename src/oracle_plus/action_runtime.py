@@ -720,12 +720,13 @@ class StopCubeActionAdapter:
     """Execute StopCube preparation, incremental waiting, and timed press."""
 
     point_actions: tuple[str, ...] = ()
+    wait_step = 20
 
     def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
         self.runtime = runtime
 
     def _solve_incremental_wait(self, solve_hold_obj_abs_timestep: Any) -> None:
-        """Advance to the next official 100-frame checkpoint before the press."""
+        """Advance by one bounded chunk toward the final pre-press timestep."""
 
         env = self.runtime.env
         planner = self.runtime.planner
@@ -737,40 +738,19 @@ class StopCubeActionAdapter:
         interval = int(getattr(base, "interval", 30))
         final_target = max(0, int(steps_press - interval))
         current_step = int(getattr(env, "elapsed_steps", 0))
-        checkpoints_key = "_stopcube_static_checkpoints"
-        index_key = "_stopcube_static_index"
-        final_target_key = "_stopcube_static_final_target"
-        last_step_key = "_stopcube_static_last_elapsed_step"
 
-        checkpoints = getattr(base, checkpoints_key, None)
-        index = getattr(base, index_key, None)
-        cached_final_target = getattr(base, final_target_key, None)
-        last_step = getattr(base, last_step_key, None)
-        needs_rebuild = (
-            not isinstance(checkpoints, list)
-            or not checkpoints
-            or index is None
-            or cached_final_target is None
-            or int(cached_final_target) != final_target
-            or (last_step is not None and current_step < int(last_step))
-        )
-        if needs_rebuild:
-            checkpoints = list(range(100, final_target, 100))
-            if not checkpoints or checkpoints[-1] != final_target:
-                checkpoints.append(final_target)
-            index = 0
-        else:
-            index = min(max(int(index), 0), len(checkpoints) - 1)
+        # Once the final pre-press point has been reached, waiting again must not
+        # manufacture another VLM decision from an unchanged observation.
+        if current_step >= final_target:
+            return
+
+        next_target = min(current_step + self.wait_step, final_target)
 
         solve_hold_obj_abs_timestep(
             env,
             planner,
-            absTimestep=checkpoints[index],
+            absTimestep=next_target,
         )
-        setattr(base, checkpoints_key, checkpoints)
-        setattr(base, index_key, index + 1)
-        setattr(base, final_target_key, final_target)
-        setattr(base, last_step_key, current_step)
 
     def execute(
         self,

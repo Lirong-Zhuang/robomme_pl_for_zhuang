@@ -174,7 +174,7 @@ def test_counting_task_prompt_variants_build_matching_image_placeholders(
     assert placeholder_count == (3 + 1) * views
 
 
-def test_stop_cube_wait_uses_incremental_official_checkpoints() -> None:
+def test_stop_cube_wait_advances_in_twenty_step_chunks() -> None:
     base = SimpleNamespace(steps_press=450, interval=30)
     env = SimpleNamespace(unwrapped=base, elapsed_steps=0)
     runtime = SimpleNamespace(env=env, planner=object())
@@ -189,12 +189,30 @@ def test_stop_cube_wait_uses_incremental_official_checkpoints() -> None:
     for _ in range(5):
         adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
 
-    assert targets == [100, 200, 300, 400, 420]
+    assert targets == [20, 40, 60, 80, 100]
 
-    # A new episode has a smaller elapsed step and must restart checkpoint state.
+    # A reset naturally starts another sequence from the new current timestep.
     env.elapsed_steps = 0
     adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
-    assert targets[-1] == 100
+    assert targets[-1] == 20
+
+
+def test_stop_cube_wait_caps_at_final_target_and_then_makes_no_call() -> None:
+    base = SimpleNamespace(steps_press=450, interval=30)
+    env = SimpleNamespace(unwrapped=base, elapsed_steps=410)
+    runtime = SimpleNamespace(env=env, planner=object())
+    adapter = StopCubeActionAdapter(runtime)
+    targets: list[int] = []
+
+    def solve_hold(fake_env, _planner, **kwargs) -> None:
+        target = kwargs["absTimestep"]
+        targets.append(target)
+        fake_env.elapsed_steps = target
+
+    adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
+    adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
+
+    assert targets == [420]
 
 
 @pytest.mark.parametrize("include_description", [True, False])
@@ -252,25 +270,8 @@ def test_pick_xtimes_prompt_uses_liberal_pickup_completion(
 
 
 @pytest.mark.parametrize("include_description", [True, False])
-def test_swing_paired_prompt_uses_liberal_wrist_target_check(
-    include_description: bool,
-) -> None:
-    prompt = get_prompt(
-        "SwingXtimes",
-        include_description=include_description,
-        include_wrist=True,
-    )
-    assert "focus primarily on the wrist images" in prompt.system_prompt
-    assert "held cube being roughly\nabove the named target" in prompt.system_prompt
-    assert "to a red-and-white appearance" in prompt.system_prompt
-    assert "Apply this check liberally" in prompt.system_prompt
-    assert "Do not require exact centering" in prompt.system_prompt
-    assert "Either cue alone is sufficient" not in prompt.system_prompt
-
-
-@pytest.mark.parametrize("include_description", [True, False])
 @pytest.mark.parametrize("include_wrist", [True, False])
-def test_swing_prompt_rolls_back_liberal_pickup_completion(
+def test_swing_prompt_uses_original_visible_target_visit_rule(
     include_description: bool,
     include_wrist: bool,
 ) -> None:
@@ -279,5 +280,30 @@ def test_swing_prompt_rolls_back_liberal_pickup_completion(
         include_description=include_description,
         include_wrist=include_wrist,
     )
+    assert "Count a target visit only when the held cube visibly reaches" in (
+        prompt.system_prompt
+    )
+    assert "Either cue alone is sufficient" not in prompt.system_prompt
     assert "Approximate visual evidence is sufficient" not in prompt.system_prompt
-    assert "cube moving upward together with the gripper" not in prompt.system_prompt
+    assert "focus primarily on the wrist images" not in prompt.system_prompt
+
+    initial_messages = prompt.build_messages(
+        call_type="initial",
+        task_goal="swing once",
+        observation_count=0,
+        overall_image_shape=(256, 256),
+    )
+    followup_messages = prompt.build_messages(
+        call_type="followup",
+        task_goal="swing once",
+        history_subgoals=[],
+        current_subgoal="move to the top of the left-side target for the first time",
+        observation_count=3,
+        overall_image_shape=(256, 256),
+    )
+    for messages in (initial_messages, followup_messages):
+        user_prompt = messages[-1]["content"]
+        assert "Target-side reminder for this call" in user_prompt
+        assert "robot-right target is the disk on the LEFT side" in user_prompt
+        assert "robot-left target is the disk on the RIGHT side" in user_prompt
+        assert "not the wrist image, to identify left versus right" in user_prompt
