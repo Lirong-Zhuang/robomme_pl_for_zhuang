@@ -14,32 +14,49 @@ from .base import build_system_prompt
 
 TASK_NAME = "StopCube"
 
-NOTES = """1. Estimate the cube's speed to decide when to remain static and
-when to press the button.
-2. Count how many times the cube has reached the target and use the requested
-count in the task goal to decide when to press.
-3. The observation clips are continuous. Do not recount one target visit when
-the cube is still on the target in both the previous and current observations.
-4. If the cube is about to reach the target for the requested time, press the
-button directly. The press motion takes time, so do not wait until the cube is
-already perfectly centered.
-5. The target is a purple disk.
-6. First move above the button. Each remain-static execution advances to one
-incremental absolute-timestep checkpoint and completes that waiting segment.
-If another checkpoint is needed, return completed=true with
-next_subgoal="remain static"; when it is time to press, return completed=true
-with the press subgoal.
-7. All subgoals and STOP require point=null."""
+NOTES = """1. Read the requested target-visit count N from the task goal. In the
+initial subgoal_sequence, first move above the button, then include exactly one
+numbered remain-static subgoal for every visit from the first through the
+(N-1)th, followed by the numbered press subgoal for the Nth visit.
+2. In the initial plan and throughout every follow-up call, always use the full
+form "remain static while the cube reaches the target for the [ordinal] time".
+Never output the bare or shortened form "remain static". Keep the ordinal in
+current_subgoal, next_subgoal, and the resulting history consistent with the
+number of distinct visits observed so far.
+3. Estimate the cube's speed and count distinct target visits. The observation
+clips are continuous: continuous frames from one target occupancy count as only
+one visit. Do not advance the ordinal until a new visit is visibly observed.
+4. Each execution of a numbered remain-static subgoal advances to one incremental
+absolute-timestep checkpoint. If its numbered visit has not yet been observed,
+return completed=false and repeat the exact same full numbered next_subgoal.
+After visit i is observed and another non-final waiting visit remains, return
+completed=true and advance to the full numbered remain-static subgoal for i+1.
+5. After the (N-1)th visit, keep the (N-1)th numbered remain-static subgoal active
+while the cube travels toward its final visit. Do not output the press subgoal
+merely because the (N-1)th visit completed. Only when the cube is approaching the
+target for the Nth time, return completed=true and output the full numbered press
+subgoal: "as the cube approaches the target for the [ordinal] time, press the
+button".
+6. The press motion takes time, so do not wait until the cube is already perfectly
+centered on its final requested visit. Once the numbered press subgoal is active,
+keep that exact subgoal until the press completes, then output STOP only if the
+cube is stopped on the target.
+7. The target is a purple disk.
+8. All subgoals and STOP require point=null."""
 
 SUBGOALS = """- move to the top of the button to prepare
-- remain static
-- press the button to stop the cube on the target
+- remain static while the cube reaches the target for the [first/second/third/...] time
+- as the cube approaches the target for the [second/third/fourth/...] time, press the button
 - STOP, only after the cube is stopped on the requested target visit"""
 
-COMBINED_EXAMPLE = """A typical task subgoal sequence is:
+COMBINED_EXAMPLE = """If the task goal requests stopping on the third target visit, use exactly:
 1. move to the top of the button to prepare
-2. remain static
-3. press the button to stop the cube on the target"""
+2. remain static while the cube reaches the target for the first time
+3. remain static while the cube reaches the target for the second time
+4. as the cube approaches the target for the third time, press the button
+
+During follow-up calls, repeat the exact active numbered remain-static string
+until its transition rule above is satisfied. Never shorten it to "remain static"."""
 
 
 SUBGOAL_ACTION_RULES: tuple[tuple[str, str], ...] = (
@@ -63,7 +80,7 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     )
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=f"stop_cube_oracle_planner_v1_{view}_{suffix}",
+        version=f"stop_cube_oracle_planner_v2_numbered_waits_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         system_prompt=build_system_prompt(

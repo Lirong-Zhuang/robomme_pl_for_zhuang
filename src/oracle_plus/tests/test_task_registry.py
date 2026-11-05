@@ -79,10 +79,14 @@ from oracle_plus.prompts import resolve_action_name
             "move to the top of the button to prepare",
             "solve_button_ready",
         ),
-        ("StopCube", "remain static", "solve_hold_obj_absTimestep"),
         (
             "StopCube",
-            "press the button to stop the cube on the target",
+            "remain static while the cube reaches the target for the second time",
+            "solve_hold_obj_absTimestep",
+        ),
+        (
+            "StopCube",
+            "as the cube approaches the target for the third time, press the button",
             "solve_button",
         ),
     ],
@@ -155,7 +159,11 @@ def test_counting_task_prompt_variants_build_matching_image_placeholders(
         include_description=include_description,
         include_wrist=include_wrist,
         history_subgoals=["previous subgoal"],
-        current_subgoal="remain static" if task == "StopCube" else "current subgoal",
+        current_subgoal=(
+            "remain static while the cube reaches the target for the first time"
+            if task == "StopCube"
+            else "current subgoal"
+        ),
         observation_count=3,
         overall_image_shape=(256, 256),
     )
@@ -189,26 +197,50 @@ def test_stop_cube_wait_uses_incremental_official_checkpoints() -> None:
     assert targets[-1] == 100
 
 
-def test_stop_cube_prompt_marks_each_wait_checkpoint_complete() -> None:
-    prompt = get_prompt(
-        "StopCube",
-        include_description=True,
-        include_wrist=False,
-    )
-    assert 'completed=true with\nnext_subgoal="remain static"' in prompt.system_prompt
-    assert "completed=false" not in prompt.system_prompt
-
-
-@pytest.mark.parametrize("task", ["PickXtimes", "SwingXtimes"])
 @pytest.mark.parametrize("include_description", [True, False])
 @pytest.mark.parametrize("include_wrist", [True, False])
-def test_repeated_manipulation_prompts_use_liberal_pickup_completion(
-    task: str,
+def test_stop_cube_prompt_uses_numbered_waits_in_all_calls(
     include_description: bool,
     include_wrist: bool,
 ) -> None:
     prompt = get_prompt(
-        task,
+        "StopCube",
+        include_description=include_description,
+        include_wrist=include_wrist,
+    )
+    assert (
+        "remain static while the cube reaches the target for the [ordinal] time"
+        in prompt.system_prompt
+    )
+    assert (
+        "remain static while the cube reaches the target for the first time"
+        in prompt.system_prompt
+    )
+    assert (
+        "remain static while the cube reaches the target for the second time"
+        in prompt.system_prompt
+    )
+    assert (
+        "as the cube approaches the target for the third time, press the button"
+        in prompt.system_prompt
+    )
+    assert "Never output the bare or shortened form \"remain static\"" in (
+        prompt.system_prompt
+    )
+    assert "return completed=false and repeat the exact same full numbered" in (
+        prompt.system_prompt
+    )
+    assert 'next_subgoal="remain static"' not in prompt.system_prompt
+
+
+@pytest.mark.parametrize("include_description", [True, False])
+@pytest.mark.parametrize("include_wrist", [True, False])
+def test_pick_xtimes_prompt_uses_liberal_pickup_completion(
+    include_description: bool,
+    include_wrist: bool,
+) -> None:
+    prompt = get_prompt(
+        "PickXtimes",
         include_description=include_description,
         include_wrist=include_wrist,
     )
@@ -220,8 +252,25 @@ def test_repeated_manipulation_prompts_use_liberal_pickup_completion(
 
 
 @pytest.mark.parametrize("include_description", [True, False])
+def test_swing_paired_prompt_uses_liberal_wrist_target_check(
+    include_description: bool,
+) -> None:
+    prompt = get_prompt(
+        "SwingXtimes",
+        include_description=include_description,
+        include_wrist=True,
+    )
+    assert "focus primarily on the wrist images" in prompt.system_prompt
+    assert "held cube being roughly\nabove the named target" in prompt.system_prompt
+    assert "to a red-and-white appearance" in prompt.system_prompt
+    assert "Apply this check liberally" in prompt.system_prompt
+    assert "Do not require exact centering" in prompt.system_prompt
+    assert "Either cue alone is sufficient" not in prompt.system_prompt
+
+
+@pytest.mark.parametrize("include_description", [True, False])
 @pytest.mark.parametrize("include_wrist", [True, False])
-def test_swing_prompt_accepts_either_target_completion_cue(
+def test_swing_prompt_rolls_back_liberal_pickup_completion(
     include_description: bool,
     include_wrist: bool,
 ) -> None:
@@ -230,6 +279,5 @@ def test_swing_prompt_accepts_either_target_completion_cue(
         include_description=include_description,
         include_wrist=include_wrist,
     )
-    assert "Either cue alone is sufficient" in prompt.system_prompt
-    assert "named target has\nturned red" in prompt.system_prompt
-    assert "cube/gripper is visibly positioned directly above" in prompt.system_prompt
+    assert "Approximate visual evidence is sufficient" not in prompt.system_prompt
+    assert "cube moving upward together with the gripper" not in prompt.system_prompt

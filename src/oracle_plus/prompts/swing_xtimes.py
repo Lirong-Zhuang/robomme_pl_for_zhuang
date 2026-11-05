@@ -14,31 +14,46 @@ from .base import build_system_prompt
 
 TASK_NAME = "SwingXtimes"
 
-NOTES = """1. The targets are two white-grey disks.
-2. When the robot reaches a target, that target turns red.
+NOTES_PAIRED = """1. The targets are two white-grey disks.
+2. When the robot reaches a target, that target changes to a red-and-white
+appearance.
 3. Right and left are defined in the robot base frame: the robot-right target
 appears on the camera's left, and the robot-left target appears on camera-right.
 4. Use the task goal to determine the cube color and number of right-left swing
 pairs. Pick the requested cube once, then alternate right-side followed by
 left-side for every repetition.
-5. Treat a move-to-target subgoal as complete when either the named target has
-turned red or the held cube/gripper is visibly positioned directly above that
-target. Either cue alone is sufficient; do not require both, because the held
-cube or gripper may partially occlude the target disk. Approximate visual
-alignment above the target is sufficient and does not need to be precisely
-measurable. Keep it incomplete only when the robot is still traveling, is
-visibly above the wrong target, or clearly has not reached the named target.
+5. For a move-to-target subgoal, focus primarily on the wrist images and compare
+the subgoal-init wrist image with the recent wrist images. Count the visit when
+the recent wrist view is broadly consistent with both the held cube being roughly
+above the named target and the target changing from its original grey appearance
+to a red-and-white appearance. Apply this check liberally: approximate alignment
+and a partial color change are enough, and tolerate blur, lighting differences,
+and the cube or gripper partly hiding the disk. Do not require exact centering or
+a perfectly unobstructed target.
 Continuous recent frames showing one visit are not multiple visits.
-6. Treat a pick-up subgoal as complete when the correct cube appears to be held
-by the gripper and there is visual evidence that it has been lifted or moved
-upward with the gripper. Approximate visual evidence is sufficient: a small lift,
-a slight visible separation, or the cube moving upward together with the gripper
-all count as success. Do not require a large or clearly measurable lifting height.
-Only keep the pickup incomplete when the gripper appears empty, the cube remains
-resting without upward movement, or there is clear evidence that it was dropped.
-7. Pickup and every move-to-target action require point=[y, x] in the latest
+6. Pickup and every move-to-target action require point=[y, x] in the latest
 overall image. Putdown, button press, and STOP require point=null.
-8. After all requested pairs, put the cube on the table and press the button."""
+7. After all requested pairs, put the cube on the table and press the button."""
+
+NOTES_OVERALL_ONLY = """1. The targets are two white-grey disks.
+2. When the robot reaches a target, that target changes to a red-and-white
+appearance.
+3. Right and left are defined in the robot base frame: the robot-right target
+appears on the camera's left, and the robot-left target appears on camera-right.
+4. Use the task goal to determine the cube color and number of right-left swing
+pairs. Pick the requested cube once, then alternate right-side followed by
+left-side for every repetition.
+5. For a move-to-target subgoal, compare the subgoal-init overall image with the
+recent overall images. Count the visit when the recent view is broadly consistent
+with both the held cube being roughly above the named target and the target
+changing from its original grey appearance to a red-and-white appearance. Apply
+this check liberally: approximate alignment and a partial color change are enough,
+and tolerate blur, lighting differences, and partial occlusion. Do not require
+exact centering or a perfectly unobstructed target.
+Continuous recent frames showing one visit are not multiple visits.
+6. Pickup and every move-to-target action require point=[y, x] in the latest
+overall image. Putdown, button press, and STOP require point=null.
+7. After all requested pairs, put the cube on the table and press the button."""
 
 SUBGOALS = """- pick up the [red/blue/green] cube
 - move to the top of the right-side target for the [first/second/third/...] time
@@ -84,14 +99,12 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     )
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=(
-            f"swing_xtimes_oracle_planner_v2_liberal_completion_{view}_{suffix}"
-        ),
+        version=f"swing_xtimes_oracle_planner_v3_wrist_target_check_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         system_prompt=build_system_prompt(
             subgoals=SUBGOALS,
-            notes=NOTES,
+            notes=NOTES_PAIRED if include_wrist else NOTES_OVERALL_ONLY,
             example=COMBINED_EXAMPLE,
             include_description=include_description,
             point_rules=point_rules,
