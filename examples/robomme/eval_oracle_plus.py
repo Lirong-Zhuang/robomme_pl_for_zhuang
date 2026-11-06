@@ -1235,7 +1235,7 @@ def run_episode(
                 history_stride=history_stride,
                 # Counting-task evidence visible at the subgoal boundary belongs
                 # to the preceding subgoal. Excluding that boundary and all older
-                # frames prevents one target occupancy/highlight from completing
+                # frames prevents one target occupancy from completing
                 # two consecutive subgoals through overlapping windows.
                 min_frame_exclusive=(
                     subgoal_initial_observation[0]

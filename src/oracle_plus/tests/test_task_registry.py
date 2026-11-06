@@ -408,7 +408,7 @@ def test_pick_xtimes_prompt_uses_liberal_pickup_completion(
 
 @pytest.mark.parametrize("include_description", [True, False])
 @pytest.mark.parametrize("include_wrist", [True, False])
-def test_swing_prompt_uses_original_visible_target_visit_rule(
+def test_swing_prompt_uses_color_independent_visible_target_visit_rule(
     include_description: bool,
     include_wrist: bool,
 ) -> None:
@@ -423,16 +423,23 @@ def test_swing_prompt_uses_original_visible_target_visit_rule(
     assert "Either cue alone is sufficient" not in prompt.system_prompt
     assert "Approximate visual evidence is sufficient" not in prompt.system_prompt
     assert "focus primarily on the wrist images" not in prompt.system_prompt
-    assert "The red highlight is temporary" in prompt.system_prompt
-    assert "use the newest\nframe to decide which target is currently red" in (
+    assert "Do not use any target color or\ncolor change" in prompt.system_prompt
+    assert "in the newest overall observation, the center of the held cube" in (
         prompt.system_prompt
     )
-    assert "red only in an\nolder frame does not complete" in prompt.system_prompt
+    assert "only the cube's stable occupancy of the disk is shown" in (
+        prompt.system_prompt
+    )
+    assert "over the target only in an older frame does not complete" in (
+        prompt.system_prompt
+    )
+    assert "red highlight" not in prompt.system_prompt.casefold()
+    assert "currently red" not in prompt.system_prompt.casefold()
     assert "Both target disks are part of the tabletop" in prompt.system_prompt
     assert "Do not\nrequire the cube to move away from the final target disk" in (
         prompt.system_prompt
     )
-    assert "Do not repeat release merely because the cube remains on a\nred target disk" in (
+    assert "Do not repeat release merely because the cube remains on a\ntarget disk" in (
         prompt.system_prompt
     )
     assert "release the [red/blue/green] cube and leave it resting" in (
