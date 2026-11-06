@@ -15,11 +15,12 @@ from .base import build_system_prompt
 TASK_NAME = "SwingXtimes"
 
 TARGET_SIDE_REMINDER = """Target-side reminder for this call:
-- The robot-right target is the disk on the LEFT side of the overall camera image.
-- The robot-left target is the disk on the RIGHT side of the overall camera image.
+- Always name the robot-right target as "robot-right target (camera-left disk)".
+- Always name the robot-left target as "robot-left target (camera-right disk)".
 These target identities stay fixed throughout the episode. Use the overall image,
-not the wrist image, to identify left versus right, and never rename a target from
-the image-centric point of view."""
+not the wrist image, to identify left versus right. Use these exact dual-frame
+labels in descriptions, subgoal_sequence, and next_subgoal; never use a bare
+"left-side" or "right-side" target/disk label."""
 
 
 def _with_target_side_reminder(template: str) -> str:
@@ -32,6 +33,10 @@ NOTES = """1. The targets are two white-grey disks.
 2. When the robot reaches a target, that target turns red.
 3. Right and left are defined in the robot base frame: the robot-right target
 appears on the camera's left, and the robot-left target appears on camera-right.
+Always call them "robot-right target (camera-left disk)" and "robot-left target
+(camera-right disk)" respectively. Use these complete dual-frame labels in every
+description, subgoal_sequence, and next_subgoal. Never use bare "left-side" or
+"right-side" to describe a target or disk.
 4. Use the task goal to determine the cube color and number of right-left swing
 pairs. Pick the requested cube once, then alternate right-side followed by
 left-side for every repetition.
@@ -42,18 +47,18 @@ overall image. Putdown, button press, and STOP require point=null.
 7. After all requested pairs, put the cube on the table and press the button."""
 
 SUBGOALS = """- pick up the [red/blue/green] cube
-- move to the top of the right-side target for the [first/second/third/...] time
-- move to the top of the left-side target for the [first/second/third/...] time
+- move to the top of the robot-right target (camera-left disk) for the [first/second/third/...] time
+- move to the top of the robot-left target (camera-right disk) for the [first/second/third/...] time
 - put the [red/blue/green] cube on the table
 - press the button
 - STOP, only after the button press completes"""
 
 COMBINED_EXAMPLE = """If the task goal requests two swings with the green cube, use:
 1. pick up the green cube
-2. move to the top of the right-side target for the first time
-3. move to the top of the left-side target for the first time
-4. move to the top of the right-side target for the second time
-5. move to the top of the left-side target for the second time
+2. move to the top of the robot-right target (camera-left disk) for the first time
+3. move to the top of the robot-left target (camera-right disk) for the first time
+4. move to the top of the robot-right target (camera-left disk) for the second time
+5. move to the top of the robot-left target (camera-right disk) for the second time
 6. put the green cube on the table
 7. press the button"""
 
@@ -85,7 +90,7 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     )
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=f"swing_xtimes_oracle_planner_v1_repeated_side_reminder_{view}_{suffix}",
+        version=f"swing_xtimes_oracle_planner_v2_dual_frame_labels_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         system_prompt=build_system_prompt(

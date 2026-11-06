@@ -61,8 +61,10 @@ from utils import RolloutRecorder
 
 MAX_TARGET_POINT_ATTEMPTS = 3
 MAX_INITIAL_DEMONSTRATION_OBSERVATIONS = 10
-STOP_CUBE_HISTORY_SIZE = 5
-STOP_CUBE_HISTORY_STRIDE = 5
+STOP_CUBE_WAIT_HISTORY_SIZE = 5
+STOP_CUBE_WAIT_HISTORY_STRIDE = 5
+STOP_CUBE_PREP_HISTORY_SIZE = 5
+STOP_CUBE_PREP_HISTORY_STRIDE = 10
 
 
 def _csv(value: str) -> list[str]:
@@ -273,6 +275,22 @@ def _sample_temporal_window(
         selected_frames.append(end_frame)
     selected_frames = selected_frames[-history_size:]
     return [(frame, by_frame[frame]) for frame in selected_frames]
+
+
+def _temporal_sampling_for_action(
+    *,
+    task: str,
+    action_name: str,
+    default_size: int,
+    default_stride: int,
+) -> tuple[int, int]:
+    """Use a longer StopCube preparation view and dense wait observations."""
+
+    if task != "StopCube":
+        return default_size, default_stride
+    if action_name == "solve_button_ready":
+        return STOP_CUBE_PREP_HISTORY_SIZE, STOP_CUBE_PREP_HISTORY_STRIDE
+    return STOP_CUBE_WAIT_HISTORY_SIZE, STOP_CUBE_WAIT_HISTORY_STRIDE
 
 
 def _prepare_episode_image_directories(episode_dir: Path) -> None:
@@ -612,6 +630,7 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
         "raw_response": decision_record["raw_response"],
         "decision": decision_record["decision"],
         "resolved_action_name": decision_record["resolved_action_name"],
+        "execution": decision_record.get("execution"),
         "vlm_attempts": decision_record.get("vlm_attempts", []),
         "validation_error": decision_record.get("validation_error"),
     }
@@ -1014,17 +1033,21 @@ def run_episode(
             )
         current_pair = _current_pair(obs)
         current_simulator_frame = _simulator_frame(reset_info, fallback=0)
-        history_size = (
-            STOP_CUBE_HISTORY_SIZE if task == "StopCube" else args.history_size
-        )
-        history_stride = (
-            STOP_CUBE_HISTORY_STRIDE if task == "StopCube" else args.history_stride
-        )
         subgoal_initial_observation = _snapshot_timed_observation(
             current_simulator_frame,
             current_pair,
         )
-        raw_window_size = (history_size - 1) * history_stride + 1
+        if task == "StopCube":
+            raw_window_size = max(
+                (STOP_CUBE_WAIT_HISTORY_SIZE - 1)
+                * STOP_CUBE_WAIT_HISTORY_STRIDE
+                + 1,
+                (STOP_CUBE_PREP_HISTORY_SIZE - 1)
+                * STOP_CUBE_PREP_HISTORY_STRIDE
+                + 1,
+            )
+        else:
+            raw_window_size = (args.history_size - 1) * args.history_stride + 1
         native_observation_ring: deque[TimedObservation] = deque(
             [(current_simulator_frame, current_pair)],
             maxlen=raw_window_size,
@@ -1062,6 +1085,16 @@ def run_episode(
         )
         decision = inference.decision
         resolved_action_name = inference.resolved_action_name
+        stopcube_boundary_press_subgoal = "press the button to stop the cube on the target"
+        if task == "StopCube":
+            stopcube_boundary_press_subgoal = next(
+                (
+                    planned_subgoal
+                    for planned_subgoal in decision.subgoal_sequence
+                    if resolve_action_name(task, planned_subgoal) == "solve_button"
+                ),
+                stopcube_boundary_press_subgoal,
+            )
         gpu_monitor.sample()
         record["decisions"].append(
             {
@@ -1102,6 +1135,25 @@ def run_episode(
                 raise RuntimeError("Non-STOP subgoal unexpectedly resolved to no action")
 
             active_subgoal = decision.next_subgoal
+            actual_action_name = resolved_action_name
+            controller_override: dict[str, Any] | None = None
+            stopcube_wait_timing: dict[str, Any] | None = None
+            if task == "StopCube" and resolved_action_name == "solve_hold_obj_absTimestep":
+                stopcube_wait_timing = adapter.wait_timing()
+                if not adapter.wait_progress_available():
+                    # The final pre-press boundary is the correct time to begin
+                    # pressing. Recover deterministically instead of executing a
+                    # zero-frame wait and misclassifying the episode as stalled.
+                    actual_action_name = "solve_button"
+                    active_subgoal = stopcube_boundary_press_subgoal
+                    controller_override = {
+                        "reason": "StopCube final pre-press boundary reached",
+                        "requested_action_name": resolved_action_name,
+                        "actual_action_name": actual_action_name,
+                        "requested_subgoal": decision.next_subgoal,
+                        "actual_subgoal": active_subgoal,
+                        "timing": stopcube_wait_timing,
+                    }
 
             def record_dense_step(step: Any) -> None:
                 nonlocal native_frame_cursor
@@ -1122,7 +1174,7 @@ def run_episode(
                 )
 
             execution = adapter.execute(
-                resolved_action_name,
+                actual_action_name,
                 active_subgoal,
                 decision.point,
                 step_callback=record_dense_step,
@@ -1148,7 +1200,8 @@ def run_episode(
                     native_observation_ring.extend(shifted_observations)
                 native_frame_cursor = current_simulator_frame
             record["decisions"][-1]["execution"] = {
-                "resolved_action_name": resolved_action_name,
+                "resolved_action_name": actual_action_name,
+                "requested_action_name": resolved_action_name,
                 "next_subgoal": active_subgoal,
                 "point": decision.point,
                 "status": execution.status,
@@ -1156,14 +1209,22 @@ def run_episode(
                 "info": _jsonable(execution.info),
                 "simulator_frame_count": action_frame_count,
             }
+            if stopcube_wait_timing is not None:
+                record["decisions"][-1]["execution"]["stopcube_timing"] = (
+                    stopcube_wait_timing
+                )
+            if controller_override is not None:
+                record["decisions"][-1]["execution"]["controller_override"] = (
+                    controller_override
+                )
             if (
                 task == "StopCube"
-                and resolved_action_name == "solve_hold_obj_absTimestep"
+                and actual_action_name == "solve_hold_obj_absTimestep"
                 and action_frame_count == 0
             ):
                 record["decisions"][-1]["execution"]["no_progress"] = True
                 record["decisions"][-1]["execution"]["reason"] = (
-                    "StopCube wait reached the final pre-press timestep"
+                    "StopCube wait was expected to advance but produced no frames"
                 )
                 record["status"] = "stalled"
                 break
@@ -1171,6 +1232,12 @@ def run_episode(
                 record["status"] = execution.status
                 break
 
+            history_size, history_stride = _temporal_sampling_for_action(
+                task=task,
+                action_name=actual_action_name,
+                default_size=args.history_size,
+                default_stride=args.history_stride,
+            )
             temporal_window = _sample_temporal_window(
                 native_observation_ring,
                 history_size=history_size,

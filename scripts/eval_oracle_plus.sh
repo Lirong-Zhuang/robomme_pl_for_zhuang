@@ -46,7 +46,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="test_24"
+RUN_NAME="test_25"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false

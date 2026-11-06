@@ -70,6 +70,16 @@ from oracle_plus.prompts import resolve_action_name
         ),
         (
             "SwingXtimes",
+            "move to the top of the robot-right target (camera-left disk) for the first time",
+            "solve_swingonto_whenhold",
+        ),
+        (
+            "SwingXtimes",
+            "move to the top of the robot-left target (camera-right disk) for the first time",
+            "solve_swingonto_whenhold",
+        ),
+        (
+            "SwingXtimes",
             "put the red cube on the table",
             "solve_putdown_whenhold",
         ),
@@ -215,6 +225,30 @@ def test_stop_cube_wait_caps_at_final_target_and_then_makes_no_call() -> None:
     assert targets == [420]
 
 
+def test_stop_cube_wait_progress_is_unavailable_only_at_final_boundary() -> None:
+    base = SimpleNamespace(
+        steps_press=450,
+        interval=30,
+        move_interval=120,
+        stop_time=4,
+    )
+    env = SimpleNamespace(unwrapped=base, elapsed_steps=419)
+    adapter = StopCubeActionAdapter(SimpleNamespace(env=env, planner=object()))
+
+    assert adapter.wait_progress_available() is True
+    assert adapter.wait_timing() == {
+        "elapsed_steps": 419,
+        "steps_press": 450,
+        "interval": 30,
+        "final_wait_target": 420,
+        "move_interval": 120,
+        "stop_time": 4,
+    }
+
+    env.elapsed_steps = 420
+    assert adapter.wait_progress_available() is False
+
+
 @pytest.mark.parametrize("include_description", [True, False])
 @pytest.mark.parametrize("include_wrist", [True, False])
 def test_stop_cube_prompt_uses_numbered_waits_in_all_calls(
@@ -248,6 +282,11 @@ def test_stop_cube_prompt_uses_numbered_waits_in_all_calls(
     assert "return completed=false and repeat the exact same full numbered" in (
         prompt.system_prompt
     )
+    assert "Target visits observed while moving above the button to prepare still count" in (
+        prompt.system_prompt
+    )
+    assert "skip every numbered remain-static subgoal whose" in prompt.system_prompt
+    assert "the first follow-up may go directly" in prompt.system_prompt
     assert 'next_subgoal="remain static"' not in prompt.system_prompt
 
 
@@ -286,6 +325,17 @@ def test_swing_prompt_uses_original_visible_target_visit_rule(
     assert "Either cue alone is sufficient" not in prompt.system_prompt
     assert "Approximate visual evidence is sufficient" not in prompt.system_prompt
     assert "focus primarily on the wrist images" not in prompt.system_prompt
+    assert (
+        "robot-right target (camera-left disk) for the [first/second/third/...] time"
+        in prompt.system_prompt
+    )
+    assert (
+        "robot-left target (camera-right disk) for the [first/second/third/...] time"
+        in prompt.system_prompt
+    )
+    assert 'never use a bare\n"left-side" or "right-side" target/disk label' in (
+        prompt.system_prompt
+    )
 
     initial_messages = prompt.build_messages(
         call_type="initial",
@@ -304,6 +354,11 @@ def test_swing_prompt_uses_original_visible_target_visit_rule(
     for messages in (initial_messages, followup_messages):
         user_prompt = messages[-1]["content"]
         assert "Target-side reminder for this call" in user_prompt
-        assert "robot-right target is the disk on the LEFT side" in user_prompt
-        assert "robot-left target is the disk on the RIGHT side" in user_prompt
+        assert 'robot-right target as "robot-right target (camera-left disk)"' in (
+            user_prompt
+        )
+        assert 'robot-left target as "robot-left target (camera-right disk)"' in (
+            user_prompt
+        )
         assert "not the wrist image, to identify left versus right" in user_prompt
+        assert "never use a bare" in user_prompt

@@ -26,6 +26,10 @@ number of distinct visits observed so far.
 3. Estimate the cube's speed and count distinct target visits. The observation
 clips are continuous: continuous frames from one target occupancy count as only
 one visit. Do not advance the ordinal until a new visit is visibly observed.
+Target visits observed while moving above the button to prepare still count.
+When preparation completes, skip every numbered remain-static subgoal whose
+visit has already occurred. If visits 1 through N-1 have already occurred and
+the cube is approaching visit N, output the numbered press subgoal directly.
 4. Each execution of a numbered remain-static subgoal advances to one incremental
 absolute-timestep checkpoint. If its numbered visit has not yet been observed,
 return completed=false and repeat the exact same full numbered next_subgoal.
@@ -56,7 +60,10 @@ COMBINED_EXAMPLE = """If the task goal requests stopping on the third target vis
 4. as the cube approaches the target for the third time, press the button
 
 During follow-up calls, repeat the exact active numbered remain-static string
-until its transition rule above is satisfied. Never shorten it to "remain static"."""
+until its transition rule above is satisfied. Never shorten it to "remain static".
+For example, if the first visit occurs while preparing for a two-visit task,
+the first follow-up may go directly to "as the cube approaches the target for
+the second time, press the button" instead of activating an obsolete first wait."""
 
 
 SUBGOAL_ACTION_RULES: tuple[tuple[str, str], ...] = (

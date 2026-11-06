@@ -725,19 +725,46 @@ class StopCubeActionAdapter:
     def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
         self.runtime = runtime
 
+    def wait_timing(self) -> dict[str, int | None]:
+        """Return the timing state used to decide whether waiting can advance."""
+
+        env = self.runtime.env
+        base = env.unwrapped
+        steps_press = getattr(base, "steps_press", None)
+        if steps_press is None:
+            raise RuntimeError("StopCube steps_press is unavailable")
+        interval = int(getattr(base, "interval", 30))
+        return {
+            "elapsed_steps": int(getattr(env, "elapsed_steps", 0)),
+            "steps_press": int(steps_press),
+            "interval": interval,
+            "final_wait_target": max(0, int(steps_press - interval)),
+            "move_interval": (
+                int(base.move_interval)
+                if getattr(base, "move_interval", None) is not None
+                else None
+            ),
+            "stop_time": (
+                int(base.stop_time)
+                if getattr(base, "stop_time", None) is not None
+                else None
+            ),
+        }
+
+    def wait_progress_available(self) -> bool:
+        """Return whether another wait request can advance simulator time."""
+
+        timing = self.wait_timing()
+        return timing["elapsed_steps"] < timing["final_wait_target"]
+
     def _solve_incremental_wait(self, solve_hold_obj_abs_timestep: Any) -> None:
         """Advance by one bounded chunk toward the final pre-press timestep."""
 
         env = self.runtime.env
         planner = self.runtime.planner
-        base = env.unwrapped
-        steps_press = getattr(base, "steps_press", None)
-        if steps_press is None:
-            raise RuntimeError("StopCube steps_press is unavailable")
-
-        interval = int(getattr(base, "interval", 30))
-        final_target = max(0, int(steps_press - interval))
-        current_step = int(getattr(env, "elapsed_steps", 0))
+        timing = self.wait_timing()
+        final_target = int(timing["final_wait_target"])
+        current_step = int(timing["elapsed_steps"])
 
         # Once the final pre-press point has been reached, waiting again must not
         # manufacture another VLM decision from an unchanged observation.
