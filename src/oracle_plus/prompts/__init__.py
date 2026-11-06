@@ -194,7 +194,8 @@ def match_action_name(task: str, subgoal: str) -> str | None:
 def resolve_action_name(task: str, subgoal: str) -> str | None:
     """Resolve a model subgoal to a trusted action, or None for STOP."""
 
-    if subgoal.strip().casefold() == "stop":
+    normalized = subgoal.strip().casefold()
+    if normalized == "stop" or normalized.startswith(("stop ", "stop,", "stop.")):
         return None
     action_name = match_action_name(task, subgoal)
     if action_name is None:

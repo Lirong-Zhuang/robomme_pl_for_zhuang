@@ -5,12 +5,14 @@ from types import SimpleNamespace
 import pytest
 
 from oracle_plus.action_runtime import StopCubeActionAdapter
+from oracle_plus.action_runtime import StopCubeReachEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
 from oracle_plus.prompts import available_tasks
 from oracle_plus.prompts import build_messages
 from oracle_plus.prompts import get_point_action_names
 from oracle_plus.prompts import get_prompt
 from oracle_plus.prompts import resolve_action_name
+from oracle_plus.vlm import SubgoalDecision
 
 
 @pytest.mark.parametrize(
@@ -83,6 +85,11 @@ from oracle_plus.prompts import resolve_action_name
             "put the red cube on the table",
             "solve_putdown_whenhold",
         ),
+        (
+            "SwingXtimes",
+            "release the green cube and leave it resting on the tabletop",
+            "solve_putdown_whenhold",
+        ),
         ("SwingXtimes", "press the button", "solve_button"),
         (
             "StopCube",
@@ -96,7 +103,10 @@ from oracle_plus.prompts import resolve_action_name
         ),
         (
             "StopCube",
-            "as the cube approaches the target for the third time, press the button",
+            (
+                "press the button now because the cube is currently approaching "
+                "the target for the third time"
+            ),
             "solve_button",
         ),
     ],
@@ -107,6 +117,24 @@ def test_subgoals_resolve_to_trusted_actions(
     action_name: str,
 ) -> None:
     assert resolve_action_name(task, subgoal) == action_name
+
+
+def test_stop_cube_rejects_legacy_conditional_press_wording() -> None:
+    with pytest.raises(ValueError):
+        resolve_action_name(
+            "StopCube",
+            "as the cube approaches the target for the third time, press the button",
+        )
+
+
+def test_descriptive_stop_form_is_terminal() -> None:
+    stop_text = "STOP, only after the button press completes"
+
+    assert resolve_action_name("SwingXtimes", stop_text) is None
+    assert SubgoalDecision(
+        completed=True,
+        next_subgoal=stop_text,
+    ).is_stop
 
 
 def test_new_tasks_have_matching_point_registries() -> None:
@@ -123,6 +151,54 @@ def test_new_tasks_have_matching_point_registries() -> None:
         adapter = build_action_adapter(task, object())
         assert get_point_action_names(task) == point_actions
         assert adapter.point_actions == point_actions
+
+
+def test_swing_putdown_release_status_uses_grasp_and_pose_state() -> None:
+    cube = SimpleNamespace(pose=SimpleNamespace(p=[[0.0, 0.0, 0.03]]))
+    agent = SimpleNamespace(
+        tcp=SimpleNamespace(pose=SimpleNamespace(p=[[0.0, 0.0, 0.15]])),
+        is_grasping=lambda _cube: False,
+    )
+    base = SimpleNamespace(target_cube=cube, agent=agent)
+    adapter = build_action_adapter(
+        "SwingXtimes",
+        SimpleNamespace(env=SimpleNamespace(unwrapped=base)),
+    )
+
+    assert adapter.putdown_release_status() == {
+        "is_grasping": False,
+        "cube_z": 0.03,
+        "gripper_z": 0.15,
+        "released_on_tabletop": True,
+    }
+
+    agent.is_grasping = lambda _cube: True
+    assert adapter.putdown_release_status()["released_on_tabletop"] is False
+
+
+@pytest.mark.parametrize(
+    ("subgoal", "side"),
+    [
+        (
+            "move to the top of the robot-right target (camera-left disk) "
+            "for the third time",
+            "right",
+        ),
+        (
+            "move to the top of the robot-left target (camera-right disk) "
+            "for the third time",
+            "left",
+        ),
+        ("move to the top of the right-side target", "right"),
+        ("move to the top of the left-side target", "left"),
+    ],
+)
+def test_swing_semantic_target_side_ignores_camera_frame_words(
+    subgoal: str,
+    side: str,
+) -> None:
+    adapter = build_action_adapter("SwingXtimes", object())
+    assert adapter.semantic_target_side(subgoal) == side
 
 
 @pytest.mark.parametrize("include_wrist", [True, False])
@@ -207,7 +283,7 @@ def test_stop_cube_wait_advances_in_twenty_step_chunks() -> None:
     assert targets[-1] == 20
 
 
-def test_stop_cube_wait_caps_at_final_target_and_then_makes_no_call() -> None:
+def test_stop_cube_wait_continues_past_diagnostic_press_boundary() -> None:
     base = SimpleNamespace(steps_press=450, interval=30)
     env = SimpleNamespace(unwrapped=base, elapsed_steps=410)
     runtime = SimpleNamespace(env=env, planner=object())
@@ -222,10 +298,10 @@ def test_stop_cube_wait_caps_at_final_target_and_then_makes_no_call() -> None:
     adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
     adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
 
-    assert targets == [420]
+    assert targets == [430, 450]
 
 
-def test_stop_cube_wait_progress_is_unavailable_only_at_final_boundary() -> None:
+def test_stop_cube_timing_is_diagnostic_only() -> None:
     base = SimpleNamespace(
         steps_press=450,
         interval=30,
@@ -235,7 +311,6 @@ def test_stop_cube_wait_progress_is_unavailable_only_at_final_boundary() -> None
     env = SimpleNamespace(unwrapped=base, elapsed_steps=419)
     adapter = StopCubeActionAdapter(SimpleNamespace(env=env, planner=object()))
 
-    assert adapter.wait_progress_available() is True
     assert adapter.wait_timing() == {
         "elapsed_steps": 419,
         "steps_press": 450,
@@ -245,8 +320,15 @@ def test_stop_cube_wait_progress_is_unavailable_only_at_final_boundary() -> None
         "stop_time": 4,
     }
 
-    env.elapsed_steps = 420
-    assert adapter.wait_progress_available() is False
+
+def test_stop_cube_reach_edge_requires_a_false_report_before_retrigger() -> None:
+    gate = StopCubeReachEdgeGate()
+
+    assert gate.accept(True) is True
+    assert gate.accept(True) is False
+    assert gate.accept(True) is False
+    assert gate.accept(False) is False
+    assert gate.accept(True) is True
 
 
 @pytest.mark.parametrize("include_description", [True, False])
@@ -273,8 +355,7 @@ def test_stop_cube_prompt_uses_numbered_waits_in_all_calls(
         in prompt.system_prompt
     )
     assert (
-        "as the cube approaches the target for the third time, press the button"
-        in prompt.system_prompt
+        "The ordinal in the press subgoal must exactly equal N" in prompt.system_prompt
     )
     assert "Never output the bare or shortened form \"remain static\"" in (
         prompt.system_prompt
@@ -285,8 +366,25 @@ def test_stop_cube_prompt_uses_numbered_waits_in_all_calls(
     assert "Target visits observed while moving above the button to prepare still count" in (
         prompt.system_prompt
     )
+    assert "Any\ntarget occupancy already visible there has already been consumed" in (
+        prompt.system_prompt
+    )
+    assert "require it\nto visibly leave and then re-enter" in prompt.system_prompt
+    assert "A continuous\noccupancy spanning subgoal-init" in prompt.system_prompt
     assert "skip every numbered remain-static subgoal whose" in prompt.system_prompt
-    assert "the first follow-up may go directly" in prompt.system_prompt
+    assert "the first follow-up may go directly" not in prompt.system_prompt
+    assert "the cube is now moving away, do not output the press subgoal" in (
+        prompt.system_prompt
+    )
+    assert "the third approach is non-final and must not trigger a press" in (
+        prompt.system_prompt
+    )
+    assert "visibly moving\ntoward the target but is still short of its center" in (
+        prompt.system_prompt
+    )
+    assert "If the task goal requests stopping on the third" not in (
+        prompt.system_prompt
+    )
     assert 'next_subgoal="remain static"' not in prompt.system_prompt
 
 
@@ -325,6 +423,21 @@ def test_swing_prompt_uses_original_visible_target_visit_rule(
     assert "Either cue alone is sufficient" not in prompt.system_prompt
     assert "Approximate visual evidence is sufficient" not in prompt.system_prompt
     assert "focus primarily on the wrist images" not in prompt.system_prompt
+    assert "The red highlight is temporary" in prompt.system_prompt
+    assert "use the newest\nframe to decide which target is currently red" in (
+        prompt.system_prompt
+    )
+    assert "red only in an\nolder frame does not complete" in prompt.system_prompt
+    assert "Both target disks are part of the tabletop" in prompt.system_prompt
+    assert "Do not\nrequire the cube to move away from the final target disk" in (
+        prompt.system_prompt
+    )
+    assert "Do not repeat release merely because the cube remains on a\nred target disk" in (
+        prompt.system_prompt
+    )
+    assert "release the [red/blue/green] cube and leave it resting" in (
+        prompt.system_prompt
+    )
     assert (
         "robot-right target (camera-left disk) for the [first/second/third/...] time"
         in prompt.system_prompt

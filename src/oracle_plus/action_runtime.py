@@ -640,6 +640,54 @@ class SwingXtimesActionAdapter:
     def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
         self.runtime = runtime
 
+    @staticmethod
+    def _pose_z(position: Any) -> float:
+        value = position.tolist() if hasattr(position, "tolist") else position
+        while (
+            isinstance(value, (list, tuple))
+            and len(value) == 1
+            and isinstance(value[0], (list, tuple))
+        ):
+            value = value[0]
+        if not isinstance(value, (list, tuple)) or len(value) < 3:
+            raise ValueError(f"Expected a 3D pose position, got {value!r}")
+        return float(value[2])
+
+    def putdown_release_status(self) -> dict[str, float | bool]:
+        """Verify putdown from grasp and pose state, not environment progress."""
+
+        base = self.runtime.env.unwrapped
+        cube = getattr(base, "target_cube", None)
+        if cube is None:
+            raise RuntimeError("SwingXtimes target cube is unavailable")
+        agent = base.agent
+        is_grasping = _flag_any(agent.is_grasping(cube))
+        cube_z = self._pose_z(cube.pose.p)
+        gripper_z = self._pose_z(agent.tcp.pose.p)
+        released_on_tabletop = (
+            not is_grasping and cube_z <= 0.2 and gripper_z > 0.05
+        )
+        return {
+            "is_grasping": is_grasping,
+            "cube_z": cube_z,
+            "gripper_z": gripper_z,
+            "released_on_tabletop": released_on_tabletop,
+        }
+
+    @staticmethod
+    def semantic_target_side(subgoal: str) -> str:
+        """Resolve the named robot-frame target without using a model point."""
+
+        text = " ".join(subgoal.casefold().replace("_", " ").split())
+        if "robot-right target" in text or "right-side target" in text:
+            return "right"
+        if "robot-left target" in text or "left-side target" in text:
+            return "left"
+        raise ValueError(
+            "SwingXtimes target subgoal must name robot-right or robot-left: "
+            f"{subgoal!r}"
+        )
+
     def execute(
         self,
         action_name: str,
@@ -660,6 +708,8 @@ class SwingXtimesActionAdapter:
         env = self.runtime.env
         planner = self.runtime.planner
         base = env.unwrapped
+        semantic_target_side: str | None = None
+        semantic_target_obj: Any | None = None
         if action_name == "solve_pickup":
             if point is None:
                 raise ValueError("SwingXtimes cube pickup requires point=[y, x]")
@@ -671,22 +721,33 @@ class SwingXtimesActionAdapter:
             target_left = getattr(base, "target_left", None)
             if target_right is None or target_left is None:
                 raise RuntimeError("SwingXtimes target objects are unavailable")
+            semantic_target_side = self.semantic_target_side(next_subgoal)
+            semantic_target_obj = (
+                target_right if semantic_target_side == "right" else target_left
+            )
             available = [target_right, target_left]
         else:
             available = None
 
         if available is not None:
-            selected = self.runtime.select_target_with_point(
+            point_selected = self.runtime.select_target_with_point(
                 available=available,
                 point_yx=point,
             )
             if action_name == "solve_pickup":
+                selected = point_selected
                 solve = lambda: solve_pickup(env, planner, obj=selected["obj"])
             else:
+                if semantic_target_obj is None or semantic_target_side is None:
+                    raise AssertionError("Swing semantic target was not resolved")
+                selected = self.runtime.select_target_with_point(
+                    available=[semantic_target_obj],
+                    point_yx=point,
+                )
                 solve = lambda: solve_swingonto_whenhold(
                     env,
                     planner,
-                    target=selected["obj"],
+                    target=semantic_target_obj,
                     height=0.1,
                 )
             execution = self.runtime.execute(solve, step_callback=step_callback)
@@ -694,6 +755,16 @@ class SwingXtimesActionAdapter:
                 key: value for key, value in selected.items() if key != "obj"
             }
             execution.info["requested_point_yx"] = list(point)
+            if action_name == "solve_swingonto_whenhold":
+                execution.info["semantic_target_side"] = semantic_target_side
+                execution.info["point_selected_target"] = {
+                    key: value
+                    for key, value in point_selected.items()
+                    if key != "obj"
+                }
+                execution.info["grounding_consistent"] = (
+                    point_selected["obj"] is semantic_target_obj
+                )
             return execution
 
         if point is not None:
@@ -716,6 +787,24 @@ class SwingXtimesActionAdapter:
         )
 
 
+@dataclass
+class StopCubeReachEdgeGate:
+    """Accept one reach transition until a non-reach observation rearms it."""
+
+    armed: bool = True
+
+    def accept(self, reach_reported: bool) -> bool:
+        """Suppress continuous true reports from one target occupancy."""
+
+        if not reach_reported:
+            self.armed = True
+            return False
+        if not self.armed:
+            return False
+        self.armed = False
+        return True
+
+
 class StopCubeActionAdapter:
     """Execute StopCube preparation, incremental waiting, and timed press."""
 
@@ -726,7 +815,7 @@ class StopCubeActionAdapter:
         self.runtime = runtime
 
     def wait_timing(self) -> dict[str, int | None]:
-        """Return the timing state used to decide whether waiting can advance."""
+        """Return environment timing for diagnostics only, never action control."""
 
         env = self.runtime.env
         base = env.unwrapped
@@ -751,27 +840,13 @@ class StopCubeActionAdapter:
             ),
         }
 
-    def wait_progress_available(self) -> bool:
-        """Return whether another wait request can advance simulator time."""
-
-        timing = self.wait_timing()
-        return timing["elapsed_steps"] < timing["final_wait_target"]
-
     def _solve_incremental_wait(self, solve_hold_obj_abs_timestep: Any) -> None:
-        """Advance by one bounded chunk toward the final pre-press timestep."""
+        """Advance one fixed chunk without consulting environment press timing."""
 
         env = self.runtime.env
         planner = self.runtime.planner
-        timing = self.wait_timing()
-        final_target = int(timing["final_wait_target"])
-        current_step = int(timing["elapsed_steps"])
-
-        # Once the final pre-press point has been reached, waiting again must not
-        # manufacture another VLM decision from an unchanged observation.
-        if current_step >= final_target:
-            return
-
-        next_target = min(current_step + self.wait_step, final_target)
+        current_step = int(getattr(env, "elapsed_steps", 0))
+        next_target = current_step + self.wait_step
 
         solve_hold_obj_abs_timestep(
             env,

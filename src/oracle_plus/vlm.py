@@ -82,7 +82,10 @@ class SubgoalDecision:
 
     @property
     def is_stop(self) -> bool:
-        return self.next_subgoal.casefold() == "stop"
+        normalized = self.next_subgoal.strip().casefold()
+        return normalized == "stop" or normalized.startswith(
+            ("stop ", "stop,", "stop.")
+        )
 
     @classmethod
     def from_mapping(

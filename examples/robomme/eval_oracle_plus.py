@@ -43,6 +43,7 @@ for import_root in (REPO_ROOT / "src", THIRD_PARTY_ROOT, ROBOMME_EXAMPLES_ROOT):
         sys.path.insert(0, str(import_root))
 
 from oracle_plus.action_runtime import OraclePlusPlannerRuntime
+from oracle_plus.action_runtime import StopCubeReachEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
 from oracle_plus.prompts import available_tasks
 from oracle_plus.prompts import build_messages
@@ -247,6 +248,7 @@ def _sample_temporal_window(
     *,
     history_size: int,
     history_stride: int,
+    min_frame_exclusive: int | None = None,
 ) -> list[TimedObservation]:
     """Sample a tail-aligned temporal window from the native-frame ring.
 
@@ -256,7 +258,13 @@ def _sample_temporal_window(
     """
     if not observations:
         return []
-    by_frame = {frame: pair for frame, pair in observations}
+    by_frame = {
+        frame: pair
+        for frame, pair in observations
+        if min_frame_exclusive is None or frame > min_frame_exclusive
+    }
+    if not by_frame:
+        return []
     available_frames = sorted(by_frame)
     end_frame = available_frames[-1]
     target_frames = [
@@ -629,7 +637,10 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
         "images": decision_record["images"],
         "raw_response": decision_record["raw_response"],
         "decision": decision_record["decision"],
+        "model_decision": decision_record.get("model_decision"),
         "resolved_action_name": decision_record["resolved_action_name"],
+        "stopcube_reach_edge": decision_record.get("stopcube_reach_edge"),
+        "swing_putdown_gate": decision_record.get("swing_putdown_gate"),
         "execution": decision_record.get("execution"),
         "vlm_attempts": decision_record.get("vlm_attempts", []),
         "validation_error": decision_record.get("validation_error"),
@@ -1085,16 +1096,6 @@ def run_episode(
         )
         decision = inference.decision
         resolved_action_name = inference.resolved_action_name
-        stopcube_boundary_press_subgoal = "press the button to stop the cube on the target"
-        if task == "StopCube":
-            stopcube_boundary_press_subgoal = next(
-                (
-                    planned_subgoal
-                    for planned_subgoal in decision.subgoal_sequence
-                    if resolve_action_name(task, planned_subgoal) == "solve_button"
-                ),
-                stopcube_boundary_press_subgoal,
-            )
         gpu_monitor.sample()
         record["decisions"].append(
             {
@@ -1123,6 +1124,7 @@ def run_episode(
                 f"Last validation error: {inference.validation_error}"
             )
         history: list[str] = []
+        stopcube_reach_gate = StopCubeReachEdgeGate()
         last_status = "ongoing"
 
         for decision_index in range(1, args.max_decisions + 1):
@@ -1136,24 +1138,12 @@ def run_episode(
 
             active_subgoal = decision.next_subgoal
             actual_action_name = resolved_action_name
-            controller_override: dict[str, Any] | None = None
             stopcube_wait_timing: dict[str, Any] | None = None
+            swing_putdown_status: dict[str, Any] | None = None
             if task == "StopCube" and resolved_action_name == "solve_hold_obj_absTimestep":
+                # Timing is logged for offline diagnosis only. The VLM remains
+                # solely responsible for deciding when to request the press.
                 stopcube_wait_timing = adapter.wait_timing()
-                if not adapter.wait_progress_available():
-                    # The final pre-press boundary is the correct time to begin
-                    # pressing. Recover deterministically instead of executing a
-                    # zero-frame wait and misclassifying the episode as stalled.
-                    actual_action_name = "solve_button"
-                    active_subgoal = stopcube_boundary_press_subgoal
-                    controller_override = {
-                        "reason": "StopCube final pre-press boundary reached",
-                        "requested_action_name": resolved_action_name,
-                        "actual_action_name": actual_action_name,
-                        "requested_subgoal": decision.next_subgoal,
-                        "actual_subgoal": active_subgoal,
-                        "timing": stopcube_wait_timing,
-                    }
 
             def record_dense_step(step: Any) -> None:
                 nonlocal native_frame_cursor
@@ -1209,13 +1199,14 @@ def run_episode(
                 "info": _jsonable(execution.info),
                 "simulator_frame_count": action_frame_count,
             }
+            if task == "SwingXtimes" and actual_action_name == "solve_putdown_whenhold":
+                swing_putdown_status = adapter.putdown_release_status()
+                record["decisions"][-1]["execution"]["swing_putdown_status"] = (
+                    swing_putdown_status
+                )
             if stopcube_wait_timing is not None:
                 record["decisions"][-1]["execution"]["stopcube_timing"] = (
                     stopcube_wait_timing
-                )
-            if controller_override is not None:
-                record["decisions"][-1]["execution"]["controller_override"] = (
-                    controller_override
                 )
             if (
                 task == "StopCube"
@@ -1242,6 +1233,15 @@ def run_episode(
                 native_observation_ring,
                 history_size=history_size,
                 history_stride=history_stride,
+                # Counting-task evidence visible at the subgoal boundary belongs
+                # to the preceding subgoal. Excluding that boundary and all older
+                # frames prevents one target occupancy/highlight from completing
+                # two consecutive subgoals through overlapping windows.
+                min_frame_exclusive=(
+                    subgoal_initial_observation[0]
+                    if task in {"StopCube", "SwingXtimes"}
+                    else None
+                ),
             )
             if not temporal_window:
                 temporal_window = [(current_simulator_frame, current_pair)]
@@ -1272,8 +1272,77 @@ def run_episode(
                 images=image_paths,
                 include_description=args.include_description,
             )
-            next_decision = inference.decision
+            model_next_decision = inference.decision
+            next_decision = model_next_decision
             next_resolved_action_name = inference.resolved_action_name
+            stopcube_reach_edge: dict[str, Any] | None = None
+            swing_putdown_gate: dict[str, Any] | None = None
+            if task == "StopCube" and actual_action_name == "solve_hold_obj_absTimestep":
+                model_subgoal_changed = (
+                    model_next_decision.next_subgoal.strip().casefold()
+                    != active_subgoal.strip().casefold()
+                )
+                reach_reported = (
+                    model_next_decision.completed or model_subgoal_changed
+                )
+                armed_before = stopcube_reach_gate.armed
+                reach_accepted = stopcube_reach_gate.accept(reach_reported)
+                stopcube_reach_edge = {
+                    "reported": reach_reported,
+                    "accepted": reach_accepted,
+                    "armed_before": armed_before,
+                    "armed_after": stopcube_reach_gate.armed,
+                }
+                if reach_reported and not reach_accepted:
+                    # The model is still seeing the target occupancy that
+                    # completed the preceding numbered wait. Keep the current
+                    # wait active until a non-reach call rearms the edge gate.
+                    next_decision = SubgoalDecision(
+                        completed=False,
+                        next_subgoal=active_subgoal,
+                        point=None,
+                        description=model_next_decision.description,
+                    )
+                    next_resolved_action_name = resolve_action_name(
+                        task,
+                        active_subgoal,
+                    )
+                    stopcube_reach_edge["reason"] = (
+                        "continuous StopCube reach suppressed until a non-reach "
+                        "observation rearms the gate"
+                    )
+            if (
+                task == "SwingXtimes"
+                and actual_action_name == "solve_putdown_whenhold"
+                and swing_putdown_status is not None
+            ):
+                release_confirmed = bool(
+                    swing_putdown_status["released_on_tabletop"]
+                )
+                swing_putdown_gate = {
+                    **swing_putdown_status,
+                    "release_confirmed": release_confirmed,
+                    "overrode_model": False,
+                }
+                if release_confirmed:
+                    next_decision = SubgoalDecision(
+                        completed=True,
+                        next_subgoal="press the button",
+                        point=None,
+                        description=(
+                            "The cube is released low on the tabletop and the "
+                            "gripper is raised away from it."
+                            if args.include_description
+                            else None
+                        ),
+                    )
+                    next_resolved_action_name = "solve_button"
+                    swing_putdown_gate["overrode_model"] = (
+                        next_decision != model_next_decision
+                    )
+                    swing_putdown_gate["reason"] = (
+                        "atomic putdown release confirmed from grasp and pose state"
+                    )
             gpu_monitor.sample()
             record["decisions"].append(
                 {
@@ -1288,7 +1357,14 @@ def run_episode(
                     "images": image_paths,
                     "raw_response": inference.raw_response,
                     "decision": asdict(next_decision),
+                    "model_decision": (
+                        asdict(model_next_decision)
+                        if next_decision != model_next_decision
+                        else None
+                    ),
                     "resolved_action_name": next_resolved_action_name,
+                    "stopcube_reach_edge": stopcube_reach_edge,
+                    "swing_putdown_gate": swing_putdown_gate,
                     "vlm_latency_ms": inference.vlm_latency_ms,
                     "action_request_ms": inference.action_request_ms,
                     "vlm_attempts": inference.attempts,
