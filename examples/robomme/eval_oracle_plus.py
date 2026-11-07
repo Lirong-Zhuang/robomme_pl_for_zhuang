@@ -538,7 +538,7 @@ def _requested_run_config(
     """Build the behavior-defining configuration used to validate a resume."""
 
     return {
-        "schema_version": 8,
+        "schema_version": 7,
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
@@ -547,7 +547,6 @@ def _requested_run_config(
         "history_size": args.history_size,
         "history_stride": args.history_stride,
         "stopcube_use_env_timing": args.stopcube_use_env_timing,
-        "stopcube_reach_gate": "world_xy_outside_to_inside_v1",
         "include_subgoal_init": True,
         "max_initial_demonstration_observations": (
             MAX_INITIAL_DEMONSTRATION_OBSERVATIONS
@@ -1180,9 +1179,6 @@ def run_episode(
             else None
         )
         stopcube_reach_gate = StopCubeReachEdgeGate()
-        if task == "StopCube":
-            stopcube_initial_occupancy = adapter.target_occupancy_status()
-            stopcube_reach_gate.sync(stopcube_initial_occupancy["inside"])
         swing_visit_gate = SwingVisitEdgeGate()
         swing_subgoal_sequence = (
             list(decision.subgoal_sequence) if task == "SwingXtimes" else []
@@ -1202,9 +1198,6 @@ def run_episode(
             actual_action_name = resolved_action_name
             controller_override: dict[str, Any] | None = None
             stopcube_wait_timing: dict[str, Any] | None = None
-            stopcube_visit_events: list[dict[str, Any]] = []
-            stopcube_visit_before: dict[str, Any] | None = None
-            stopcube_visit_after: dict[str, Any] | None = None
             swing_putdown_status: dict[str, Any] | None = None
             swing_expected_side: str | None = None
             swing_visit_before: dict[str, Any] | None = None
@@ -1235,12 +1228,6 @@ def run_episode(
                 swing_expected_side = adapter.semantic_target_side(active_subgoal)
                 swing_visit_before = adapter.visit_status()
                 swing_visit_gate.sync(swing_visit_before["occupied_side"])
-            if task == "StopCube":
-                stopcube_visit_before = {
-                    **adapter.target_occupancy_status(),
-                    "observed_visits": stopcube_reach_gate.observed_visits,
-                    "consumed_visits": stopcube_reach_gate.consumed_visits,
-                }
 
             def record_dense_step(step: Any) -> None:
                 nonlocal native_frame_cursor
@@ -1259,17 +1246,6 @@ def run_episode(
                 native_observation_ring.append(
                     (native_frame_cursor, _current_pair(observations))
                 )
-                if task == "StopCube":
-                    occupancy = adapter.target_occupancy_status()
-                    edge = stopcube_reach_gate.observe(occupancy["inside"])
-                    if edge["entered"] or edge["exited"]:
-                        stopcube_visit_events.append(
-                            {
-                                "simulator_frame": native_frame_cursor,
-                                **occupancy,
-                                **edge,
-                            }
-                        )
 
             execution = adapter.execute(
                 actual_action_name,
@@ -1285,22 +1261,6 @@ def run_episode(
                 execution.info,
                 fallback=current_simulator_frame + action_frame_count,
             )
-            if task == "StopCube":
-                final_occupancy = adapter.target_occupancy_status()
-                final_edge = stopcube_reach_gate.observe(final_occupancy["inside"])
-                if final_edge["entered"] or final_edge["exited"]:
-                    stopcube_visit_events.append(
-                        {
-                            "simulator_frame": current_simulator_frame,
-                            **final_occupancy,
-                            **final_edge,
-                        }
-                    )
-                stopcube_visit_after = {
-                    **final_occupancy,
-                    "observed_visits": stopcube_reach_gate.observed_visits,
-                    "consumed_visits": stopcube_reach_gate.consumed_visits,
-                }
             if native_observation_ring:
                 frame_offset = (
                     current_simulator_frame - native_observation_ring[-1][0]
@@ -1350,12 +1310,6 @@ def run_episode(
                 record["decisions"][-1]["execution"]["controller_override"] = (
                     controller_override
                 )
-            if stopcube_visit_before is not None and stopcube_visit_after is not None:
-                record["decisions"][-1]["execution"]["stopcube_visits"] = {
-                    "before": stopcube_visit_before,
-                    "events": stopcube_visit_events,
-                    "after": stopcube_visit_after,
-                }
             if (
                 task == "StopCube"
                 and actual_action_name == "solve_hold_obj_absTimestep"
@@ -1434,20 +1388,18 @@ def run_episode(
                 reach_reported = (
                     model_next_decision.completed or model_subgoal_changed
                 )
-                consumed_before = stopcube_reach_gate.consumed_visits
-                reach_accepted = stopcube_reach_gate.accept_report(reach_reported)
+                armed_before = stopcube_reach_gate.armed
+                reach_accepted = stopcube_reach_gate.accept(reach_reported)
                 stopcube_reach_edge = {
                     "reported": reach_reported,
                     "accepted": reach_accepted,
-                    "inside": stopcube_reach_gate.inside,
-                    "observed_visits": stopcube_reach_gate.observed_visits,
-                    "consumed_before": consumed_before,
-                    "consumed_after": stopcube_reach_gate.consumed_visits,
+                    "armed_before": armed_before,
+                    "armed_after": stopcube_reach_gate.armed,
                 }
                 if reach_reported and not reach_accepted:
-                    # A semantic completion report cannot consume the same
-                    # physical target entry twice. Keep the current wait active
-                    # until a new outside-to-inside edge is observed.
+                    # The model is still seeing the target occupancy that
+                    # completed the preceding numbered wait. Keep the current
+                    # wait active until a non-reach call rearms the edge gate.
                     next_decision = SubgoalDecision(
                         completed=False,
                         next_subgoal=active_subgoal,
@@ -1459,8 +1411,8 @@ def run_episode(
                         active_subgoal,
                     )
                     stopcube_reach_edge["reason"] = (
-                        "StopCube completion suppressed because no unconsumed "
-                        "outside-to-inside target entry was observed"
+                        "continuous StopCube reach suppressed until a non-reach "
+                        "observation rearms the gate"
                     )
             if (
                 task == "SwingXtimes"
