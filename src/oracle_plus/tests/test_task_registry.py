@@ -466,14 +466,46 @@ def test_stop_cube_timing_reports_environment_values() -> None:
     }
 
 
-def test_stop_cube_reach_edge_requires_a_false_report_before_retrigger() -> None:
+def test_stop_cube_reach_edge_requires_a_physical_exit_before_retrigger() -> None:
     gate = StopCubeReachEdgeGate()
 
-    assert gate.accept(True) is True
-    assert gate.accept(True) is False
-    assert gate.accept(True) is False
-    assert gate.accept(False) is False
-    assert gate.accept(True) is True
+    gate.sync(False)
+    first_entry = gate.observe(True)
+    assert first_entry["entered"] is True
+    assert first_entry["observed_visits"] == 1
+    assert gate.accept_report(True) is True
+
+    # Remaining inside cannot create or consume another visit, even if the VLM
+    # briefly reports false and then true again.
+    assert gate.observe(True)["entered"] is False
+    assert gate.accept_report(False) is False
+    assert gate.accept_report(True) is False
+
+    assert gate.observe(False)["exited"] is True
+    second_entry = gate.observe(True)
+    assert second_entry["entered"] is True
+    assert second_entry["observed_visits"] == 2
+    assert gate.accept_report(True) is True
+
+
+def test_stop_cube_target_occupancy_uses_world_xy_region() -> None:
+    cube = SimpleNamespace(pose=SimpleNamespace(p=[[0.02, 0.0, 0.02]]))
+    target = SimpleNamespace(pose=SimpleNamespace(p=[[0.0, 0.0, 0.005]]))
+    base = SimpleNamespace(cube=cube, target=target, cube_half_size=0.01)
+    adapter = StopCubeActionAdapter(
+        SimpleNamespace(
+            env=SimpleNamespace(unwrapped=base),
+            planner=object(),
+        )
+    )
+
+    status = adapter.target_occupancy_status()
+    assert status["inside"] is True
+    assert status["distance_xy"] == pytest.approx(0.02)
+    assert status["threshold"] == pytest.approx(0.03)
+
+    cube.pose.p = [[0.04, 0.0, 0.02]]
+    assert adapter.target_occupancy_status()["inside"] is False
 
 
 @pytest.mark.parametrize("include_description", [True, False])

@@ -964,19 +964,41 @@ class SwingXtimesActionAdapter:
 
 @dataclass
 class StopCubeReachEdgeGate:
-    """Accept one reach transition until a non-reach observation rearms it."""
+    """Count physical outside-to-inside target entries exactly once."""
 
-    armed: bool = True
+    inside: bool = False
+    observed_visits: int = 0
+    consumed_visits: int = 0
 
-    def accept(self, reach_reported: bool) -> bool:
-        """Suppress continuous true reports from one target occupancy."""
+    def sync(self, inside: bool) -> None:
+        """Initialize occupancy without treating it as a new visit."""
 
-        if not reach_reported:
-            self.armed = True
+        self.inside = inside
+
+    def observe(self, inside: bool) -> dict[str, Any]:
+        """Update occupancy and count only a new outside-to-inside edge."""
+
+        previous_inside = self.inside
+        entered = inside and not previous_inside
+        exited = previous_inside and not inside
+        if entered:
+            self.observed_visits += 1
+        self.inside = inside
+        return {
+            "previous_inside": previous_inside,
+            "inside": inside,
+            "entered": entered,
+            "exited": exited,
+            "observed_visits": self.observed_visits,
+            "consumed_visits": self.consumed_visits,
+        }
+
+    def accept_report(self, reach_reported: bool) -> bool:
+        """Consume at most one unconsumed physical entry for a VLM report."""
+
+        if not reach_reported or self.consumed_visits >= self.observed_visits:
             return False
-        if not self.armed:
-            return False
-        self.armed = False
+        self.consumed_visits += 1
         return True
 
 
@@ -1019,6 +1041,48 @@ class StopCubeActionAdapter:
                 if getattr(base, "stop_time", None) is not None
                 else None
             ),
+        }
+
+    @staticmethod
+    def _actor_position_xyz(actor: Any) -> tuple[float, float, float]:
+        value = actor.pose.p
+        if hasattr(value, "detach"):
+            value = value.detach()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        while (
+            isinstance(value, (list, tuple))
+            and len(value) == 1
+            and isinstance(value[0], (list, tuple))
+        ):
+            value = value[0]
+        if not isinstance(value, (list, tuple)) or len(value) < 3:
+            raise ValueError(f"Expected a 3D actor position, got {value!r}")
+        return float(value[0]), float(value[1]), float(value[2])
+
+    def target_occupancy_status(self) -> dict[str, Any]:
+        """Return whether the moving cube center is inside the target region."""
+
+        import math
+
+        base = self.runtime.env.unwrapped
+        cube = getattr(base, "cube", None)
+        target = getattr(base, "target", None)
+        cube_half_size = getattr(base, "cube_half_size", None)
+        if cube is None or target is None or cube_half_size is None:
+            raise RuntimeError("StopCube cube, target, or cube_half_size is unavailable")
+        cube_position = self._actor_position_xyz(cube)
+        target_position = self._actor_position_xyz(target)
+        distance_xy = math.dist(cube_position[:2], target_position[:2])
+        threshold = float(cube_half_size) * 3.0
+        return {
+            "inside": distance_xy <= threshold,
+            "distance_xy": distance_xy,
+            "threshold": threshold,
+            "cube_position": cube_position,
+            "target_position": target_position,
         }
 
     def wait_progress_available(self) -> bool:
