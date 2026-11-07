@@ -254,7 +254,7 @@ def test_swing_visit_status_uses_fixed_disk_x_order_and_bounded_regions() -> Non
         env = SimpleNamespace(unwrapped=base)
 
         @staticmethod
-        def project_actor_center(actor):
+        def project_actor_center(actor, *, projection_z=None):
             return {
                 "name": actor.name,
                 "position": [0.0, 0.0, 0.0],
@@ -270,6 +270,49 @@ def test_swing_visit_status_uses_fixed_disk_x_order_and_bounded_regions() -> Non
 
     pixels["cube"] = [125, 88]
     assert adapter.visit_status()["occupied_side"] is None
+
+
+def test_swing_visit_status_projects_held_cube_at_target_plane() -> None:
+    cube = SimpleNamespace(name="cube")
+    target_right = SimpleNamespace(name="target_right")
+    target_left = SimpleNamespace(name="target_left")
+    base = SimpleNamespace(
+        target_cube=cube,
+        target_right=target_right,
+        target_left=target_left,
+    )
+
+    class Runtime:
+        env = SimpleNamespace(unwrapped=base)
+
+        @staticmethod
+        def project_actor_center(actor, *, projection_z=None):
+            if actor is cube:
+                assert projection_z == pytest.approx(0.005)
+                return {
+                    "name": actor.name,
+                    "position": [-0.1179, -0.1358, 0.1018],
+                    "projection_position": [-0.1179, -0.1358, projection_z],
+                    "projected_pixel": [94, 82],
+                }
+            if actor is target_right:
+                return {
+                    "name": actor.name,
+                    "position": [-0.1154, -0.1413, 0.005],
+                    "projected_pixel": [94, 82],
+                }
+            return {
+                "name": actor.name,
+                "position": [-0.0488, 0.1615, 0.005],
+                "projected_pixel": [169, 94],
+            }
+
+    status = build_action_adapter("SwingXtimes", Runtime()).visit_status()
+
+    assert status["occupied_side"] == "right"
+    assert status["cube"]["position"][2] == pytest.approx(0.1018)
+    assert status["cube"]["projection_position"][2] == pytest.approx(0.005)
+    assert status["distance_pixels"]["right"] == 0.0
 
 
 @pytest.mark.parametrize("include_wrist", [True, False])

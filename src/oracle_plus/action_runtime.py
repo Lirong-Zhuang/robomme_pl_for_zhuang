@@ -265,8 +265,19 @@ class OraclePlusPlannerRuntime:
             )
         return selected
 
-    def project_actor_center(self, actor: Any) -> dict[str, Any]:
-        """Project one tracked actor center into the fixed overall camera."""
+    def project_actor_center(
+        self,
+        actor: Any,
+        *,
+        projection_z: float | None = None,
+    ) -> dict[str, Any]:
+        """Project one tracked actor center into the fixed overall camera.
+
+        ``projection_z`` preserves the actor's world x/y coordinates while
+        projecting them at a shared height.  This is useful for comparing a
+        held object with a tabletop region without introducing parallax from
+        their different heights.
+        """
 
         if self.front_image_shape is None:
             raise RuntimeError("Overall image shape is unavailable for projection")
@@ -284,8 +295,12 @@ class OraclePlusPlannerRuntime:
         position = extract_actor_position_xyz(actor)
         if position is None:
             raise ValueError(f"Could not read actor position for {actor!r}")
+        position_float = position.astype("float64")
+        projection_position = position_float.copy()
+        if projection_z is not None:
+            projection_position[2] = projection_z
         pixel = project_world_to_pixel(
-            position,
+            projection_position,
             intrinsic_cv=self.front_camera_intrinsic,
             extrinsic_cv=self.front_camera_extrinsic,
             image_shape=self.front_image_shape,
@@ -294,11 +309,14 @@ class OraclePlusPlannerRuntime:
             raise ValueError(
                 f"Actor {getattr(actor, 'name', 'unknown')!r} is outside the overall view"
             )
-        return {
+        result = {
             "name": getattr(actor, "name", "unknown"),
-            "position": position.astype("float64").tolist(),
+            "position": position_float.tolist(),
             "projected_pixel": [int(pixel[0]), int(pixel[1])],
         }
+        if projection_z is not None:
+            result["projection_position"] = projection_position.tolist()
+        return result
 
     @staticmethod
     def _last(value: Any) -> Any:
@@ -790,9 +808,16 @@ class SwingXtimesActionAdapter:
         if cube is None or target_right is None or target_left is None:
             raise RuntimeError("SwingXtimes cube or target disks are unavailable")
 
-        cube_projection = self.runtime.project_actor_center(cube)
         right_projection = self.runtime.project_actor_center(target_right)
         left_projection = self.runtime.project_actor_center(target_left)
+        target_plane_z = (
+            float(right_projection["position"][2])
+            + float(left_projection["position"][2])
+        ) / 2.0
+        cube_projection = self.runtime.project_actor_center(
+            cube,
+            projection_z=target_plane_z,
+        )
         right_pixel = right_projection["projected_pixel"]
         left_pixel = left_projection["projected_pixel"]
         cube_pixel = cube_projection["projected_pixel"]
@@ -831,8 +856,10 @@ class SwingXtimesActionAdapter:
             },
             "target_separation_pixels": separation,
             "enter_radius_pixels": enter_radius,
+            "target_plane_z": target_plane_z,
             "mapping_rule": (
-                "smaller-x disk is robot-right; larger-x disk is robot-left"
+                "smaller-x disk is robot-right; larger-x disk is robot-left; "
+                "cube x/y is projected at the target-disk plane"
             ),
         }
 
