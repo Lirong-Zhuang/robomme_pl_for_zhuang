@@ -44,6 +44,7 @@ for import_root in (REPO_ROOT / "src", THIRD_PARTY_ROOT, ROBOMME_EXAMPLES_ROOT):
 
 from oracle_plus.action_runtime import OraclePlusPlannerRuntime
 from oracle_plus.action_runtime import StopCubeReachEdgeGate
+from oracle_plus.action_runtime import SwingVisitEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
 from oracle_plus.prompts import available_tasks
 from oracle_plus.prompts import build_messages
@@ -299,6 +300,27 @@ def _temporal_sampling_for_action(
     if action_name == "solve_button_ready":
         return STOP_CUBE_PREP_HISTORY_SIZE, STOP_CUBE_PREP_HISTORY_STRIDE
     return STOP_CUBE_WAIT_HISTORY_SIZE, STOP_CUBE_WAIT_HISTORY_STRIDE
+
+
+def _next_swing_plan_subgoal(
+    subgoal_sequence: list[str],
+    active_subgoal: str,
+) -> str:
+    """Return the deterministic successor of one Swing plan item."""
+
+    active_key = " ".join(active_subgoal.casefold().split())
+    for index, planned_subgoal in enumerate(subgoal_sequence):
+        if " ".join(planned_subgoal.casefold().split()) != active_key:
+            continue
+        if index + 1 >= len(subgoal_sequence):
+            raise RuntimeError(
+                f"SwingXtimes active subgoal has no successor: {active_subgoal!r}"
+            )
+        return subgoal_sequence[index + 1]
+    raise RuntimeError(
+        f"SwingXtimes active subgoal is absent from the initial plan: "
+        f"{active_subgoal!r}"
+    )
 
 
 def _prepare_episode_image_directories(episode_dir: Path) -> None:
@@ -640,6 +662,7 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
         "model_decision": decision_record.get("model_decision"),
         "resolved_action_name": decision_record["resolved_action_name"],
         "stopcube_reach_edge": decision_record.get("stopcube_reach_edge"),
+        "swing_visit_gate": decision_record.get("swing_visit_gate"),
         "swing_putdown_gate": decision_record.get("swing_putdown_gate"),
         "execution": decision_record.get("execution"),
         "vlm_attempts": decision_record.get("vlm_attempts", []),
@@ -1125,6 +1148,10 @@ def run_episode(
             )
         history: list[str] = []
         stopcube_reach_gate = StopCubeReachEdgeGate()
+        swing_visit_gate = SwingVisitEdgeGate()
+        swing_subgoal_sequence = (
+            list(decision.subgoal_sequence) if task == "SwingXtimes" else []
+        )
         last_status = "ongoing"
 
         for decision_index in range(1, args.max_decisions + 1):
@@ -1140,10 +1167,20 @@ def run_episode(
             actual_action_name = resolved_action_name
             stopcube_wait_timing: dict[str, Any] | None = None
             swing_putdown_status: dict[str, Any] | None = None
+            swing_expected_side: str | None = None
+            swing_visit_before: dict[str, Any] | None = None
+            swing_visit_report: dict[str, Any] | None = None
             if task == "StopCube" and resolved_action_name == "solve_hold_obj_absTimestep":
                 # Timing is logged for offline diagnosis only. The VLM remains
                 # solely responsible for deciding when to request the press.
                 stopcube_wait_timing = adapter.wait_timing()
+            if (
+                task == "SwingXtimes"
+                and resolved_action_name == "solve_swingonto_whenhold"
+            ):
+                swing_expected_side = adapter.semantic_target_side(active_subgoal)
+                swing_visit_before = adapter.visit_status()
+                swing_visit_gate.sync(swing_visit_before["occupied_side"])
 
             def record_dense_step(step: Any) -> None:
                 nonlocal native_frame_cursor
@@ -1199,6 +1236,20 @@ def run_episode(
                 "info": _jsonable(execution.info),
                 "simulator_frame_count": action_frame_count,
             }
+            if swing_expected_side is not None and swing_visit_before is not None:
+                swing_visit_after = adapter.visit_status()
+                swing_visit_edge = swing_visit_gate.accept(
+                    expected_side=swing_expected_side,
+                    occupied_side=swing_visit_after["occupied_side"],
+                )
+                swing_visit_report = {
+                    "before": swing_visit_before,
+                    "after": swing_visit_after,
+                    "edge": swing_visit_edge,
+                }
+                record["decisions"][-1]["execution"]["swing_visit"] = (
+                    swing_visit_report
+                )
             if task == "SwingXtimes" and actual_action_name == "solve_putdown_whenhold":
                 swing_putdown_status = adapter.putdown_release_status()
                 record["decisions"][-1]["execution"]["swing_putdown_status"] = (
@@ -1277,6 +1328,7 @@ def run_episode(
             next_resolved_action_name = inference.resolved_action_name
             stopcube_reach_edge: dict[str, Any] | None = None
             swing_putdown_gate: dict[str, Any] | None = None
+            swing_visit_gate_record: dict[str, Any] | None = None
             if task == "StopCube" and actual_action_name == "solve_hold_obj_absTimestep":
                 model_subgoal_changed = (
                     model_next_decision.next_subgoal.strip().casefold()
@@ -1311,6 +1363,79 @@ def run_episode(
                         "continuous StopCube reach suppressed until a non-reach "
                         "observation rearms the gate"
                     )
+            if (
+                task == "SwingXtimes"
+                and actual_action_name == "solve_swingonto_whenhold"
+                and swing_visit_report is not None
+            ):
+                edge = swing_visit_report["edge"]
+                visit_confirmed = bool(edge["accepted"])
+                swing_visit_gate_record = {
+                    **swing_visit_report,
+                    "visit_confirmed": visit_confirmed,
+                    "overrode_model": False,
+                }
+                if visit_confirmed:
+                    planned_next_subgoal = _next_swing_plan_subgoal(
+                        swing_subgoal_sequence,
+                        active_subgoal,
+                    )
+                    planned_action_name = resolve_action_name(
+                        task,
+                        planned_next_subgoal,
+                    )
+                    planned_point: tuple[int, int] | None = None
+                    if planned_action_name == "solve_swingonto_whenhold":
+                        planned_side = adapter.semantic_target_side(
+                            planned_next_subgoal
+                        )
+                        pixel_xy = swing_visit_report["after"]["targets"][
+                            planned_side
+                        ]["projected_pixel"]
+                        planned_point = (int(pixel_xy[1]), int(pixel_xy[0]))
+                    next_decision = SubgoalDecision(
+                        completed=True,
+                        next_subgoal=planned_next_subgoal,
+                        point=planned_point,
+                        description=(
+                            "The held cube entered the "
+                            f"{'camera-left' if swing_expected_side == 'right' else 'camera-right'} "
+                            "disk region, confirming the current target visit."
+                            if args.include_description
+                            else None
+                        ),
+                    )
+                    next_resolved_action_name = planned_action_name
+                    swing_visit_gate_record["reason"] = (
+                        "expected disk-entry edge confirmed from fixed overall-camera "
+                        "geometry; advanced through the initial Swing plan"
+                    )
+                else:
+                    current_pixel_xy = swing_visit_report["after"]["targets"][
+                        swing_expected_side
+                    ]["projected_pixel"]
+                    next_decision = SubgoalDecision(
+                        completed=False,
+                        next_subgoal=active_subgoal,
+                        point=(int(current_pixel_xy[1]), int(current_pixel_xy[0])),
+                        description=(
+                            "The held cube has not produced a new entry into the "
+                            "currently expected disk region."
+                            if args.include_description
+                            else None
+                        ),
+                    )
+                    next_resolved_action_name = resolve_action_name(
+                        task,
+                        active_subgoal,
+                    )
+                    swing_visit_gate_record["reason"] = (
+                        "no new expected disk-entry edge; kept the current Swing "
+                        "subgoal and replaced the model point with the fixed disk center"
+                    )
+                swing_visit_gate_record["overrode_model"] = (
+                    next_decision != model_next_decision
+                )
             if (
                 task == "SwingXtimes"
                 and actual_action_name == "solve_putdown_whenhold"
@@ -1364,6 +1489,7 @@ def run_episode(
                     ),
                     "resolved_action_name": next_resolved_action_name,
                     "stopcube_reach_edge": stopcube_reach_edge,
+                    "swing_visit_gate": swing_visit_gate_record,
                     "swing_putdown_gate": swing_putdown_gate,
                     "vlm_latency_ms": inference.vlm_latency_ms,
                     "action_request_ms": inference.action_request_ms,

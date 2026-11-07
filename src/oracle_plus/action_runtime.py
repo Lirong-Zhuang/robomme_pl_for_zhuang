@@ -265,6 +265,41 @@ class OraclePlusPlannerRuntime:
             )
         return selected
 
+    def project_actor_center(self, actor: Any) -> dict[str, Any]:
+        """Project one tracked actor center into the fixed overall camera."""
+
+        if self.front_image_shape is None:
+            raise RuntimeError("Overall image shape is unavailable for projection")
+        if self.front_camera_intrinsic is None or self.front_camera_extrinsic is None:
+            raise RuntimeError(
+                "Overall camera intrinsic/extrinsic is unavailable for projection"
+            )
+        from robomme.robomme_env.utils.choice_action_mapping import (
+            extract_actor_position_xyz,
+        )
+        from robomme.robomme_env.utils.choice_action_mapping import (
+            project_world_to_pixel,
+        )
+
+        position = extract_actor_position_xyz(actor)
+        if position is None:
+            raise ValueError(f"Could not read actor position for {actor!r}")
+        pixel = project_world_to_pixel(
+            position,
+            intrinsic_cv=self.front_camera_intrinsic,
+            extrinsic_cv=self.front_camera_extrinsic,
+            image_shape=self.front_image_shape,
+        )
+        if pixel is None:
+            raise ValueError(
+                f"Actor {getattr(actor, 'name', 'unknown')!r} is outside the overall view"
+            )
+        return {
+            "name": getattr(actor, "name", "unknown"),
+            "position": position.astype("float64").tolist(),
+            "projected_pixel": [int(pixel[0]), int(pixel[1])],
+        }
+
     @staticmethod
     def _last(value: Any) -> Any:
         try:
@@ -632,6 +667,63 @@ class PickXtimesActionAdapter:
         )
 
 
+@dataclass
+class SwingVisitEdgeGate:
+    """Count one expected disk entry while suppressing stable occupancy."""
+
+    occupied_side: str | None = None
+    right_visits: int = 0
+    left_visits: int = 0
+
+    def sync(self, occupied_side: str | None) -> None:
+        """Record the pre-action region without consuming a visit."""
+
+        self.occupied_side = occupied_side
+
+    def accept(
+        self,
+        *,
+        expected_side: str,
+        occupied_side: str | None,
+    ) -> dict[str, Any]:
+        """Accept only an entry edge into the currently expected disk."""
+
+        if expected_side not in {"right", "left"}:
+            raise ValueError(f"Unsupported expected Swing side: {expected_side!r}")
+        previous_side = self.occupied_side
+        entered_side = (
+            occupied_side
+            if occupied_side is not None and occupied_side != previous_side
+            else None
+        )
+        # The first swing can begin directly above its target after pickup, so
+        # there may be no observable outside->inside edge at the high-level
+        # action boundary. The completed target-directed action may consume that
+        # initial occupancy once; every later visit still requires a side change.
+        initial_expected_occupancy = (
+            self.right_visits == 0
+            and self.left_visits == 0
+            and occupied_side == expected_side
+        )
+        accepted = entered_side == expected_side or initial_expected_occupancy
+        if accepted:
+            if expected_side == "right":
+                self.right_visits += 1
+            else:
+                self.left_visits += 1
+        self.occupied_side = occupied_side
+        return {
+            "expected_side": expected_side,
+            "previous_side": previous_side,
+            "occupied_side": occupied_side,
+            "entered_side": entered_side,
+            "initial_expected_occupancy": initial_expected_occupancy,
+            "accepted": accepted,
+            "right_visits": self.right_visits,
+            "left_visits": self.left_visits,
+        }
+
+
 class SwingXtimesActionAdapter:
     """Bind SwingXtimes decisions to cubes and the two grounded swing targets."""
 
@@ -687,6 +779,62 @@ class SwingXtimesActionAdapter:
             "SwingXtimes target subgoal must name robot-right or robot-left: "
             f"{subgoal!r}"
         )
+
+    def visit_status(self) -> dict[str, Any]:
+        """Locate the held cube relative to the two fixed disk image regions."""
+
+        base = self.runtime.env.unwrapped
+        cube = getattr(base, "target_cube", None)
+        target_right = getattr(base, "target_right", None)
+        target_left = getattr(base, "target_left", None)
+        if cube is None or target_right is None or target_left is None:
+            raise RuntimeError("SwingXtimes cube or target disks are unavailable")
+
+        cube_projection = self.runtime.project_actor_center(cube)
+        right_projection = self.runtime.project_actor_center(target_right)
+        left_projection = self.runtime.project_actor_center(target_left)
+        right_pixel = right_projection["projected_pixel"]
+        left_pixel = left_projection["projected_pixel"]
+        cube_pixel = cube_projection["projected_pixel"]
+
+        if right_pixel[0] >= left_pixel[0]:
+            raise RuntimeError(
+                "SwingXtimes target layout contradicts the fixed camera mapping: "
+                f"robot-right x={right_pixel[0]}, robot-left x={left_pixel[0]}"
+            )
+
+        import math
+
+        separation = math.dist(right_pixel, left_pixel)
+        # The target disks occupy roughly one quarter of their center separation
+        # in the fixed overall view. Clamping keeps the rule stable across modest
+        # camera-scale changes while remaining stricter than nearest-disk matching.
+        enter_radius = max(10.0, min(32.0, separation * 0.28))
+        distance_right = math.dist(cube_pixel, right_pixel)
+        distance_left = math.dist(cube_pixel, left_pixel)
+        occupied_side: str | None = None
+        nearest_distance = min(distance_right, distance_left)
+        if nearest_distance <= enter_radius:
+            occupied_side = (
+                "right" if distance_right <= distance_left else "left"
+            )
+        return {
+            "occupied_side": occupied_side,
+            "cube": cube_projection,
+            "targets": {
+                "right": right_projection,
+                "left": left_projection,
+            },
+            "distance_pixels": {
+                "right": distance_right,
+                "left": distance_left,
+            },
+            "target_separation_pixels": separation,
+            "enter_radius_pixels": enter_radius,
+            "mapping_rule": (
+                "smaller-x disk is robot-right; larger-x disk is robot-left"
+            ),
+        }
 
     def execute(
         self,

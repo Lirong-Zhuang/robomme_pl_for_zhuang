@@ -6,6 +6,7 @@ import pytest
 
 from oracle_plus.action_runtime import StopCubeActionAdapter
 from oracle_plus.action_runtime import StopCubeReachEdgeGate
+from oracle_plus.action_runtime import SwingVisitEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
 from oracle_plus.prompts import available_tasks
 from oracle_plus.prompts import build_messages
@@ -199,6 +200,76 @@ def test_swing_semantic_target_side_ignores_camera_frame_words(
 ) -> None:
     adapter = build_action_adapter("SwingXtimes", object())
     assert adapter.semantic_target_side(subgoal) == side
+
+
+def test_swing_visit_edge_counts_only_a_new_expected_disk_entry() -> None:
+    gate = SwingVisitEdgeGate()
+
+    gate.sync("right")
+    first_left = gate.accept(expected_side="left", occupied_side="left")
+    assert first_left["accepted"] is True
+    assert first_left["left_visits"] == 1
+
+    gate.sync("left")
+    repeated_left = gate.accept(expected_side="left", occupied_side="left")
+    assert repeated_left["accepted"] is False
+    assert repeated_left["left_visits"] == 1
+
+    gate.sync("left")
+    second_right = gate.accept(expected_side="right", occupied_side="right")
+    assert second_right["accepted"] is True
+    assert second_right["right_visits"] == 1
+
+
+def test_swing_visit_edge_accepts_initial_expected_occupancy_once() -> None:
+    gate = SwingVisitEdgeGate()
+
+    gate.sync("right")
+    first_right = gate.accept(expected_side="right", occupied_side="right")
+    assert first_right["accepted"] is True
+    assert first_right["initial_expected_occupancy"] is True
+
+    gate.sync("right")
+    repeated_right = gate.accept(expected_side="right", occupied_side="right")
+    assert repeated_right["accepted"] is False
+    assert repeated_right["right_visits"] == 1
+
+
+def test_swing_visit_status_uses_fixed_disk_x_order_and_bounded_regions() -> None:
+    cube = SimpleNamespace(name="cube")
+    target_right = SimpleNamespace(name="target_right")
+    target_left = SimpleNamespace(name="target_left")
+    base = SimpleNamespace(
+        target_cube=cube,
+        target_right=target_right,
+        target_left=target_left,
+    )
+    pixels = {
+        "cube": [168, 92],
+        "target_right": [80, 88],
+        "target_left": [170, 88],
+    }
+
+    class Runtime:
+        env = SimpleNamespace(unwrapped=base)
+
+        @staticmethod
+        def project_actor_center(actor):
+            return {
+                "name": actor.name,
+                "position": [0.0, 0.0, 0.0],
+                "projected_pixel": pixels[actor.name],
+            }
+
+    adapter = build_action_adapter("SwingXtimes", Runtime())
+    status = adapter.visit_status()
+    assert status["occupied_side"] == "left"
+    assert status["targets"]["right"]["projected_pixel"][0] < (
+        status["targets"]["left"]["projected_pixel"][0]
+    )
+
+    pixels["cube"] = [125, 88]
+    assert adapter.visit_status()["occupied_side"] is None
 
 
 @pytest.mark.parametrize("include_wrist", [True, False])
@@ -424,6 +495,12 @@ def test_swing_prompt_uses_color_independent_visible_target_visit_rule(
     assert "Approximate visual evidence is sufficient" not in prompt.system_prompt
     assert "focus primarily on the wrist images" not in prompt.system_prompt
     assert "Do not use any target color or\ncolor change" in prompt.system_prompt
+    assert "smaller\nimage x-coordinate is always the robot-right target" in (
+        prompt.system_prompt
+    )
+    assert "Never infer target side from the arm direction, wrist\nimage" in (
+        prompt.system_prompt
+    )
     assert "in the newest overall observation, the center of the held cube" in (
         prompt.system_prompt
     )
