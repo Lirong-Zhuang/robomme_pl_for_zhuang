@@ -154,6 +154,16 @@ def test_new_tasks_have_matching_point_registries() -> None:
         assert adapter.point_actions == point_actions
 
 
+def test_stop_cube_environment_timing_toggle_defaults_on_and_can_be_disabled() -> None:
+    assert build_action_adapter("StopCube", object()).use_env_timing is True
+    adapter = build_action_adapter(
+        "StopCube",
+        object(),
+        stopcube_use_env_timing=False,
+    )
+    assert adapter.use_env_timing is False
+
+
 def test_swing_putdown_release_status_uses_grasp_and_pose_state() -> None:
     cube = SimpleNamespace(pose=SimpleNamespace(p=[[0.0, 0.0, 0.03]]))
     agent = SimpleNamespace(
@@ -397,7 +407,7 @@ def test_stop_cube_wait_advances_in_twenty_step_chunks() -> None:
     assert targets[-1] == 20
 
 
-def test_stop_cube_wait_continues_past_diagnostic_press_boundary() -> None:
+def test_stop_cube_wait_caps_at_environment_press_boundary_by_default() -> None:
     base = SimpleNamespace(steps_press=450, interval=30)
     env = SimpleNamespace(unwrapped=base, elapsed_steps=410)
     runtime = SimpleNamespace(env=env, planner=object())
@@ -412,10 +422,31 @@ def test_stop_cube_wait_continues_past_diagnostic_press_boundary() -> None:
     adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
     adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
 
+    assert targets == [420]
+    assert adapter.wait_progress_available() is False
+
+
+def test_stop_cube_wait_can_ignore_environment_timing() -> None:
+    base = SimpleNamespace()
+    env = SimpleNamespace(unwrapped=base, elapsed_steps=410)
+    runtime = SimpleNamespace(env=env, planner=object())
+    adapter = StopCubeActionAdapter(runtime, use_env_timing=False)
+    targets: list[int] = []
+
+    def solve_hold(fake_env, _planner, **kwargs) -> None:
+        target = kwargs["absTimestep"]
+        targets.append(target)
+        fake_env.elapsed_steps = target
+
+    adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
+    adapter._solve_incremental_wait(solve_hold)  # noqa: SLF001
+
     assert targets == [430, 450]
+    with pytest.raises(RuntimeError, match="environment timing is disabled"):
+        adapter.wait_progress_available()
 
 
-def test_stop_cube_timing_is_diagnostic_only() -> None:
+def test_stop_cube_timing_reports_environment_values() -> None:
     base = SimpleNamespace(
         steps_press=450,
         interval=30,

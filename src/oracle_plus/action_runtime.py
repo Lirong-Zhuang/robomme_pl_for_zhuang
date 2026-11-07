@@ -986,11 +986,17 @@ class StopCubeActionAdapter:
     point_actions: tuple[str, ...] = ()
     wait_step = 20
 
-    def __init__(self, runtime: OraclePlusPlannerRuntime) -> None:
+    def __init__(
+        self,
+        runtime: OraclePlusPlannerRuntime,
+        *,
+        use_env_timing: bool = True,
+    ) -> None:
         self.runtime = runtime
+        self.use_env_timing = use_env_timing
 
     def wait_timing(self) -> dict[str, int | None]:
-        """Return environment timing for diagnostics only, never action control."""
+        """Return the environment-generated StopCube motion timing."""
 
         env = self.runtime.env
         base = env.unwrapped
@@ -1015,13 +1021,27 @@ class StopCubeActionAdapter:
             ),
         }
 
+    def wait_progress_available(self) -> bool:
+        """Return whether an env-timed wait can still advance before pressing."""
+
+        if not self.use_env_timing:
+            raise RuntimeError("StopCube environment timing is disabled")
+        timing = self.wait_timing()
+        return timing["elapsed_steps"] < timing["final_wait_target"]
+
     def _solve_incremental_wait(self, solve_hold_obj_abs_timestep: Any) -> None:
-        """Advance one fixed chunk without consulting environment press timing."""
+        """Advance one chunk, optionally capped by environment press timing."""
 
         env = self.runtime.env
         planner = self.runtime.planner
         current_step = int(getattr(env, "elapsed_steps", 0))
-        next_target = current_step + self.wait_step
+        if self.use_env_timing:
+            final_target = int(self.wait_timing()["final_wait_target"])
+            if current_step >= final_target:
+                return
+            next_target = min(current_step + self.wait_step, final_target)
+        else:
+            next_target = current_step + self.wait_step
 
         solve_hold_obj_abs_timestep(
             env,
@@ -1160,7 +1180,12 @@ class MoveCubeActionAdapter:
         )
 
 
-def build_action_adapter(task: str, runtime: OraclePlusPlannerRuntime) -> Any:
+def build_action_adapter(
+    task: str,
+    runtime: OraclePlusPlannerRuntime,
+    *,
+    stopcube_use_env_timing: bool = True,
+) -> Any:
     if task == "BinFill":
         return BinFillActionAdapter(runtime)
     if task == "ButtonUnmask":
@@ -1172,7 +1197,10 @@ def build_action_adapter(task: str, runtime: OraclePlusPlannerRuntime) -> Any:
     if task == "SwingXtimes":
         return SwingXtimesActionAdapter(runtime)
     if task == "StopCube":
-        return StopCubeActionAdapter(runtime)
+        return StopCubeActionAdapter(
+            runtime,
+            use_env_timing=stopcube_use_env_timing,
+        )
     if task == "MoveCube":
         return MoveCubeActionAdapter(runtime)
     raise ValueError(
