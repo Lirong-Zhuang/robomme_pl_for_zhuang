@@ -4,6 +4,7 @@ import pytest
 
 from oracle_plus.move_cube_plan import STRATEGY_EVIDENCE
 from oracle_plus.move_cube_plan import STRATEGY_PLANS
+from oracle_plus.move_cube_plan import canonicalize_move_cube_strategy
 from oracle_plus.move_cube_plan import gate_move_cube_followup
 from oracle_plus.move_cube_plan import lock_move_cube_plan
 from oracle_plus.prompts import get_prompt
@@ -91,6 +92,22 @@ def test_move_cube_rejects_pick_place_without_vertical_lift_evidence() -> None:
             ),
             resolve_action=resolve_action_name,
         )
+
+
+def test_move_cube_audit_classification_ignores_untrusted_subgoal_text() -> None:
+    canonical = canonicalize_move_cube_strategy(
+        SubgoalDecision(
+            completed=False,
+            next_subgoal="approach the cube",
+            point=None,
+            description="The cube remains supported by the tabletop.",
+            strategy="A_GRIPPER_PUSH",
+        )
+    )
+
+    assert canonical.next_subgoal == STRATEGY_PLANS["A_GRIPPER_PUSH"][0]
+    assert canonical.subgoal_sequence == STRATEGY_PLANS["A_GRIPPER_PUSH"]
+    assert canonical.evidence == STRATEGY_EVIDENCE["A_GRIPPER_PUSH"]
 
 
 def test_move_cube_followup_cannot_jump_to_another_strategy() -> None:

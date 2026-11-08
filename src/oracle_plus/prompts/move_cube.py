@@ -114,7 +114,26 @@ INITIAL_SCHEMA_WITHOUT_DESCRIPTION = """```json
 ```"""
 
 
-PICK_PLACE_AUDIT_VERSION = "move_cube_pick_place_audit_v1_overall_only"
+PICK_PLACE_AUDIT_VERSION = "move_cube_pick_place_audit_v2_overall_only"
+
+PICK_PLACE_AUDIT_SCHEMA_WITH_DESCRIPTION = """```json
+{
+  "description": "short visible evidence for the audited classification",
+  "strategy": "A_GRIPPER_PUSH, B_CUBE_PICK_PLACE, or C_PEG_HOOK",
+  "completed": false,
+  "next_subgoal": "AUDIT_ONLY",
+  "point": null
+}
+```"""
+
+PICK_PLACE_AUDIT_SCHEMA_WITHOUT_DESCRIPTION = """```json
+{
+  "strategy": "A_GRIPPER_PUSH, B_CUBE_PICK_PLACE, or C_PEG_HOOK",
+  "completed": false,
+  "next_subgoal": "AUDIT_ONLY",
+  "point": null
+}
+```"""
 
 
 def build_pick_place_audit_messages(
@@ -127,9 +146,9 @@ def build_pick_place_audit_messages(
     if observation_count < 2:
         raise ValueError("MoveCube pickup audit requires at least two demo images")
     schema = (
-        INITIAL_SCHEMA_WITH_DESCRIPTION
+        PICK_PLACE_AUDIT_SCHEMA_WITH_DESCRIPTION
         if include_description
-        else INITIAL_SCHEMA_WITHOUT_DESCRIPTION
+        else PICK_PLACE_AUDIT_SCHEMA_WITHOUT_DESCRIPTION
     )
     description_rule = (
         "Include a short description naming the observations that show or fail "
@@ -162,7 +181,8 @@ Audit rules:
    away, the cube is not following that vertical rise; classify the motion as A.
 4. If either table clearance or attached vertical motion is absent or ambiguous,
    classify A rather than B.
-5. Set all evidence fields exactly as required by the selected strategy.
+5. This is classification only. Do not propose approach, grasp, push, place, or
+   any other executable subgoal. Set next_subgoal exactly to AUDIT_ONLY.
 6. {description_rule}
 
 Return JSON only using this schema:
@@ -173,8 +193,7 @@ to newest. There is no new-execution image in this audit.
 
 {observation_lines}
 
-Return the audited strategy and its canonical subgoal sequence. Start directly
-with the JSON object."""
+Return only the audited strategy record. Start directly with the JSON object."""
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -197,7 +216,7 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     view = "paired" if include_wrist else "overall_only"
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=f"move_cube_oracle_planner_demo_v4_{view}_{suffix}",
+        version=f"move_cube_oracle_planner_demo_v5_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         initial_observation_mode="demonstration",

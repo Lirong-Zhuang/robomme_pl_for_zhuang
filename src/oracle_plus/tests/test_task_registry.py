@@ -364,6 +364,8 @@ def test_move_cube_pick_place_audit_uses_overall_demo_images_only(
     assert sum(message["content"].count("<image>") for message in messages) == 15
     assert "proposal is deliberately withheld" in messages[0]["content"]
     assert "classify A rather than B" in messages[0]["content"]
+    assert '"next_subgoal": "AUDIT_ONLY"' in messages[0]["content"]
+    assert "Do not propose approach" in messages[0]["content"]
     assert "There is no new-execution image" in messages[1]["content"]
 
 

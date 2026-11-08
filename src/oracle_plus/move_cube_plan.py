@@ -55,6 +55,33 @@ class LockedMoveCubePlan:
     action_names: tuple[str, ...]
 
 
+def canonicalize_move_cube_strategy(
+    decision: SubgoalDecision,
+) -> SubgoalDecision:
+    """Convert a classification-only audit result into a trusted plan shape."""
+
+    if decision.strategy is None:
+        raise ValueError("MoveCube strategy audit must include strategy")
+    strategy = decision.strategy.strip().upper()
+    try:
+        subgoals = STRATEGY_PLANS[strategy]
+        evidence = STRATEGY_EVIDENCE[strategy]
+    except KeyError as error:
+        raise ValueError(
+            f"Unknown MoveCube strategy {decision.strategy!r}; "
+            f"expected one of {tuple(STRATEGY_PLANS)}"
+        ) from error
+    return SubgoalDecision(
+        completed=False,
+        next_subgoal=subgoals[0],
+        point=None,
+        description=decision.description,
+        subgoal_sequence=subgoals,
+        strategy=strategy,
+        evidence=dict(evidence),
+    )
+
+
 def lock_move_cube_plan(
     decision: SubgoalDecision,
     *,

@@ -47,6 +47,7 @@ from oracle_plus.action_runtime import StopCubeReachEdgeGate
 from oracle_plus.action_runtime import SwingVisitEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
 from oracle_plus.move_cube_plan import LockedMoveCubePlan
+from oracle_plus.move_cube_plan import canonicalize_move_cube_strategy
 from oracle_plus.move_cube_plan import gate_move_cube_followup
 from oracle_plus.move_cube_plan import lock_move_cube_plan
 from oracle_plus.prompts import available_tasks
@@ -1192,19 +1193,42 @@ def run_episode(
                     observation_count=len(audit_paths),
                     include_description=args.include_description,
                 )
-                move_cube_strategy_audit = _infer_with_target_point_retry(
+                audit_started = time.perf_counter()
+                (
+                    audit_decision,
+                    audit_raw_response,
+                    audit_latency_ms,
+                    audit_request_to_decision_ms,
+                ) = _infer(
                     model,
-                    task=task,
                     messages=audit_messages,
                     images=audit_paths,
                     include_description=args.include_description,
                 )
-                if move_cube_strategy_audit.validation_error is not None:
-                    raise ValueError(
-                        "MoveCube strategy audit returned an invalid decision: "
-                        f"{move_cube_strategy_audit.validation_error}"
-                    )
-                decision_to_lock = move_cube_strategy_audit.decision
+                decision_to_lock = canonicalize_move_cube_strategy(audit_decision)
+                audit_action_name = resolve_action_name(
+                    task,
+                    decision_to_lock.next_subgoal,
+                )
+                move_cube_strategy_audit = ValidatedInference(
+                    decision=audit_decision,
+                    raw_response=audit_raw_response,
+                    messages=audit_messages,
+                    resolved_action_name=audit_action_name,
+                    vlm_latency_ms=audit_latency_ms,
+                    action_request_ms=(time.perf_counter() - audit_started) * 1000,
+                    attempts=[
+                        {
+                            "attempt": 1,
+                            "messages": audit_messages,
+                            "raw_response": audit_raw_response,
+                            "decision": asdict(audit_decision),
+                            "vlm_latency_ms": audit_latency_ms,
+                            "request_to_decision_ms": audit_request_to_decision_ms,
+                            "validation_error": None,
+                        }
+                    ],
+                )
             locked_move_cube_plan, decision = lock_move_cube_plan(
                 decision_to_lock,
                 resolve_action=resolve_action_name,
