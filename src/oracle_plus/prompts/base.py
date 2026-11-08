@@ -193,6 +193,9 @@ def build_system_prompt(
     example: str,
     include_description: bool,
     point_rules: str | None = None,
+    initial_schema: str | None = None,
+    followup_schema: str | None = None,
+    description_rule_override: str | None = None,
 ) -> str:
     if include_description:
         description_rule = (
@@ -203,12 +206,18 @@ def build_system_prompt(
             "Do not use phrases such as 'wait', 'actually', 'let me re-examine', "
             "'I need to reconsider', or 'looking more carefully'."
         )
-        initial_schema = INITIAL_SCHEMA_WITH_DESCRIPTION
-        followup_schema = FOLLOWUP_SCHEMA_WITH_DESCRIPTION
+        default_initial_schema = INITIAL_SCHEMA_WITH_DESCRIPTION
+        default_followup_schema = FOLLOWUP_SCHEMA_WITH_DESCRIPTION
     else:
         description_rule = "Do not output a description field."
-        initial_schema = INITIAL_SCHEMA_WITHOUT_DESCRIPTION
-        followup_schema = FOLLOWUP_SCHEMA_WITHOUT_DESCRIPTION
+        default_initial_schema = INITIAL_SCHEMA_WITHOUT_DESCRIPTION
+        default_followup_schema = FOLLOWUP_SCHEMA_WITHOUT_DESCRIPTION
+    if description_rule_override is not None:
+        description_rule = description_rule_override
+    if initial_schema is None:
+        initial_schema = default_initial_schema
+    if followup_schema is None:
+        followup_schema = default_followup_schema
     if point_rules is None:
         point_rules = (
             "5. For a pickup subgoal, output the target center in the latest "

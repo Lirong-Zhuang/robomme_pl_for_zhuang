@@ -46,6 +46,9 @@ from oracle_plus.action_runtime import OraclePlusPlannerRuntime
 from oracle_plus.action_runtime import StopCubeReachEdgeGate
 from oracle_plus.action_runtime import SwingVisitEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
+from oracle_plus.move_cube_plan import LockedMoveCubePlan
+from oracle_plus.move_cube_plan import gate_move_cube_followup
+from oracle_plus.move_cube_plan import lock_move_cube_plan
 from oracle_plus.prompts import available_tasks
 from oracle_plus.prompts import build_messages
 from oracle_plus.prompts import get_point_action_names
@@ -62,7 +65,8 @@ from utils import RolloutRecorder
 
 
 MAX_TARGET_POINT_ATTEMPTS = 3
-MAX_INITIAL_DEMONSTRATION_OBSERVATIONS = 10
+MAX_INITIAL_DEMONSTRATION_OBSERVATIONS = 16
+LEGACY_INITIAL_DEMONSTRATION_OBSERVATIONS = 10
 STOP_CUBE_WAIT_HISTORY_SIZE = 5
 STOP_CUBE_WAIT_HISTORY_STRIDE = 5
 STOP_CUBE_PREP_HISTORY_SIZE = 5
@@ -537,7 +541,7 @@ def _requested_run_config(
 ) -> dict[str, Any]:
     """Build the behavior-defining configuration used to validate a resume."""
 
-    return {
+    config: dict[str, Any] = {
         "schema_version": 7,
         "tasks": tasks,
         "episode_ids": episode_ids,
@@ -550,6 +554,8 @@ def _requested_run_config(
         "include_subgoal_init": True,
         "max_initial_demonstration_observations": (
             MAX_INITIAL_DEMONSTRATION_OBSERVATIONS
+            if "MoveCube" in tasks
+            else LEGACY_INITIAL_DEMONSTRATION_OBSERVATIONS
         ),
         # Preserve this config key for compatibility with resumable older runs;
         # it now applies to every action listed in a task's point registry.
@@ -571,6 +577,9 @@ def _requested_run_config(
             "inference_config": server_metadata.get("inference_config", {}),
         },
     }
+    if "MoveCube" in tasks:
+        config["move_cube_plan_lock"] = True
+    return config
 
 
 def _setup_resume_config(
@@ -673,6 +682,7 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
         "decision": decision_record["decision"],
         "model_decision": decision_record.get("model_decision"),
         "resolved_action_name": decision_record["resolved_action_name"],
+        "move_cube_plan_gate": decision_record.get("move_cube_plan_gate"),
         "stopcube_reach_edge": decision_record.get("stopcube_reach_edge"),
         "swing_visit_gate": decision_record.get("swing_visit_gate"),
         "swing_putdown_gate": decision_record.get("swing_putdown_gate"),
@@ -1133,8 +1143,24 @@ def run_episode(
             images=initial_paths,
             include_description=args.include_description,
         )
-        decision = inference.decision
+        model_initial_decision = inference.decision
+        decision = model_initial_decision
         resolved_action_name = inference.resolved_action_name
+        locked_move_cube_plan: LockedMoveCubePlan | None = None
+        move_cube_plan_index = 0
+        if task == "MoveCube":
+            locked_move_cube_plan, decision = lock_move_cube_plan(
+                model_initial_decision,
+                resolve_action=resolve_action_name,
+            )
+            resolved_action_name = resolve_action_name(
+                task,
+                decision.next_subgoal,
+            )
+            record["move_cube_strategy"] = locked_move_cube_plan.strategy
+            record["move_cube_locked_plan"] = list(
+                locked_move_cube_plan.subgoals
+            )
         gpu_monitor.sample()
         record["decisions"].append(
             {
@@ -1149,6 +1175,11 @@ def run_episode(
                 "images": initial_paths,
                 "raw_response": inference.raw_response,
                 "decision": asdict(decision),
+                "model_decision": (
+                    asdict(model_initial_decision)
+                    if decision != model_initial_decision
+                    else None
+                ),
                 "resolved_action_name": resolved_action_name,
                 "vlm_latency_ms": inference.vlm_latency_ms,
                 "action_request_ms": inference.action_request_ms,
@@ -1377,9 +1408,25 @@ def run_episode(
             model_next_decision = inference.decision
             next_decision = model_next_decision
             next_resolved_action_name = inference.resolved_action_name
+            move_cube_plan_gate: dict[str, object] | None = None
             stopcube_reach_edge: dict[str, Any] | None = None
             swing_putdown_gate: dict[str, Any] | None = None
             swing_visit_gate_record: dict[str, Any] | None = None
+            if task == "MoveCube":
+                if locked_move_cube_plan is None:
+                    raise AssertionError("MoveCube locked plan is unavailable")
+                (
+                    next_decision,
+                    next_resolved_action_name,
+                    move_cube_plan_index,
+                    move_cube_plan_gate,
+                ) = gate_move_cube_followup(
+                    model_next_decision,
+                    locked_plan=locked_move_cube_plan,
+                    active_index=move_cube_plan_index,
+                    active_subgoal=active_subgoal,
+                    resolve_action=resolve_action_name,
+                )
             if task == "StopCube" and actual_action_name == "solve_hold_obj_absTimestep":
                 model_subgoal_changed = (
                     model_next_decision.next_subgoal.strip().casefold()
@@ -1539,6 +1586,7 @@ def run_episode(
                         else None
                     ),
                     "resolved_action_name": next_resolved_action_name,
+                    "move_cube_plan_gate": move_cube_plan_gate,
                     "stopcube_reach_edge": stopcube_reach_edge,
                     "swing_visit_gate": swing_visit_gate_record,
                     "swing_putdown_gate": swing_putdown_gate,

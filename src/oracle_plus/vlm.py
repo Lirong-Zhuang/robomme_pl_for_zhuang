@@ -79,6 +79,8 @@ class SubgoalDecision:
     point: tuple[int, int] | None = None
     description: str | None = None
     subgoal_sequence: tuple[str, ...] = ()
+    strategy: str | None = None
+    evidence: dict[str, Any] | None = None
 
     @property
     def is_stop(self) -> bool:
@@ -147,12 +149,31 @@ class SubgoalDecision:
             isinstance(item, str) and item.strip() for item in subgoals
         ):
             raise ValueError("subgoal_sequence must be a list of non-empty strings")
+        strategy_value = value.get("strategy")
+        if strategy_value is None:
+            strategy = None
+        elif not isinstance(strategy_value, str) or not strategy_value.strip():
+            raise ValueError("strategy must be non-empty text when provided")
+        else:
+            strategy = strategy_value.strip()
+        evidence_value = value.get("evidence")
+        if evidence_value is None:
+            evidence = None
+        elif not isinstance(evidence_value, dict) or not all(
+            isinstance(key, str) for key in evidence_value
+        ):
+            raise ValueError("evidence must be an object with string keys")
+        else:
+            evidence = dict(evidence_value)
+
         return cls(
             completed=completed,
             next_subgoal=next_subgoal,
             point=point,
             description=description,
             subgoal_sequence=tuple(item.strip() for item in subgoals),
+            strategy=strategy,
+            evidence=evidence,
         )
 
 
