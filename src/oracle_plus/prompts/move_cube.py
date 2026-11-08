@@ -114,7 +114,7 @@ INITIAL_SCHEMA_WITHOUT_DESCRIPTION = """```json
 ```"""
 
 
-PICK_PLACE_AUDIT_VERSION = "move_cube_pick_place_audit_v2_overall_only"
+PICK_PLACE_AUDIT_VERSION = "move_cube_strategy_audit_v3_overall_only"
 
 PICK_PLACE_AUDIT_SCHEMA_WITH_DESCRIPTION = """```json
 {
@@ -138,12 +138,12 @@ PICK_PLACE_AUDIT_SCHEMA_WITHOUT_DESCRIPTION = """```json
 
 def build_pick_place_audit_messages(
     *,
-    observation_count: int,
+    observation_frames: list[int],
     include_description: bool,
 ) -> list[dict[str, str]]:
-    """Build an independent overall-view audit for a candidate cube pickup."""
+    """Build an independent overall-view audit for a non-push candidate."""
 
-    if observation_count < 2:
+    if len(observation_frames) < 2:
         raise ValueError("MoveCube pickup audit requires at least two demo images")
     schema = (
         PICK_PLACE_AUDIT_SCHEMA_WITH_DESCRIPTION
@@ -157,8 +157,11 @@ def build_pick_place_audit_messages(
         else "Do not output a description field."
     )
     observation_lines = "\n".join(
-        f"Demonstration overall observation {index}: <image>"
-        for index in range(1, observation_count + 1)
+        (
+            f"Demonstration overall observation {index} "
+            f"(simulator frame {frame}): <image>"
+        )
+        for index, frame in enumerate(observation_frames, start=1)
     )
     system = f"""You are an independent skeptical visual auditor for a robot
 demonstration. An earlier strategy proposal is deliberately withheld and must
@@ -174,16 +177,22 @@ Classify exactly one strategy:
   it contacts and moves the cube.
 
 Audit rules:
-1. Try to falsify pickup rather than justify the previous proposal.
+1. Apply the same evidence burden to all three strategies. Do not default to push,
+   pickup, or hook, and do not infer the answer from sequence duration alone.
 2. A cube appearing between the fingers, being partly occluded, changing image-y
    or apparent size, or moving horizontally with the gripper is not lift evidence.
 3. If the cube stops on the purple disk while the gripper subsequently rises
    away, the cube is not following that vertical rise; classify the motion as A.
-4. If either table clearance or attached vertical motion is absent or ambiguous,
-   classify A rather than B.
-5. This is classification only. Do not propose approach, grasp, push, place, or
+4. Conversely, do not classify A when multiple observations show the cube itself
+   elevated with visible table clearance and still attached during vertical and
+   horizontal gripper motion; that is B.
+5. Classify C only when the visibly carried object is the long thin peg. A peg
+   merely lying near, behind, or crossing the gripper in projection is not held.
+   If the compact cube, rather than the elongated peg, moves with the gripper,
+   classify B rather than C.
+6. This is classification only. Do not propose approach, grasp, push, place, or
    any other executable subgoal. Set next_subgoal exactly to AUDIT_ONLY.
-6. {description_rule}
+7. {description_rule}
 
 Return JSON only using this schema:
 {schema}
@@ -216,7 +225,7 @@ def _prompt(*, include_description: bool, include_wrist: bool) -> TaskPromptSpec
     view = "paired" if include_wrist else "overall_only"
     return TaskPromptSpec(
         task=TASK_NAME,
-        version=f"move_cube_oracle_planner_demo_v5_{view}_{suffix}",
+        version=f"move_cube_oracle_planner_demo_v6_{view}_{suffix}",
         include_description=include_description,
         include_wrist=include_wrist,
         initial_observation_mode="demonstration",

@@ -1182,7 +1182,7 @@ def run_episode(
             if (
                 model_initial_decision.strategy is not None
                 and model_initial_decision.strategy.strip().upper()
-                == "B_CUBE_PICK_PLACE"
+                in {"B_CUBE_PICK_PLACE", "C_PEG_HOOK"}
             ):
                 audit_paths = _move_cube_demo_overall_paths(
                     initial_paths,
@@ -1190,7 +1190,9 @@ def run_episode(
                     include_wrist=args.include_wrist,
                 )
                 audit_messages = build_pick_place_audit_messages(
-                    observation_count=len(audit_paths),
+                    observation_frames=[
+                        frame for frame, _ in initial_window[:-1]
+                    ],
                     include_description=args.include_description,
                 )
                 audit_started = time.perf_counter()
