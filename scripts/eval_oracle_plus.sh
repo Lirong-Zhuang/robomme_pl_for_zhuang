@@ -11,7 +11,7 @@ cd "$REPO_ROOT"
 # Oracle Plus follows Trinity's VLA server pattern: Qwen3.8-27B is served from
 # robomme-qwen38, while RoboMME and MPLib run from the robomme environment.
 # Comma-separated task names supported by Oracle Plus.
-TASKS="ButtonUnmask,PickHighlight,MoveCube"
+TASKS="MoveCube"
 EPISODE_IDS=""
 NUM_EPISODES=50
 # Repeat the same fixed benchmark episode IDs. Environment seed/difficulty stay
@@ -50,7 +50,7 @@ VLM_PORT=0
 VLM_STARTUP_TIMEOUT=600
 
 SAVE_DIR="runs/evaluation/oracle-plus"
-RUN_NAME="outside_counting_tasks_2"
+RUN_NAME="movecube_1"
 # false resumes an existing partial run, preserving completed episodes and
 # retrying only entries whose latest status is "error". true starts from scratch.
 OVERWRITE=false

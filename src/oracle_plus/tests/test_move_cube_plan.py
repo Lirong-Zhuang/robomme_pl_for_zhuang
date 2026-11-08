@@ -70,6 +70,29 @@ def test_move_cube_rejects_strategy_and_evidence_mismatch() -> None:
         )
 
 
+def test_move_cube_rejects_pick_place_without_vertical_lift_evidence() -> None:
+    subgoals = STRATEGY_PLANS["B_CUBE_PICK_PLACE"]
+    with pytest.raises(ValueError, match="requires evidence"):
+        lock_move_cube_plan(
+            SubgoalDecision(
+                completed=False,
+                next_subgoal=subgoals[0],
+                point=None,
+                description=(
+                    "The cube overlaps the fingers and moves horizontally with them."
+                ),
+                subgoal_sequence=subgoals,
+                strategy="B_CUBE_PICK_PLACE",
+                evidence={
+                    "carried_object": "cube",
+                    "cube_leaves_tabletop": True,
+                    "peg_moves_with_gripper": False,
+                },
+            ),
+            resolve_action=resolve_action_name,
+        )
+
+
 def test_move_cube_followup_cannot_jump_to_another_strategy() -> None:
     subgoals = STRATEGY_PLANS["C_PEG_HOOK"]
     locked, _ = lock_move_cube_plan(

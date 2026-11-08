@@ -24,17 +24,26 @@ STRATEGY_EVIDENCE: dict[str, dict[str, str | bool]] = {
     "A_GRIPPER_PUSH": {
         "carried_object": "neither",
         "cube_leaves_tabletop": False,
+        "cube_has_visible_table_clearance": False,
+        "cube_moves_with_vertical_lift": False,
         "peg_moves_with_gripper": False,
+        "peg_visibly_held": False,
     },
     "B_CUBE_PICK_PLACE": {
         "carried_object": "cube",
         "cube_leaves_tabletop": True,
+        "cube_has_visible_table_clearance": True,
+        "cube_moves_with_vertical_lift": True,
         "peg_moves_with_gripper": False,
+        "peg_visibly_held": False,
     },
     "C_PEG_HOOK": {
         "carried_object": "peg",
         "cube_leaves_tabletop": False,
+        "cube_has_visible_table_clearance": False,
+        "cube_moves_with_vertical_lift": False,
         "peg_moves_with_gripper": True,
+        "peg_visibly_held": True,
     },
 }
 
