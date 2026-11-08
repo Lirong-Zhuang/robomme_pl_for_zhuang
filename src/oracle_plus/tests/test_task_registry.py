@@ -9,6 +9,7 @@ from oracle_plus.action_runtime import StopCubeReachEdgeGate
 from oracle_plus.action_runtime import SwingVisitEdgeGate
 from oracle_plus.action_runtime import build_action_adapter
 from oracle_plus.prompts import available_tasks
+from oracle_plus.prompts import build_pick_place_audit_messages
 from oracle_plus.prompts import build_messages
 from oracle_plus.prompts import get_point_action_names
 from oracle_plus.prompts import get_prompt
@@ -349,6 +350,21 @@ def test_move_cube_initial_prompt_aligns_with_sampled_demo_images(
         include_description=True,
         include_wrist=include_wrist,
     ).initial_observation_mode == "demonstration"
+
+
+@pytest.mark.parametrize("include_description", [True, False])
+def test_move_cube_pick_place_audit_uses_overall_demo_images_only(
+    include_description: bool,
+) -> None:
+    messages = build_pick_place_audit_messages(
+        observation_count=15,
+        include_description=include_description,
+    )
+
+    assert sum(message["content"].count("<image>") for message in messages) == 15
+    assert "proposal is deliberately withheld" in messages[0]["content"]
+    assert "classify A rather than B" in messages[0]["content"]
+    assert "There is no new-execution image" in messages[1]["content"]
 
 
 @pytest.mark.parametrize(

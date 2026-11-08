@@ -33,6 +33,7 @@ from .move_cube import (
 )
 from .move_cube import PROMPT_WITH_DESCRIPTION as MOVE_CUBE_PROMPT_WITH_DESCRIPTION
 from .move_cube import PROMPT_WITHOUT_DESCRIPTION as MOVE_CUBE_PROMPT_WITHOUT_DESCRIPTION
+from .move_cube import build_pick_place_audit_messages
 from .move_cube import match_action_name as match_move_cube_action_name
 from .pick_highlight import POINT_ACTION_NAMES as PICK_HIGHLIGHT_POINT_ACTION_NAMES
 from .pick_highlight import (

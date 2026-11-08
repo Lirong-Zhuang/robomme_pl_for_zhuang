@@ -50,6 +50,7 @@ from oracle_plus.move_cube_plan import LockedMoveCubePlan
 from oracle_plus.move_cube_plan import gate_move_cube_followup
 from oracle_plus.move_cube_plan import lock_move_cube_plan
 from oracle_plus.prompts import available_tasks
+from oracle_plus.prompts import build_pick_place_audit_messages
 from oracle_plus.prompts import build_messages
 from oracle_plus.prompts import get_point_action_names
 from oracle_plus.prompts import get_prompt
@@ -397,6 +398,29 @@ def _write_vlm_call_images(
     return image_paths
 
 
+def _move_cube_demo_overall_paths(
+    image_paths: list[str],
+    *,
+    observation_count: int,
+    include_wrist: bool,
+) -> list[str]:
+    """Select demo overall images, excluding wrist and new-execution images."""
+
+    views_per_observation = 2 if include_wrist else 1
+    expected_count = observation_count * views_per_observation
+    if len(image_paths) != expected_count:
+        raise ValueError(
+            "MoveCube initial image count does not match its observation layout: "
+            f"expected {expected_count}, found {len(image_paths)}"
+        )
+    if observation_count < 2:
+        raise ValueError("MoveCube audit requires demo images and an initial state")
+    return [
+        image_paths[index * views_per_observation]
+        for index in range(observation_count - 1)
+    ]
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -682,6 +706,9 @@ def _compact_vlm_step(decision_record: dict[str, Any]) -> dict[str, Any]:
         "decision": decision_record["decision"],
         "model_decision": decision_record.get("model_decision"),
         "resolved_action_name": decision_record["resolved_action_name"],
+        "move_cube_strategy_audit": decision_record.get(
+            "move_cube_strategy_audit"
+        ),
         "move_cube_plan_gate": decision_record.get("move_cube_plan_gate"),
         "stopcube_reach_edge": decision_record.get("stopcube_reach_edge"),
         "swing_visit_gate": decision_record.get("swing_visit_gate"),
@@ -1147,10 +1174,39 @@ def run_episode(
         decision = model_initial_decision
         resolved_action_name = inference.resolved_action_name
         locked_move_cube_plan: LockedMoveCubePlan | None = None
+        move_cube_strategy_audit: ValidatedInference | None = None
         move_cube_plan_index = 0
         if task == "MoveCube":
+            decision_to_lock = model_initial_decision
+            if (
+                model_initial_decision.strategy is not None
+                and model_initial_decision.strategy.strip().upper()
+                == "B_CUBE_PICK_PLACE"
+            ):
+                audit_paths = _move_cube_demo_overall_paths(
+                    initial_paths,
+                    observation_count=len(initial_window),
+                    include_wrist=args.include_wrist,
+                )
+                audit_messages = build_pick_place_audit_messages(
+                    observation_count=len(audit_paths),
+                    include_description=args.include_description,
+                )
+                move_cube_strategy_audit = _infer_with_target_point_retry(
+                    model,
+                    task=task,
+                    messages=audit_messages,
+                    images=audit_paths,
+                    include_description=args.include_description,
+                )
+                if move_cube_strategy_audit.validation_error is not None:
+                    raise ValueError(
+                        "MoveCube strategy audit returned an invalid decision: "
+                        f"{move_cube_strategy_audit.validation_error}"
+                    )
+                decision_to_lock = move_cube_strategy_audit.decision
             locked_move_cube_plan, decision = lock_move_cube_plan(
-                model_initial_decision,
+                decision_to_lock,
                 resolve_action=resolve_action_name,
             )
             resolved_action_name = resolve_action_name(
@@ -1181,9 +1237,38 @@ def run_episode(
                     else None
                 ),
                 "resolved_action_name": resolved_action_name,
-                "vlm_latency_ms": inference.vlm_latency_ms,
-                "action_request_ms": inference.action_request_ms,
+                "vlm_latency_ms": inference.vlm_latency_ms + (
+                    move_cube_strategy_audit.vlm_latency_ms
+                    if move_cube_strategy_audit is not None
+                    else 0.0
+                ),
+                "action_request_ms": inference.action_request_ms + (
+                    move_cube_strategy_audit.action_request_ms
+                    if move_cube_strategy_audit is not None
+                    else 0.0
+                ),
                 "vlm_attempts": inference.attempts,
+                "move_cube_strategy_audit": (
+                    {
+                        "messages": move_cube_strategy_audit.messages,
+                        "images": audit_paths,
+                        "raw_response": move_cube_strategy_audit.raw_response,
+                        "decision": asdict(move_cube_strategy_audit.decision),
+                        "resolved_action_name": (
+                            move_cube_strategy_audit.resolved_action_name
+                        ),
+                        "vlm_latency_ms": move_cube_strategy_audit.vlm_latency_ms,
+                        "action_request_ms": (
+                            move_cube_strategy_audit.action_request_ms
+                        ),
+                        "vlm_attempts": move_cube_strategy_audit.attempts,
+                        "validation_error": (
+                            move_cube_strategy_audit.validation_error
+                        ),
+                    }
+                    if move_cube_strategy_audit is not None
+                    else None
+                ),
                 "validation_error": inference.validation_error,
                 "execution": None,
             }
