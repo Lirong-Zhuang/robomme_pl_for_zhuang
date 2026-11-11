@@ -1,3 +1,35 @@
+# Current development: Agentic method
+
+**The current development focus is an Agentic method for RoboMME task
+execution.** The new system is being built around an Agentic harness rather
+than extending only the fixed Trinity or Oracle Plus inference pipelines. The
+harness separates category-level initialization, in-task verification, and
+in-task planning/execution, while keeping task configuration and task history
+as explicit, readable state.
+
+## Current Agentic framework
+
+![Current Agentic planning, verification, and execution framework](assets/agent_framework_1.png)
+
+The current workflow has three stages:
+
+1. **Init Planning** starts with the task category, task description, trusted
+   action candidates, learned operational notes, and a Task Config package. It
+   generates a category-level `Task_config_v1` and initializes `Task_log`; it
+   does not assume an episode-specific task goal.
+2. **In-Task Verification** reads the active Task Config and Task Log, evaluates
+   the current subgoal from the configured observation window, and records the
+   result and relevant state changes.
+3. **In-Task Planning** receives the task goal and observations after environment
+   reset. Its first call generates the concrete episode subgoal sequence; later
+   calls select or regenerate the next subgoal and bind it to a trusted action
+   before grounding and execution.
+
+The figure is the current framework sketch and may evolve with the harness.
+Although it still shows an `NA / Insufficient Info` branch, the current
+`task_config.v1` contract uses only `completed`, `incomplete`, and `failed`;
+insufficient visual evidence is treated as `incomplete`.
+
 # Trinity
 
 **Base version: Trinity v2.2. Current development branch: Oracle Plus.**
