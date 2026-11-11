@@ -8,7 +8,8 @@ Run from the repository root after activating that environment:
 
 The environment must provide CUDA, PyTorch, Transformers, and a recent ms-swift
 with Qwen3.8 support. Set QWEN_MODEL_PATH if the default checkpoint path below is
-not valid on the current machine. This test needs no simulator or VLA server.
+not valid on the current machine. This test needs no simulator or VLA server. On
+success, the output JSON contains both ``task_config`` and ``run_metrics``.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from harness.prompts import build_task_init_messages  # noqa: E402
+from oracle_plus.runtime_metrics import GpuMemoryMonitor  # noqa: E402
 from oracle_plus.vlm import VLMSubgoalPlanner27B  # noqa: E402
 
 
@@ -240,6 +243,8 @@ def _validate_task_config(
 
 
 def main() -> None:
+    program_started_at = time.perf_counter()
+    gpu_monitor = GpuMemoryMonitor(os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
     output_path = (OUTPUT_DIRECTORY / OUTPUT_FILE_NAME).resolve()
     action_catalog = _load_json_object(ACTION_CANDIDATES_PATH)
     config_example = (
@@ -258,30 +263,51 @@ def main() -> None:
     print(f"Model: {MODEL_PATH.expanduser().resolve()}")
     print(f"Output: {output_path}")
     print("Loading VLM...")
-    model = VLMSubgoalPlanner27B(
-        model_path=str(MODEL_PATH),
-        attn_impl=ATTN_IMPL,
-        max_tokens=MAX_NEW_TOKENS,
-        temperature=TEMPERATURE,
-    )
-    config, raw_response, vlm_latency_ms, request_to_json_ms = model.infer_json_object(
-        messages=messages
-    )
     try:
-        _validate_task_config(config, action_catalog)
-    except (KeyError, TypeError, ValueError):
-        print("VLM returned JSON, but task-config validation failed. Raw response:")
-        print(raw_response)
-        raise
+        model = VLMSubgoalPlanner27B(
+            model_path=str(MODEL_PATH),
+            attn_impl=ATTN_IMPL,
+            max_tokens=MAX_NEW_TOKENS,
+            temperature=TEMPERATURE,
+        )
+        gpu_monitor.mark_model_loaded()
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    print(f"VLM latency: {vlm_latency_ms:.1f} ms")
-    print(f"Request-to-validated-JSON latency: {request_to_json_ms:.1f} ms")
-    print(f"Task config written: {output_path}")
+        config, raw_response, vlm_latency_ms, request_to_json_ms = (
+            model.infer_json_object(messages=messages)
+        )
+        gpu_monitor.sample()
+        try:
+            _validate_task_config(config, action_catalog)
+        except (KeyError, TypeError, ValueError):
+            print("VLM returned JSON, but task-config validation failed. Raw response:")
+            print(raw_response)
+            raise
+        gpu_memory = gpu_monitor.summary()
+
+        artifact = {
+            "task_config": config,
+            "run_metrics": {
+                "program_elapsed_seconds": round(
+                    time.perf_counter() - program_started_at, 3
+                ),
+                "program_peak_gpu_memory_gb": gpu_memory.get(
+                    "current_process_peak_during_entire_eval_gb"
+                ),
+                "other_programs_gpu_memory_before_start_gb": gpu_memory.get(
+                    "other_processes_before_eval_gb"
+                ),
+            },
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"VLM latency: {vlm_latency_ms:.1f} ms")
+        print(f"Request-to-JSON latency: {request_to_json_ms:.1f} ms")
+        print(f"Task config and run metrics written: {output_path}")
+    finally:
+        gpu_monitor.close()
 
 
 if __name__ == "__main__":
