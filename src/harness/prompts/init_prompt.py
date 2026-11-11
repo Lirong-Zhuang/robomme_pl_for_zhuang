@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v4"
+INIT_PROMPT_VERSION = "minimal_task_config_v5"
 
 
 @dataclass(frozen=True)
@@ -210,12 +210,18 @@ the lift-before-non-vertical-motion collision-avoidance rule.
 The config must contain complete task-specific prompts for both verification and
 in-task planning. Complete means the prompts can be sent to a VLM after replacing
 their placeholders; do not write 'use the standard prompt', refer to this init
-prompt, or omit output rules. The verification user template must contain exactly
-these runtime placeholders: {{task_goal}}, {{current_subgoal}}, {{action_name}},
-{{acceptance_criteria}}, {{verification_parameters}},
-{{task_notes}}, {{subgoal_start_observations}}, {{recent_observations}}, and
-{{task_log_summary}}. It must require JSON containing status as completed, incomplete,
-or failed plus a concise observable-evidence description.
+prompt, or omit output rules.
+
+Runtime-placeholder contract (an exact, task-independent API):
+- Placeholder names describe fields supplied by the harness, not the information
+  sources selected for a particular task. Never add, remove, rename, or substitute
+  a placeholder to reflect task-specific sources.
+- The verification user template must contain exactly these runtime placeholders:
+  {{task_goal}}, {{current_subgoal}}, {{action_name}}, {{acceptance_criteria}},
+  {{verification_parameters}}, {{task_notes}}, {{subgoal_start_observations}},
+  {{recent_observations}}, and {{task_log_summary}}.
+- The verification template must require JSON containing status as completed,
+  incomplete, or failed plus a concise observable-evidence description.
 
 The in-task-planning user template must contain exactly these runtime placeholders:
 {{task_goal}}, {{planning_policy}}, {{subgoal_catalog}}, {{task_notes}},
@@ -227,6 +233,18 @@ planning prompt must support both:
 an episode-specific subgoal_sequence must be created; and (b) later calls, where
 the verifier result and task_log determine whether to retain, advance, retry, or
 regenerate the plan.
+
+Information-source transport is already covered by those fixed placeholders:
+- Initial demonstration-video observations arrive inside {{current_observations}}.
+- A video-derived subgoal list or strategy saved for later calls arrives inside
+  {{task_log}}; verification receives its relevant summary through
+  {{task_log_summary}}.
+- Saved keyframes and their descriptions arrive inside {{task_log}} or
+  {{task_log_summary}} as appropriate.
+Therefore never introduce placeholders such as {{video_subgoal_list}},
+{{video_observations}}, {{demonstration_video}}, or {{keyframes}}. Before returning
+the JSON object, mechanically scan both user_prompt_template strings and correct
+them unless their placeholder sets exactly equal the two required sets above.
 
 The task config may include additional keyframe-observation policies when the task
 contains relevant environment changes that ordinary recent history may not retain.

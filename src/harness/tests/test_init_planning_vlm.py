@@ -37,11 +37,11 @@ from oracle_plus.vlm import VLMSubgoalPlanner27B  # noqa: E402
 # Test settings: edit this block before running.
 # -----------------------------------------------------------------------------
 
-TASK_NAME = "BinFill"  # BinFill, MoveCube, or PickHighlight
-USE_TASK_CONFIG_EXAMPLE = True
+TASK_NAME = "MoveCube"  # BinFill, MoveCube, or PickHighlight
+USE_TASK_CONFIG_EXAMPLE = False
 
-OUTPUT_DIRECTORY = REPO_ROOT / "runs" / "agentic_method" / "tests" / "init_planning"
-OUTPUT_FILE_NAME = "binfill_task_config_with_example_v1.json"
+OUTPUT_DIRECTORY = REPO_ROOT / "runs" / "tests" / "agentic_method" / "init_planning"
+OUTPUT_FILE_NAME = "movecube_task_config_without_example_v1.json"
 ACTION_CANDIDATES_PATH = (
     REPO_ROOT
     / "src"
@@ -176,6 +176,23 @@ def _placeholders(template: str) -> set[str]:
     return set(re.findall(r"\{[a-z_]+\}", template))
 
 
+def _validate_placeholders(
+    *,
+    prompt_name: str,
+    template: str,
+    expected: set[str],
+) -> None:
+    actual = _placeholders(template)
+    if actual == expected:
+        return
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    raise ValueError(
+        f"{prompt_name} prompt has incorrect runtime placeholders; "
+        f"missing={missing}, extra={extra}, actual={sorted(actual)}"
+    )
+
+
 def _validate_task_config(
     config: dict[str, Any],
     action_catalog: dict[str, Any],
@@ -232,10 +249,16 @@ def _validate_task_config(
     prompts = config["vlm_prompts"]
     verifier_template = prompts["verification"]["user_prompt_template"]
     planner_template = prompts["in_task_planning"]["user_prompt_template"]
-    if _placeholders(verifier_template) != _VERIFICATION_PLACEHOLDERS:
-        raise ValueError("verification prompt has incorrect runtime placeholders")
-    if _placeholders(planner_template) != _PLANNING_PLACEHOLDERS:
-        raise ValueError("in-task-planning prompt has incorrect runtime placeholders")
+    _validate_placeholders(
+        prompt_name="verification",
+        template=verifier_template,
+        expected=_VERIFICATION_PLACEHOLDERS,
+    )
+    _validate_placeholders(
+        prompt_name="in-task-planning",
+        template=planner_template,
+        expected=_PLANNING_PLACEHOLDERS,
+    )
 
     for index, keyframe in enumerate(config["keyframes"]):
         if keyframe.get("interval_unit") != "frame":
