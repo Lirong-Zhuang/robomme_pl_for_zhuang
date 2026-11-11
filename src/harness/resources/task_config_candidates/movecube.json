@@ -1,0 +1,98 @@
+{
+  "schema_version": "task_config.v1",
+  "planning": {
+    "information_sources": [
+      "task_goal",
+      "video_subgoal_list"
+    ],
+    "task_goal_sufficient": false,
+    "video_subgoal_list": {
+      "description_instruction": "While watching the chronological demonstration, identify the demonstrated manipulation strategy and save its exact ordered subgoal list without mixing strategies.",
+      "task_log_field": "planning.video_subgoal_list"
+    },
+    "ordering_rules": [
+      "During the first in-task-planning call, inspect the chronological demonstration video and select exactly one demonstrated strategy.",
+      "Generate the subgoal sequence while viewing the video and store the selected strategy and sequence in Task Log.",
+      "Use only the subgoals belonging to the selected strategy and never mix strategies during execution."
+    ],
+    "stop_condition": "The cube reaches the target using the same manipulation strategy observed in the demonstration video."
+  },
+  "verification": {
+    "k": 3,
+    "views": [
+      "overall",
+      "wrist"
+    ],
+    "interval": 16,
+    "interval_unit": "frame",
+    "selection_reason": "Three paired observations provide temporal evidence for grasp, lift, push, hook, and placement completion without reclassifying the locked video-derived strategy."
+  },
+  "subgoals": [
+    {
+      "template": "pick up the peg",
+      "example": "pick up the peg",
+      "action_name": "grasp_and_lift_peg_side",
+      "acceptance": {
+        "completed": "The long peg is visibly held by the gripper and lifted from the table.",
+        "incomplete": "The peg is not yet securely held and lifted, or the available views are insufficient to confirm it.",
+        "failed": "The wrong object is grasped, the peg is visibly dropped, or the peg becomes unrecoverably displaced."
+      }
+    },
+    {
+      "template": "hook the cube to the target with the peg",
+      "example": "hook the cube to the target with the peg",
+      "action_name": "solve_push_to_target_with_peg",
+      "acceptance": {
+        "completed": "The held peg has moved the cube onto the target and the cube remains at the target.",
+        "incomplete": "The cube has not yet reached the target or contact-driven motion is still ongoing.",
+        "failed": "The peg is lost, the cube is pushed irrecoverably away, or the robot switches to a different manipulation strategy."
+      }
+    },
+    {
+      "template": "close the gripper and push the cube to the target",
+      "example": "close the gripper and push the cube to the target",
+      "action_name": "solve_push_to_target",
+      "acceptance": {
+        "completed": "The empty closed gripper has pushed the cube onto the target while the cube remained supported by the table.",
+        "incomplete": "The cube is still being pushed or has not yet reached the target.",
+        "failed": "The cube or peg is picked up, the cube is pushed irrecoverably away, or another demonstrated strategy is used."
+      }
+    },
+    {
+      "template": "pick up the cube",
+      "example": "pick up the cube",
+      "action_name": "solve_pickup",
+      "acceptance": {
+        "completed": "The cube is visibly held and lifted with clear separation from the table.",
+        "incomplete": "The cube remains table-supported or the available views do not clearly establish a lift.",
+        "failed": "The peg is grasped instead, the cube is dropped, or the cube becomes unrecoverably displaced."
+      }
+    },
+    {
+      "template": "place the cube onto the target",
+      "example": "place the cube onto the target",
+      "action_name": "solve_putonto_target",
+      "acceptance": {
+        "completed": "The cube is released onto the target and is no longer held by the gripper.",
+        "incomplete": "The cube remains held or its stable placement on the target is not yet visible.",
+        "failed": "The cube is released away from the target or visibly leaves the target after release."
+      }
+    }
+  ],
+  "task_notes": [
+    "Before any horizontal or lateral motion with a grasped cube or peg, first lift it to a visibly safe clearance above the table and confirm the lift to avoid collisions.",
+    "The first in-task-planning call must generate the concrete subgoal sequence from the demonstration video, not from the task name alone.",
+    "After the strategy and sequence are saved in Task Log, later planning calls may verify progress but must not substitute a different strategy."
+  ],
+  "vlm_prompts": {
+    "verification": {
+      "system_prompt": "You verify exactly one active MoveCube subgoal against the strategy and sequence already locked in Task Log. Judge only observable completion or failure evidence for that subgoal; never reclassify or replace the video-derived strategy. Use incomplete when evidence is insufficient. Return JSON only with exactly two fields: status and description.",
+      "user_prompt_template": "Task goal: {task_goal}\nCurrent subgoal: {current_subgoal}\nMapped action: {action_name}\nAcceptance criteria: {acceptance_criteria}\nVerification parameters: {verification_parameters}\nTask-specific notes: {task_notes}\nSubgoal-start observations: {subgoal_start_observations}\nRecent observations: {recent_observations}\nTask Log summary: {task_log_summary}\nReturn status as completed, incomplete, or failed. Description must contain only concise observable evidence."
+    },
+    "in_task_planning": {
+      "system_prompt": "You plan MoveCube by reproducing the manipulation strategy shown in the demonstration video. On the first call, inspect the chronological video observations, determine whether the demonstration uses peg-assisted motion, direct closed-gripper pushing, or cube pick-and-place, and immediately generate the matching complete subgoal_sequence. Save that strategy and sequence through the planning result. On later calls, preserve the locked sequence and select its current or next subgoal from verification progress. Return JSON only with exactly three fields: subgoal_sequence, next_subgoal, and action_name.",
+      "user_prompt_template": "Task goal: {task_goal}\nPlanning policy: {planning_policy}\nAvailable subgoals and actions: {subgoal_catalog}\nTask-specific notes: {task_notes}\nKeyframe policy: {keyframe_policy}\nTask Log: {task_log}\nRobot state: {robot_state}\nCurrent observations, including the demonstration video on the first call: {current_observations}\nCurrent subgoal: {current_subgoal}\nCurrent subgoal sequence: {current_subgoal_sequence}\nVerification result: {verification_result}\nReturn the video-derived ordered subgoal_sequence, its next_subgoal or STOP, and the exact mapped action_name."
+    }
+  },
+  "keyframes": []
+}

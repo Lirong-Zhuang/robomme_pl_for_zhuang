@@ -243,16 +243,42 @@ class VLMSubgoalPlanner27B:
         images: list[str],
         include_description: bool,
     ) -> tuple[SubgoalDecision, str, float, float]:
+        parsed, raw_response, elapsed_ms, request_to_json_ms = (
+            self.infer_json_object(messages=messages, images=images)
+        )
+        parse_started_at = time.perf_counter()
+        decision = SubgoalDecision.from_mapping(
+            parsed,
+            include_description=include_description,
+        )
+        request_to_decision_ms = (
+            request_to_json_ms + (time.perf_counter() - parse_started_at) * 1000
+        )
+        return decision, raw_response, elapsed_ms, request_to_decision_ms
+
+    def infer_json_object(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        images: list[str] | None = None,
+    ) -> tuple[dict[str, Any], str, float, float]:
+        """Generate one JSON object without imposing the rollout decision schema.
+
+        Oracle Plus continues to use :meth:`infer`, while standalone harness tests
+        can reuse the identical model/template/runtime for larger JSON artifacts.
+        """
+
+        image_paths = images or []
         placeholder_count = sum(
             message.get("content", "").count("<image>") for message in messages
         )
-        if placeholder_count != len(images):
+        if placeholder_count != len(image_paths):
             raise ValueError(
                 f"Prompt/image mismatch: {placeholder_count} placeholders for "
-                f"{len(images)} images"
+                f"{len(image_paths)} images"
             )
         started_at = time.perf_counter()
-        request = self.InferRequest(messages=messages, images=images)
+        request = self.InferRequest(messages=messages, images=image_paths)
         responses = self.engine.infer(
             [request],
             request_config=self.request_config,
@@ -264,9 +290,5 @@ class VLMSubgoalPlanner27B:
         parsed = parse_json_object(raw_response)
         if parsed is None:
             raise ValueError(f"27B response is not a JSON object: {raw_response!r}")
-        decision = SubgoalDecision.from_mapping(
-            parsed,
-            include_description=include_description,
-        )
-        request_to_decision_ms = (time.perf_counter() - started_at) * 1000
-        return decision, raw_response, elapsed_ms, request_to_decision_ms
+        request_to_json_ms = (time.perf_counter() - started_at) * 1000
+        return parsed, raw_response, elapsed_ms, request_to_json_ms

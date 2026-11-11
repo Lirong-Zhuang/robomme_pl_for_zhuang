@@ -1,0 +1,74 @@
+{
+  "schema_version": "task_config.v1",
+  "planning": {
+    "information_sources": [
+      "task_goal"
+    ],
+    "task_goal_sufficient": true,
+    "video_subgoal_list": null,
+    "ordering_rules": [
+      "Read the requested cube colors and counts from task_goal.",
+      "For every requested cube, alternate pickup and put-into-bin subgoals.",
+      "Press the button only after every requested placement is recorded as completed."
+    ],
+    "stop_condition": "All requested color counts are satisfied and the final button-press subgoal is completed."
+  },
+  "verification": {
+    "k": 3,
+    "views": [
+      "overall",
+      "wrist"
+    ],
+    "interval": 16,
+    "interval_unit": "frame",
+    "selection_reason": "Three paired observations are sufficient to distinguish grasp-and-lift, release into the bin, and button motion while counts remain in Task Log."
+  },
+  "subgoals": [
+    {
+      "template": "pick up the {ordinal} {color} cube",
+      "example": "pick up the first red cube",
+      "action_name": "solve_pickup",
+      "acceptance": {
+        "completed": "The intended cube is visibly held by the gripper and has moved upward from its supporting surface.",
+        "incomplete": "The cube is not yet securely held and lifted, or the available views do not clearly establish a lift.",
+        "failed": "A wrong cube is grasped, the intended cube is visibly dropped, or the grasp attempt leaves it unrecoverably displaced."
+      }
+    },
+    {
+      "template": "put the held cube into the bin",
+      "example": "put the held cube into the bin",
+      "action_name": "solve_put_into_bin",
+      "acceptance": {
+        "completed": "The held cube is released through the bin opening and is no longer held by the gripper.",
+        "incomplete": "The cube remains held or has not been visibly released into the bin opening.",
+        "failed": "The cube is visibly released outside the bin or lost in a position that cannot satisfy the placement."
+      }
+    },
+    {
+      "template": "press the button",
+      "example": "press the button",
+      "action_name": "solve_button",
+      "acceptance": {
+        "completed": "The button completes a visible press cycle after all requested placements are recorded.",
+        "incomplete": "The press motion is still ongoing or full button actuation is not visible.",
+        "failed": "The button is pressed before the requested placement counts are satisfied or the press attempt visibly misses the button."
+      }
+    }
+  ],
+  "task_notes": [
+    "Before any horizontal or lateral motion with a grasped cube, first lift it to a visibly safe clearance above the table and confirm the lift to avoid collisions.",
+    "Maintain completed placement counts by color in Task Log.",
+    "Do not reduce a completed count merely because a previously inserted cube is no longer visible."
+  ],
+  "vlm_prompts": {
+    "verification": {
+      "system_prompt": "You verify exactly one active BinFill subgoal. Judge only observable evidence under its configured acceptance criteria and the recorded Task Log. Use completed only for positive success evidence, incomplete for ongoing or insufficient evidence, and failed only for positive failure evidence. Return JSON only with exactly two fields: status and description.",
+      "user_prompt_template": "Task goal: {task_goal}\nCurrent subgoal: {current_subgoal}\nMapped action: {action_name}\nAcceptance criteria: {acceptance_criteria}\nVerification parameters: {verification_parameters}\nTask-specific notes: {task_notes}\nSubgoal-start observations: {subgoal_start_observations}\nRecent observations: {recent_observations}\nTask Log summary: {task_log_summary}\nReturn status as completed, incomplete, or failed. Description must contain only concise observable evidence."
+    },
+    "in_task_planning": {
+      "system_prompt": "You plan BinFill using only subgoal templates and trusted actions in Task Config. On the first call, expand task_goal into an ordered pickup-and-bin-placement sequence followed by one button press. On later calls, keep, advance, retry, or regenerate the sequence from the verification result and Task Log counts. Return JSON only with exactly three fields: subgoal_sequence, next_subgoal, and action_name.",
+      "user_prompt_template": "Task goal: {task_goal}\nPlanning policy: {planning_policy}\nAvailable subgoals and actions: {subgoal_catalog}\nTask-specific notes: {task_notes}\nKeyframe policy: {keyframe_policy}\nTask Log: {task_log}\nRobot state: {robot_state}\nCurrent observations: {current_observations}\nCurrent subgoal: {current_subgoal}\nCurrent subgoal sequence: {current_subgoal_sequence}\nVerification result: {verification_result}\nReturn the active ordered subgoal_sequence, its next_subgoal or STOP, and the exact mapped action_name."
+    }
+  },
+  "keyframes": []
+}

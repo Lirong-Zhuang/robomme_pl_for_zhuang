@@ -1,17 +1,19 @@
-# Task-config package resources
+# Task-config example resources
 
-Store reusable `task_config.v1` examples and defaults in this directory. Packages
-should be organized by task family rather than by episode, for example:
+Store reusable `task_config.v1` examples and defaults in this directory. The
+current test fixtures are complete JSON examples:
 
-- `counting.json` for tasks such as BinFill
-- `imitation.json` for tasks such as MoveCube
-- `reference.json` for tasks such as PickHighlight
+- `binfill.json`
+- `movecube.json`
+- `pickhighlight.json`
 
-A package may contain a base config, one or more worked examples, recommended
-verification defaults, prompt templates, and optional keyframe-policy examples. It
-must not contain a concrete episode goal, current observations, or generated runtime
-state.
+Each file is one complete worked example that may provide structure and writing
+style to the init VLM. An example must not contain a concrete episode goal, current
+observations, or generated runtime state.
 
-The init planner receives the selected family package as
-`task_config_package_path` and adapts it to the registered task description and
-the task-scoped action candidates.
+These task-specific files are gold/reference outputs and end-to-end smoke-test
+fixtures. Do not pass the matching task file to the init VLM when measuring whether
+it can infer video or keyframe requirements from the minimal task description; that
+would reveal the expected answer. For that experiment, `task_config_example_path`
+should point to an example from an unrelated task, or the no-example prompt variant
+should be selected with `use_task_config_example=False`.

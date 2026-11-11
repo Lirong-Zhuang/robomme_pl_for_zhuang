@@ -1,9 +1,4 @@
-"""Category-level task descriptions used by init planning.
-
-These descriptions contain stable benchmark facts only. Episode-specific facts,
-such as the concrete task goal, highlighted objects, or the demonstrated strategy,
-must be supplied later by the environment and the first in-task-planning call.
-"""
+"""Minimal paper-style task descriptions used by init planning."""
 
 from __future__ import annotations
 
@@ -12,116 +7,74 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TaskDescription:
-    """Structured, reusable description of one benchmark task category."""
+    """Internal task key plus summary and goal forms exposed to init planning."""
 
-    task_category: str
-    task_family: str
+    task_name: str
     summary: str
-    environment: str
-    objective: str
-    episode_variation: str
-    memory_requirement: str
+    task_goal_examples: tuple[str, ...]
 
     def to_prompt_text(self) -> str:
-        """Render the description for injection into the init-planning prompt."""
+        """Return only the paper-style summary shown to the init-planning VLM."""
 
-        return "\n".join(
-            (
-                f"Task family: {self.task_family}",
-                f"Summary: {self.summary}",
-                f"Environment: {self.environment}",
-                f"Objective: {self.objective}",
-                f"Episode-specific variation: {self.episode_variation}",
-                f"Memory requirement: {self.memory_requirement}",
-            )
-        )
+        return self.summary
 
 
 BINFILL_DESCRIPTION = TaskDescription(
-    task_category="BinFill",
-    task_family="counting and temporal-memory manipulation",
+    task_name="BinFill",
     summary=(
-        "Place the task-requested numbers of colored cubes into a bin and press "
-        "the button only after every requested placement has been completed."
+        "The BinFill task evaluates sequential decisionmaking and temporal memory. "
+        "The robot must place a specified number of colored cubes into a bin and "
+        "then press a button to terminate the episode. Success requires accurate "
+        "counting and timely termination."
     ),
-    environment=(
-        "The tabletop contains red, blue, and/or green cubes, distractor cubes, "
-        "a bin represented by a board with a dark opening, and a push button. "
-        "A cube accepted by the bin remains visible briefly and is then removed "
-        "from the scene."
-    ),
-    objective=(
-        "Repeatedly pick a requested cube, place it into the bin, maintain the "
-        "completed count for every requested color, and press the button after "
-        "all requested color counts have been satisfied."
-    ),
-    episode_variation=(
-        "The task goal determines which cube colors are required and how many of "
-        "each color must be inserted. Cube positions, distractors, color counts, "
-        "and color execution order can vary between episodes."
-    ),
-    memory_requirement=(
-        "Retain per-color placement counts because accepted cubes can disappear "
-        "from the current view; do not infer the completed count from one frame."
+    task_goal_examples=(
+        "Put one blue cube into the bin and press the button to stop.",
+        (
+            "Put one blue cube and two green cubes into the bin and press the "
+            "button to stop."
+        ),
+        (
+            "Put one blue cube, one green cube, and two red cubes into the bin "
+            "and press the button to stop."
+        ),
     ),
 )
 
 
 MOVE_CUBE_DESCRIPTION = TaskDescription(
-    task_category="MoveCube",
-    task_family="imitation and procedural-memory manipulation",
+    task_name="MoveCube",
     summary=(
-        "Infer how a demonstration moves a cube to its target, then reproduce "
-        "the same manipulation strategy in the new execution."
+        "The MoveCube task assesses the robot’s ability to recognize and reproduce "
+        "distinct action semantics. The task requires the robot to observe a video "
+        "demonstration where a cube is moved to a target using one of three specific "
+        "manipulation manners: (1) hooking it with a tool; (2) pushing it with a "
+        "closed gripper; or (3) performing a standard pick-and-place operation. "
+        "Success requires correctly inferring the underlying motion strategy from "
+        "videos and executing the exact same method during the execution phase."
     ),
-    environment=(
-        "The scene contains a small cube, a purple disk target, a long thin peg, "
-        "and the robot gripper. Reset observations include a prerecorded "
-        "demonstration followed by the initial state of the new execution."
-    ),
-    objective=(
-        "Move the cube onto the target using exactly the demonstrated strategy: "
-        "direct contact with an empty closed gripper, cube pick-and-place, or "
-        "grasping the peg and using it to move the cube."
-    ),
-    episode_variation=(
-        "The demonstrated strategy and the object poses can vary by episode. The "
-        "concrete strategy cannot be selected from the task category alone and "
-        "must be inferred from temporal demonstration evidence."
-    ),
-    memory_requirement=(
-        "Preserve the inferred demonstration strategy across the reset into the "
-        "new execution and never combine actions belonging to different strategies."
+    task_goal_examples=(
+        (
+            "Watch the video carefully, then move the cube to the target in the "
+            "same manner as before."
+        ),
     ),
 )
 
 
 PICK_HIGHLIGHT_DESCRIPTION = TaskDescription(
-    task_category="PickHighlight",
-    task_family="reference and object-memory manipulation",
+    task_name="PickHighlight",
     summary=(
-        "Press the button to reveal the target subset, then pick every cube that "
-        "acquires a white highlighted area."
+        "The PickHighlight task evaluates the robot’s shortterm object memory. The "
+        "robot must press a button to briefly highlight specific cubes, memorize "
+        "the highlighted cubes, and then pick them up after the cues disappear. "
+        "This tests the robot’s ability to maintain a working memory of transient "
+        "object states."
     ),
-    environment=(
-        "The tabletop contains a push button and several colored cubes. Pressing "
-        "the button adds a white highlighted area to one or more target cubes; "
-        "the remaining cubes are distractors."
-    ),
-    objective=(
-        "Press the button first, identify and pick every highlighted cube at least "
-        "once, and avoid picking non-highlighted cubes. When several targets are "
-        "present, place the held cube back on the table before picking the next; "
-        "the final highlighted cube does not need to be put down."
-    ),
-    episode_variation=(
-        "The number, colors, and positions of cubes and the highlighted subset "
-        "vary by episode. Target identities are unavailable until the button has "
-        "been pressed and the resulting scene change has been observed."
-    ),
-    memory_requirement=(
-        "Store the post-button highlighted identities and their locations, then "
-        "track which highlighted cubes have already been picked."
+    task_goal_examples=(
+        (
+            "First press the button, then pick up all cubes that have been "
+            "highlighted with white areas on the table."
+        ),
     ),
 )
 
@@ -133,28 +86,28 @@ _TASK_DESCRIPTIONS: tuple[TaskDescription, ...] = (
 )
 
 _TASK_DESCRIPTION_BY_KEY = {
-    description.task_category.casefold(): description
+    description.task_name.casefold(): description
     for description in _TASK_DESCRIPTIONS
 }
 
 
 def available_task_descriptions() -> tuple[str, ...]:
-    """Return registered task-category names in deterministic order."""
+    """Return registered task names in deterministic order."""
 
-    return tuple(description.task_category for description in _TASK_DESCRIPTIONS)
+    return tuple(description.task_name for description in _TASK_DESCRIPTIONS)
 
 
-def get_task_description(task_category: str) -> TaskDescription:
-    """Resolve one task description with case-insensitive category matching."""
+def get_task_description(task_name: str) -> TaskDescription:
+    """Resolve one task description with case-insensitive task-name matching."""
 
-    key = task_category.strip().casefold()
+    key = task_name.strip().casefold()
     if not key:
-        raise ValueError("task_category must be non-empty")
+        raise ValueError("task_name must be non-empty")
     try:
         return _TASK_DESCRIPTION_BY_KEY[key]
     except KeyError as error:
         available = ", ".join(available_task_descriptions())
         raise KeyError(
-            f"No task description registered for {task_category!r}; "
+            f"No task description registered for {task_name!r}; "
             f"available: {available}"
         ) from error

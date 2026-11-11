@@ -1,0 +1,37 @@
+{
+  "schema_version": "action_catalog.v1",
+  "actions": [
+    {
+      "name": "solve_pickup",
+      "description": "Grasp a selected compact object, close the gripper, and lift the object from its supporting surface."
+    },
+    {
+      "name": "solve_put_into_bin",
+      "description": "Move the currently held object above a bin opening, release it into the bin."
+    },
+    {
+      "name": "solve_button",
+      "description": "Move to a specified button, close the gripper and press it, then withdraw."
+    },
+    {
+      "name": "grasp_and_lift_peg_side",
+      "description": "Approach a long peg from the side, grasp it securely, and lift it from the table."
+    },
+    {
+      "name": "solve_push_to_target_with_peg",
+      "description": "While holding a peg, use the peg to push or hook a cube until the cube reaches its target."
+    },
+    {
+      "name": "solve_push_to_target",
+      "description": "Use direct contact from an empty closed gripper to push a cube across the table to its target."
+    },
+    {
+      "name": "solve_putonto_target",
+      "description": "Move the currently held object above a specified target, place it onto the target, and release it."
+    },
+    {
+      "name": "solve_putdown",
+      "description": "Lower the currently held object onto an available table surface, release it, and move the gripper away."
+    }
+  ]
+}

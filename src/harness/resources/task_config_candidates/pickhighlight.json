@@ -1,0 +1,90 @@
+{
+  "schema_version": "task_config.v1",
+  "planning": {
+    "information_sources": [
+      "task_goal",
+      "keyframes"
+    ],
+    "task_goal_sufficient": false,
+    "video_subgoal_list": null,
+    "ordering_rules": [
+      "Press the button before selecting any cube.",
+      "When highlights appear, save the configured keyframe and description before the cues disappear.",
+      "Use the saved highlighted-cube identities to generate or regenerate the remaining pickup sequence.",
+      "When several highlighted cubes remain, put down the held cube before picking the next one."
+    ],
+    "stop_condition": "Every cube recorded as highlighted has been picked at least once; the final highlighted cube does not need to be put down."
+  },
+  "verification": {
+    "k": 3,
+    "views": [
+      "overall",
+      "wrist"
+    ],
+    "interval": 16,
+    "interval_unit": "frame",
+    "selection_reason": "Three paired observations are sufficient for button, pickup, and put-down verification, while the transient highlight evidence is preserved separately as a keyframe."
+  },
+  "subgoals": [
+    {
+      "template": "press the button",
+      "example": "press the button",
+      "action_name": "solve_button",
+      "acceptance": {
+        "completed": "The button completes a visible press cycle and the cube highlights appear in the overall view.",
+        "incomplete": "The press motion is ongoing or the post-press highlighted state has not yet been observed.",
+        "failed": "The press visibly misses the button or a cube is picked before the highlight reveal is captured."
+      }
+    },
+    {
+      "template": "pick up the {ordinal} highlighted cube described as {identity}",
+      "example": "pick up the first highlighted cube described as the red cube at the back left",
+      "action_name": "solve_pickup",
+      "acceptance": {
+        "completed": "The intended cube from the saved highlight keyframe is visibly held and lifted from the table.",
+        "incomplete": "The intended cube is not yet securely held and lifted, or the available views are insufficient to confirm it.",
+        "failed": "A cube not present in the saved highlighted set is grasped, or the intended cube is visibly dropped or irrecoverably displaced."
+      }
+    },
+    {
+      "template": "place the held cube onto the table",
+      "example": "place the held cube onto the table",
+      "action_name": "solve_putdown",
+      "acceptance": {
+        "completed": "The held cube is released onto a stable table area and the gripper moves away empty.",
+        "incomplete": "The cube remains held or stable release onto the table is not yet visible.",
+        "failed": "The cube is released off the table, onto another object, or into a position that prevents the remaining pickups."
+      }
+    }
+  ],
+  "task_notes": [
+    "Before any horizontal or lateral motion with a grasped cube, first lift it to a visibly safe clearance above the table and confirm the lift to avoid collisions.",
+    "Treat the saved post-button keyframe and its description as the authority for which cubes were highlighted after the visual cues disappear.",
+    "Track completed highlighted-cube pickups in Task Log and never replace the saved target set using later unhighlighted observations."
+  ],
+  "vlm_prompts": {
+    "verification": {
+      "system_prompt": "You verify exactly one active PickHighlight subgoal using its acceptance criteria, recent observations, and the saved highlight keyframe description in Task Log. After highlight cues disappear, use the saved target set rather than guessing from current cube appearance. Use incomplete for insufficient evidence and failed only for positive failure evidence. Return JSON only with exactly two fields: status and description.",
+      "user_prompt_template": "Task goal: {task_goal}\nCurrent subgoal: {current_subgoal}\nMapped action: {action_name}\nAcceptance criteria: {acceptance_criteria}\nVerification parameters: {verification_parameters}\nTask-specific notes: {task_notes}\nSubgoal-start observations: {subgoal_start_observations}\nRecent observations: {recent_observations}\nTask Log summary, including saved highlight evidence: {task_log_summary}\nReturn status as completed, incomplete, or failed. Description must contain only concise observable evidence."
+    },
+    "in_task_planning": {
+      "system_prompt": "You plan PickHighlight using the transient highlighted-cube evidence saved in Task Log. Initially select the button press. Once the highlight keyframe and description exist, generate or regenerate the ordered pickup sequence for exactly those cubes, inserting a table put-down between pickups but not after the final pickup. Return JSON only with exactly three fields: subgoal_sequence, next_subgoal, and action_name.",
+      "user_prompt_template": "Task goal: {task_goal}\nPlanning policy: {planning_policy}\nAvailable subgoals and actions: {subgoal_catalog}\nTask-specific notes: {task_notes}\nKeyframe policy: {keyframe_policy}\nTask Log, including saved keyframes and descriptions: {task_log}\nRobot state: {robot_state}\nCurrent observations: {current_observations}\nCurrent subgoal: {current_subgoal}\nCurrent subgoal sequence: {current_subgoal_sequence}\nVerification result: {verification_result}\nReturn the active ordered subgoal_sequence, its next_subgoal or STOP, and the exact mapped action_name."
+    }
+  },
+  "keyframes": [
+    {
+      "views": [
+        "overall"
+      ],
+      "save_when": "Immediately after the button press completes, while the cube highlights are visible and before they disappear.",
+      "capture_mode": "single",
+      "frame_count": 1,
+      "interval": 16,
+      "interval_unit": "frame",
+      "save_description": true,
+      "description_instruction": "Describe every highlighted cube using visible identity cues such as color and relative table position; exclude non-highlighted cubes.",
+      "task_log_field": "keyframes.highlight_reveal"
+    }
+  ]
+}
