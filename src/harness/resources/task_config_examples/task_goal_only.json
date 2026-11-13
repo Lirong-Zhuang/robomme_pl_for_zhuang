@@ -1,0 +1,78 @@
+{
+  "schema_version": "task_config.v1",
+  "planning": {
+    "information_sources": [
+      "task_goal"
+    ],
+    "task_goal_sufficient": true,
+    "video_subgoal_list": null,
+    "ordering_rules": [
+      "Read the requested cube colors and counts from task_goal.",
+      "For every requested cube, alternate pickup and put-into-bin subgoals.",
+      "Press the button only after every requested placement is recorded as completed."
+    ],
+    "stop_condition": "All requested color counts are satisfied and the final button-press subgoal is completed."
+  },
+  "verification": {
+    "k": 3,
+    "views": [
+      "overall",
+      "wrist"
+    ],
+    "interval": 16,
+    "interval_unit": "frame",
+    "selection_reason": "Three paired observations are sufficient to distinguish grasp-and-lift, release into the bin, and button motion while counts remain in compact Task State."
+  },
+  "subgoals": [
+    {
+      "subgoal_key": "pickup_cube",
+      "template": "pick up the {ordinal} {color} cube",
+      "example": "pick up the first red cube",
+      "action_name": "solve_pickup",
+      "acceptance": {
+        "completed": "The intended cube is visibly held by the gripper and has moved upward from its supporting surface.",
+        "incomplete": "The cube is not yet securely held and lifted, or the available views do not clearly establish a lift.",
+        "failed": "A wrong cube is grasped, the intended cube is visibly dropped, or the grasp attempt leaves it unrecoverably displaced."
+      }
+    },
+    {
+      "subgoal_key": "put_into_bin",
+      "template": "put it into the bin",
+      "example": "put it into the bin",
+      "action_name": "solve_put_into_bin",
+      "acceptance": {
+        "completed": "The held cube is released through the bin opening and is no longer held by the gripper.",
+        "incomplete": "The cube remains held or has not been visibly released into the bin opening.",
+        "failed": "The cube is visibly released outside the bin or lost in a position that cannot satisfy the placement."
+      }
+    },
+    {
+      "subgoal_key": "press_button",
+      "template": "press the button",
+      "example": "press the button",
+      "action_name": "solve_button",
+      "acceptance": {
+        "completed": "The button completes a visible press cycle after all requested placements are recorded.",
+        "incomplete": "The press motion is still ongoing or full button actuation is not visible.",
+        "failed": "The button is pressed before the requested placement counts are satisfied or the press attempt visibly misses the button."
+      }
+    }
+  ],
+  "object_roles": [],
+  "task_notes": [
+    "Before any horizontal or lateral motion with a grasped cube, first lift it to a visibly safe clearance above the table and confirm the lift to avoid collisions.",
+    "Maintain completed placement counts by color in compact Task State.",
+    "Do not reduce a completed count merely because a previously inserted cube is no longer visible."
+  ],
+  "vlm_prompts": {
+    "first_planning": {
+      "system_prompt": "Role\nYou perform only the first BinFill planning call. Build one concrete ordered subgoal sequence and select the first subgoal for execution.\n\nAvailable subgoals, keys, and trusted actions\n- pickup_cube: pick up the [ordinal] [color] cube -> solve_pickup\n- put_into_bin: put it into the bin -> solve_put_into_bin\n- press_button: press the button -> solve_button\n\nTask rules\n1. Read every requested cube color and count from the task goal.\n2. For each requested cube, alternate one pickup with one put-into-bin subgoal.\n3. Preserve the color order in the task goal and use first, second, third, and later ordinals within each color count.\n4. Press the button exactly once after all requested placements.\n5. Use only the listed subgoal forms and keys. The harness resolves actions from the key; do not output action_name.\n6. Each sequence entry must contain subgoal_key, instantiated subgoal text, and its arguments object.\n7. next_subgoal_key, next_subgoal, and arguments must exactly duplicate the first sequence entry.\n8. Do not verify execution or output status, completed, description, evidence, point, or execution_tool.\n\nExample\nFor two red cubes: pickup_cube(first, red); put_into_bin; pickup_cube(second, red); put_into_bin; press_button.\n\nOutput\nReturn JSON only with exactly subgoal_sequence, next_subgoal_key, next_subgoal, and arguments.\nStart directly with { and do not output Markdown, analysis, reasoning, think tags, or additional fields.",
+      "user_prompt_template": "The task goal is: {task_goal}\n\nCurrent observations:\n{current_observations}\n\nThis is the initial call. Generate the complete concrete subgoal_sequence from the task goal. Each entry must contain subgoal_key, subgoal, and arguments. Then repeat the first entry as next_subgoal_key, next_subgoal, and arguments. Do not perform verification or output an action name. Start directly with the JSON object and output JSON only."
+    },
+    "followup_planning": {
+      "system_prompt": "Role\nYou jointly verify the current BinFill subgoal and select the subgoal that should be active next.\n\nAvailable subgoals, keys, and trusted actions\n- pickup_cube: pick up the [ordinal] [color] cube -> solve_pickup\n- put_into_bin: put it into the bin -> solve_put_into_bin\n- press_button: press the button -> solve_button\n\nVerification rules\n1. Compare the fixed subgoal-start observations with the recent observation window.\n2. Judge only against the supplied acceptance criteria.\n3. Use completed only for positive success evidence, incomplete for ongoing or insufficient evidence, and failed only for positive failure evidence.\n\nPlanning rules\n1. If incomplete, keep the current subgoal key, text, and arguments.\n2. If completed, advance exactly one step using the current sequence and compact Task State.\n3. A failed attempt does not increment a completed count. Retry a trusted subgoal when recoverable; otherwise emit STOP.\n4. Emit STOP only after all requested placements and the button press are completed.\n5. Never reduce a completed count merely because an inserted cube is no longer visible.\n6. The harness resolves action_name and the next acceptance criteria from next_subgoal_key; do not output action_name.\n\nOutput\nReturn JSON only with exactly status, description, next_subgoal_key, next_subgoal, and arguments. For STOP use next_subgoal_key=STOP, next_subgoal=STOP, and arguments={}. description must contain concise observable evidence only.",
+      "user_prompt_template": "Task goal\n{task_goal}\n\nCompact Task State\n{task_state}\n\nCurrent execution\n- Key: {current_subgoal_key}\n- Subgoal: {current_subgoal}\n- Acceptance criteria: {acceptance_criteria}\n- Verification parameters: {verification_parameters}\n\nSubgoal-start observations\n{subgoal_start_observations}\n\nRecent observations, oldest to newest\n{recent_observations}\n\nCurrent subgoal sequence\n{current_subgoal_sequence}\n\nVerify the current subgoal and select what should be active next in the same response. Do not output action_name. Output JSON only."
+    }
+  },
+  "keyframes": []
+}

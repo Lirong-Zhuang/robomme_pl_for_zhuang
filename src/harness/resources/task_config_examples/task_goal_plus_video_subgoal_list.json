@@ -1,0 +1,117 @@
+{
+  "schema_version": "task_config.v1",
+  "planning": {
+    "information_sources": [
+      "task_goal",
+      "video_subgoal_list"
+    ],
+    "task_goal_sufficient": false,
+    "video_subgoal_list": {
+      "description_instruction": "While watching the chronological demonstration, identify the demonstrated manipulation strategy and save its exact ordered subgoal list without mixing strategies.",
+      "task_state_field": "persistent_facts.planning.video_subgoal_list"
+    },
+    "ordering_rules": [
+      "During the first in-task-planning call, inspect the chronological demonstration video and select exactly one demonstrated strategy.",
+      "Generate the subgoal sequence while viewing the video and store the selected strategy and sequence in compact Task State.",
+      "Use only the subgoals belonging to the selected strategy and never mix strategies during execution."
+    ],
+    "stop_condition": "The cube reaches the target using the same manipulation strategy observed in the demonstration video."
+  },
+  "verification": {
+    "k": 3,
+    "views": [
+      "overall",
+      "wrist"
+    ],
+    "interval": 16,
+    "interval_unit": "frame",
+    "selection_reason": "Three paired observations provide temporal evidence for grasp, lift, push, hook, and placement completion without reclassifying the locked video-derived strategy."
+  },
+  "subgoals": [
+    {
+      "subgoal_key": "pickup_peg",
+      "template": "pick up the peg",
+      "example": "pick up the peg",
+      "action_name": "grasp_and_lift_peg_side",
+      "acceptance": {
+        "completed": "The long thin peg is visibly held by the gripper and lifted from the table.",
+        "incomplete": "The peg is not yet securely held and lifted, or the available views are insufficient to confirm it.",
+        "failed": "The wrong object is grasped, the peg is visibly dropped, or the peg becomes unrecoverably displaced."
+      }
+    },
+    {
+      "subgoal_key": "move_cube_with_peg",
+      "template": "hook the cube to the target with the peg",
+      "example": "hook the cube to the target with the peg",
+      "action_name": "solve_push_to_target_with_peg",
+      "acceptance": {
+        "completed": "The held long thin peg has moved the small compact cube onto the purple target disk and the cube remains on that disk.",
+        "incomplete": "The cube has not yet reached the target or contact-driven motion is still ongoing.",
+        "failed": "The peg is lost, the cube is pushed irrecoverably away, or the robot switches to a different manipulation strategy."
+      }
+    },
+    {
+      "subgoal_key": "push_cube_to_target",
+      "template": "close the gripper and push the cube to the target",
+      "example": "close the gripper and push the cube to the target",
+      "action_name": "solve_push_to_target",
+      "acceptance": {
+        "completed": "The empty closed gripper has pushed the small compact cube onto the purple target disk while the cube remained supported by the table.",
+        "incomplete": "The cube is still being pushed or has not yet reached the target.",
+        "failed": "The cube or peg is picked up, the cube is pushed irrecoverably away, or another demonstrated strategy is used."
+      }
+    },
+    {
+      "subgoal_key": "pickup_cube",
+      "template": "pick up the cube",
+      "example": "pick up the cube",
+      "action_name": "solve_pickup",
+      "acceptance": {
+        "completed": "The small compact cube is visibly held and lifted with clear separation from the table.",
+        "incomplete": "The cube remains table-supported or the available views do not clearly establish a lift.",
+        "failed": "The peg is grasped instead, the cube is dropped, or the cube becomes unrecoverably displaced."
+      }
+    },
+    {
+      "subgoal_key": "place_cube_on_target",
+      "template": "place the cube onto the target",
+      "example": "place the cube onto the target",
+      "action_name": "solve_putonto_target",
+      "acceptance": {
+        "completed": "The small compact cube is released onto the purple target disk and is no longer held by the gripper.",
+        "incomplete": "The cube remains held or its stable placement on the target is not yet visible.",
+        "failed": "The cube is released away from the target or visibly leaves the target after release."
+      }
+    }
+  ],
+  "object_roles": [
+    {
+      "role": "target",
+      "identity": "The purple circular disk."
+    },
+    {
+      "role": "cube",
+      "identity": "The small compact block."
+    },
+    {
+      "role": "peg or tool",
+      "identity": "The long thin object."
+    }
+  ],
+  "task_notes": [
+    "Before any horizontal or lateral motion with a grasped cube or peg, first lift it to a visibly safe clearance above the table and confirm the lift to avoid collisions.",
+    "The first in-task-planning call must generate the concrete subgoal sequence from the demonstration video, not from the task name alone.",
+    "After the strategy and sequence are saved in compact Task State, later planning calls may verify progress but must not substitute a different strategy."
+  ],
+  "vlm_prompts": {
+    "first_planning": {
+      "system_prompt": "Role\nYou perform only the first MoveCube planning call. Inspect the chronological demonstration, select exactly one demonstrated strategy, and build its execution sequence. Do not verify an execution subgoal.\n\nNecessary planning sources\nTask goal and the chronological demonstration are jointly required references. Use the demonstration to generate the locked video_subgoal_list; never choose a strategy or sequence from task goal alone.\n\nObject identification\n- The target is the purple circular disk.\n- The cube is the small compact block.\n- The peg or tool is the long thin object.\nUse these visible size, shape, and color cues to distinguish which object, if any, is carried by the gripper and which object reaches the target. Never confuse the compact cube with the elongated peg or the purple target disk.\n\nAvailable subgoals, keys, and trusted actions\n- pickup_peg: pick up the peg -> grasp_and_lift_peg_side\n- move_cube_with_peg: hook the cube to the target with the peg -> solve_push_to_target_with_peg\n- push_cube_to_target: close the gripper and push the cube to the target -> solve_push_to_target\n- pickup_cube: pick up the cube -> solve_pickup\n- place_cube_on_target: place the cube onto the target -> solve_putonto_target\n\nStrategy rules\n- Peg-assisted motion: pickup_peg; move_cube_with_peg.\n- Direct closed-gripper push: push_cube_to_target.\n- Cube pick-and-place: pickup_cube; place_cube_on_target.\n- Select exactly one strategy and never mix strategies.\n- Demonstration actions are evidence, not progress in the new execution.\n- The harness resolves actions from keys; do not output action_name.\n\nOutput\nReturn JSON only with exactly subgoal_sequence, next_subgoal_key, next_subgoal, and arguments. Every sequence entry contains subgoal_key, subgoal, and arguments. The next fields must duplicate the first entry. Do not output status or description.",
+      "user_prompt_template": "Task goal\n{task_goal}\n\nChronological demonstration followed by the new execution state\n{current_observations}\n\nInfer and lock exactly one demonstrated strategy. Generate its concrete ordered subgoal_sequence, then repeat its first entry as next_subgoal_key, next_subgoal, and arguments. Do not output action_name. Output JSON only."
+    },
+    "followup_planning": {
+      "system_prompt": "Role\nYou jointly verify the current MoveCube subgoal and select the subgoal that should be active next.\n\nNecessary planning sources\nTask goal and the supplied video_subgoal_list are jointly required references for every subgoal decision. Treat video_subgoal_list as the locked demonstrated strategy and never replace, bypass, or reinterpret it from task goal alone.\n\nObject identification\n- The target is the purple circular disk.\n- The cube is the small compact block.\n- The peg or tool is the long thin object.\nUse these visible size, shape, and color cues when verifying the carried object, table clearance, contact-driven motion, and final target occupancy. Never count the compact cube, elongated peg, or purple disk as one another.\n\nAvailable subgoals, keys, and trusted actions\n- pickup_peg: pick up the peg -> grasp_and_lift_peg_side\n- move_cube_with_peg: hook the cube to the target with the peg -> solve_push_to_target_with_peg\n- push_cube_to_target: close the gripper and push the cube to the target -> solve_push_to_target\n- pickup_cube: pick up the cube -> solve_pickup\n- place_cube_on_target: place the cube onto the target -> solve_putonto_target\n\nVerification rules\n1. Compare the fixed subgoal-start observations with the recent observation window.\n2. Judge the current subgoal using its acceptance criteria and the locked video_subgoal_list.\n3. Use completed only for positive success evidence, incomplete for ongoing or insufficient evidence, and failed only for positive failure evidence.\n\nPlanning rules\n1. Never reclassify, replace, or mix the video-derived strategy.\n2. If incomplete, keep the current subgoal key, text, and arguments.\n3. If completed, advance exactly one step in video_subgoal_list; emit STOP after its final subgoal.\n4. If failed, retry a trusted subgoal within the locked strategy when possible; otherwise emit STOP.\n5. The harness resolves actions from keys; do not output action_name.\n\nOutput\nReturn JSON only with exactly status, description, next_subgoal_key, next_subgoal, and arguments. For STOP use next_subgoal_key=STOP, next_subgoal=STOP, and arguments={}. description must contain concise observable evidence only.",
+      "user_prompt_template": "Task goal\n{task_goal}\n\nLocked video-derived subgoal list; required planning reference\n{video_subgoal_list}\n\nCompact Task State\n{task_state}\n\nCurrent execution\n- Key: {current_subgoal_key}\n- Subgoal: {current_subgoal}\n- Acceptance criteria: {acceptance_criteria}\n- Verification parameters: {verification_parameters}\n\nSubgoal-start observations\n{subgoal_start_observations}\n\nRecent observations, oldest to newest\n{recent_observations}\n\nCurrent subgoal sequence\n{current_subgoal_sequence}\n\nVerify the current subgoal and select what should be active next in the same response. Base planning on task goal together with video_subgoal_list and never substitute a different strategy. Do not output action_name. Output JSON only."
+    }
+  },
+  "keyframes": []
+}

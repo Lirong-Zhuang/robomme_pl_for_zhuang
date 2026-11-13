@@ -32,6 +32,34 @@
     {
       "name": "solve_putdown",
       "description": "Lower the currently held object onto an available table surface, release it, and move the gripper away."
+    },
+    {
+      "name": "solve_button_ready",
+      "description": "Move above a specified button and hold a press-ready pose without actuating the button."
+    },
+    {
+      "name": "solve_hold_abs_timestep",
+      "description": "Keep the robot static while the environment continues evolving, advancing only to the requested absolute-time checkpoint before observing again."
+    },
+    {
+      "name": "solve_pickup_bin",
+      "description": "Grasp a selected white container from above, close the gripper, and lift the container from the table without treating any hidden cube as the grasp target."
+    },
+    {
+      "name": "solve_swingonto_whenhold",
+      "description": "While continuing to hold an object, move it above a specified target disk without releasing it."
+    },
+    {
+      "name": "insert_peg",
+      "description": "While holding the selected peg at the demonstrated end, align it with the box and insert it from the specified robot-left or robot-right side."
+    },
+    {
+      "name": "solve_pattern_direction",
+      "description": "Move the end-effector-mounted stick continuously from its current grid target to the adjacent target in one specified robot-frame direction: forward, backward, left, right, or one of the four diagonals."
+    },
+    {
+      "name": "solve_swingonto_with_direction",
+      "description": "Move the end-effector-mounted stick to the nearest specified-side target while circling the intervening obstacle clockwise or counterclockwise as requested."
     }
   ]
 }

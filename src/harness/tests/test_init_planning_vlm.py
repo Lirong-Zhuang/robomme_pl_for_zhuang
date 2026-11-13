@@ -50,15 +50,23 @@ ACTION_CANDIDATES_PATH = (
     / "action_candidates"
     / "action_catalog.json"
 )
-# Keep this independently editable. For a fair inference test, prefer an example
-# from a different task rather than the gold config for TASK_NAME.
-TASK_CONFIG_EXAMPLE_PATH = (
+# The VLM reads this index first, selects one information-source profile, and then
+# consults the corresponding JSON as a structural example rather than by task name.
+TASK_CONFIG_EXAMPLES_INDEX_PATH = (
     REPO_ROOT
     / "src"
     / "harness"
     / "resources"
-    / "task_config_candidates"
-    / "binfill.json"
+    / "task_config_examples"
+    / "README.md"
+)
+TASK_CONFIG_EXAMPLE_PATHS = tuple(
+    TASK_CONFIG_EXAMPLES_INDEX_PATH.parent / filename
+    for filename in (
+        "task_goal_only.json",
+        "task_goal_plus_video_subgoal_list.json",
+        "task_goal_plus_keyframes.json",
+    )
 )
 
 MODEL_PATH = Path(
@@ -75,9 +83,14 @@ TEMPERATURE = 0.0
 _DIRECT_TEST_ADAPTER = """
 
 Direct single-call test adapter:
-- The Python harness has already executed the required read operations. The exact
-  read results are appended to the user message below and must be treated as the
-  contents returned by the read tool for their declared paths.
+- No filesystem read tool is exposed inside this standalone model call. The Python
+  harness therefore appends the exact action catalog, Markdown profile index, and
+  all three candidate JSON examples to the user message.
+- First apply the Markdown index to the current task and select exactly one source
+  profile. Consult only the JSON belonging to that selected profile when learning
+  structure and transport. Treat the other two preloaded JSON objects as unread and
+  irrelevant to generation. This preloading changes transport only; the profile
+  decision must still be made by you from the current task inputs.
 - No filesystem write tool is exposed inside this standalone model call. Therefore,
   return the complete task_config.v1 JSON object itself instead of a write
   acknowledgement. The trusted Python harness will validate that object and write
@@ -91,6 +104,7 @@ _REQUIRED_TOP_LEVEL_FIELDS = {
     "planning",
     "verification",
     "subgoals",
+    "object_roles",
     "task_notes",
     "vlm_prompts",
     "keyframes",
@@ -100,29 +114,31 @@ _ALLOWED_INFORMATION_SOURCES = {
     "video_subgoal_list",
     "keyframes",
 }
-_VERIFICATION_PLACEHOLDERS = {
+_FIRST_PLANNING_PLACEHOLDERS = {
     "{task_goal}",
+    "{current_observations}",
+}
+_KEYFRAME_FIRST_PLANNING_PLACEHOLDERS = {
+    *_FIRST_PLANNING_PLACEHOLDERS,
+    "{keyframe_policy}",
+    "{saved_keyframe}",
+}
+_FOLLOWUP_PLANNING_PLACEHOLDERS = {
+    "{task_goal}",
+    "{task_state}",
+    "{current_subgoal_key}",
     "{current_subgoal}",
-    "{action_name}",
     "{acceptance_criteria}",
     "{verification_parameters}",
-    "{task_notes}",
     "{subgoal_start_observations}",
     "{recent_observations}",
-    "{task_log_summary}",
-}
-_PLANNING_PLACEHOLDERS = {
-    "{task_goal}",
-    "{planning_policy}",
-    "{subgoal_catalog}",
-    "{task_notes}",
-    "{keyframe_policy}",
-    "{task_log}",
-    "{robot_state}",
-    "{current_observations}",
-    "{current_subgoal}",
     "{current_subgoal_sequence}",
-    "{verification_result}",
+}
+_KEYFRAME_FOLLOWUP_PLACEHOLDERS = {
+    *_FOLLOWUP_PLANNING_PLACEHOLDERS,
+    "{current_observation}",
+    "{keyframe_policy}",
+    "{saved_keyframe}",
 }
 
 
@@ -135,19 +151,29 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return value
 
 
+def _load_text(path: Path) -> str:
+    if not path.is_file():
+        raise FileNotFoundError(f"Required text resource does not exist: {path}")
+    value = path.read_text(encoding="utf-8")
+    if not value.strip():
+        raise ValueError(f"Text resource must not be empty: {path}")
+    return value
+
+
 def _build_direct_messages(
     *,
     output_path: Path,
     action_catalog: dict[str, Any],
-    config_example: dict[str, Any] | None,
+    config_examples_index: str | None,
+    config_examples: dict[Path, dict[str, Any]] | None,
 ) -> list[dict[str, str]]:
     messages = build_task_init_messages(
         task_name=TASK_NAME,
         action_candidates_path=str(ACTION_CANDIDATES_PATH.resolve()),
         task_config_output_path=str(output_path),
         use_task_config_example=USE_TASK_CONFIG_EXAMPLE,
-        task_config_example_path=(
-            str(TASK_CONFIG_EXAMPLE_PATH.resolve())
+        task_config_examples_index_path=(
+            str(TASK_CONFIG_EXAMPLES_INDEX_PATH.resolve())
             if USE_TASK_CONFIG_EXAMPLE
             else None
         ),
@@ -160,14 +186,23 @@ def _build_direct_messages(
         json.dumps(action_catalog, ensure_ascii=False, indent=2),
         "</read_result>",
     ]
-    if config_example is not None:
+    if config_examples_index is not None and config_examples is not None:
         resource_results.extend(
             (
-                f"\n<read_result path={json.dumps(str(TASK_CONFIG_EXAMPLE_PATH.resolve()))}>",
-                json.dumps(config_example, ensure_ascii=False, indent=2),
+                "\n<read_result path="
+                f"{json.dumps(str(TASK_CONFIG_EXAMPLES_INDEX_PATH.resolve()))}>",
+                config_examples_index,
                 "</read_result>",
             )
         )
+        for path in TASK_CONFIG_EXAMPLE_PATHS:
+            resource_results.extend(
+                (
+                    f"\n<read_result path={json.dumps(str(path.resolve()))}>",
+                    json.dumps(config_examples[path], ensure_ascii=False, indent=2),
+                    "</read_result>",
+                )
+            )
     messages[1]["content"] += "\n".join(resource_results)
     return messages
 
@@ -213,7 +248,17 @@ def _validate_task_config(
     subgoals = config["subgoals"]
     if not isinstance(subgoals, list) or not subgoals:
         raise ValueError("subgoals must be a non-empty list")
+    subgoal_keys: set[str] = set()
     for index, subgoal in enumerate(subgoals):
+        subgoal_key = subgoal.get("subgoal_key")
+        if (
+            not isinstance(subgoal_key, str)
+            or re.fullmatch(r"[a-z][a-z0-9_]*", subgoal_key) is None
+        ):
+            raise ValueError(f"subgoals[{index}].subgoal_key is invalid")
+        if subgoal_key in subgoal_keys:
+            raise ValueError(f"duplicate subgoal_key: {subgoal_key!r}")
+        subgoal_keys.add(subgoal_key)
         if subgoal.get("action_name") not in action_names:
             raise ValueError(f"subgoals[{index}] uses an unknown action")
         acceptance = subgoal.get("acceptance")
@@ -246,19 +291,117 @@ def _validate_task_config(
     if not isinstance(verification.get("interval"), int):
         raise ValueError("verification.interval must be an integer")
 
+    object_roles = config["object_roles"]
+    if not isinstance(object_roles, list):
+        raise ValueError("object_roles must be a list")
+    for index, object_role in enumerate(object_roles):
+        if not isinstance(object_role, dict) or set(object_role) != {
+            "role",
+            "identity",
+        }:
+            raise ValueError(
+                f"object_roles[{index}] must contain exactly role and identity"
+            )
+        if not all(
+            isinstance(object_role[field], str) and object_role[field].strip()
+            for field in ("role", "identity")
+        ):
+            raise ValueError(
+                f"object_roles[{index}] role and identity must be non-empty strings"
+            )
+
+    task_notes = config["task_notes"]
+    if not isinstance(task_notes, list) or not all(
+        isinstance(note, str) and note.strip() for note in task_notes
+    ):
+        raise ValueError("task_notes must be a list of non-empty strings")
+    if any("object-role identities" in note.casefold() for note in task_notes):
+        raise ValueError(
+            "task_notes must not contain the object-role glossary; use object_roles"
+        )
+
+    if TASK_NAME.casefold() == "movecube":
+        object_roles_text = "\n".join(
+            f"{item['role']}: {item['identity']}" for item in object_roles
+        ).casefold()
+        for object_description in (
+            "purple circular disk",
+            "small compact block",
+            "long thin object",
+        ):
+            if object_description not in object_roles_text:
+                raise ValueError(
+                    "MoveCube object_roles omit object description: "
+                    f"{object_description!r}"
+                )
+
     prompts = config["vlm_prompts"]
-    verifier_template = prompts["verification"]["user_prompt_template"]
-    planner_template = prompts["in_task_planning"]["user_prompt_template"]
+    if set(prompts) != {"first_planning", "followup_planning"}:
+        raise ValueError(
+            "vlm_prompts must contain exactly first_planning and followup_planning"
+        )
+    selected_action_names = {subgoal["action_name"] for subgoal in subgoals}
+    for prompt_name in ("first_planning", "followup_planning"):
+        system_prompt = prompts[prompt_name]["system_prompt"]
+        prompt_tokens = set(re.findall(r"\b[a-z][a-z0-9_]*\b", system_prompt))
+        mentioned_subgoal_keys = subgoal_keys & prompt_tokens
+        if mentioned_subgoal_keys != subgoal_keys:
+            raise ValueError(
+                f"{prompt_name} system prompt does not contain every subgoal_key; "
+                f"expected={sorted(subgoal_keys)}, "
+                f"mentioned={sorted(mentioned_subgoal_keys)}"
+            )
+        mentioned_action_names = action_names & prompt_tokens
+        if mentioned_action_names != selected_action_names:
+            raise ValueError(
+                f"{prompt_name} system prompt action mappings disagree with "
+                f"top-level subgoals; expected={sorted(selected_action_names)}, "
+                f"mentioned={sorted(mentioned_action_names)}"
+            )
+        if TASK_NAME.casefold() == "movecube":
+            for object_description in (
+                "purple circular disk",
+                "small compact block",
+                "long thin object",
+            ):
+                if object_description not in system_prompt.casefold():
+                    raise ValueError(
+                        f"{prompt_name} system prompt omits MoveCube object "
+                        f"description: {object_description!r}"
+                    )
+    first_template = prompts["first_planning"]["user_prompt_template"]
+    followup_template = prompts["followup_planning"]["user_prompt_template"]
+    uses_keyframes = bool(config["keyframes"])
+    uses_video_subgoal_list = "video_subgoal_list" in sources
     _validate_placeholders(
-        prompt_name="verification",
-        template=verifier_template,
-        expected=_VERIFICATION_PLACEHOLDERS,
+        prompt_name="first-planning",
+        template=first_template,
+        expected=(
+            _KEYFRAME_FIRST_PLANNING_PLACEHOLDERS
+            if uses_keyframes
+            else _FIRST_PLANNING_PLACEHOLDERS
+        ),
     )
     _validate_placeholders(
-        prompt_name="in-task-planning",
-        template=planner_template,
-        expected=_PLANNING_PLACEHOLDERS,
+        prompt_name="followup-planning",
+        template=followup_template,
+        expected=(
+            (
+                _KEYFRAME_FOLLOWUP_PLACEHOLDERS
+                if uses_keyframes
+                else _FOLLOWUP_PLANNING_PLACEHOLDERS
+            )
+            | ({"{video_subgoal_list}"} if uses_video_subgoal_list else set())
+        ),
     )
+
+    for prompt_name in ("first_planning", "followup_planning"):
+        prompt_text = "\n".join(prompts[prompt_name].values())
+        mentions_keyframe_save = "keyframe_save" in prompt_text
+        if mentions_keyframe_save != uses_keyframes:
+            raise ValueError(
+                f"{prompt_name} keyframe_save contract disagrees with keyframes"
+            )
 
     for index, keyframe in enumerate(config["keyframes"]):
         if keyframe.get("interval_unit") != "frame":
@@ -270,15 +413,27 @@ def main() -> None:
     gpu_monitor = GpuMemoryMonitor(os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
     output_path = (OUTPUT_DIRECTORY / OUTPUT_FILE_NAME).resolve()
     action_catalog = _load_json_object(ACTION_CANDIDATES_PATH)
-    config_example = (
-        _load_json_object(TASK_CONFIG_EXAMPLE_PATH)
+    config_examples_index = (
+        _load_text(TASK_CONFIG_EXAMPLES_INDEX_PATH)
         if USE_TASK_CONFIG_EXAMPLE
         else None
     )
+    config_examples = (
+        {path: _load_json_object(path) for path in TASK_CONFIG_EXAMPLE_PATHS}
+        if USE_TASK_CONFIG_EXAMPLE
+        else None
+    )
+    if config_examples_index is not None:
+        for path in TASK_CONFIG_EXAMPLE_PATHS:
+            if path.name not in config_examples_index:
+                raise ValueError(
+                    f"Profile index does not list candidate example: {path.name}"
+                )
     messages = _build_direct_messages(
         output_path=output_path,
         action_catalog=action_catalog,
-        config_example=config_example,
+        config_examples_index=config_examples_index,
+        config_examples=config_examples,
     )
 
     print(f"Task: {TASK_NAME}")
