@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v16_repeatable_keyframes"
+INIT_PROMPT_VERSION = "minimal_task_config_v17_hybrid_keyframes"
 
 
 @dataclass(frozen=True)
@@ -106,6 +106,7 @@ path. Do not wrap it in a Markdown code fence.
     {
       "views": ["overall"],
       "save_when": "precise event relative to a subgoal or environment change",
+      "stop_when": null,
       "capture_mode": "single or sequence",
       "frame_count": 1,
       "interval": 16,
@@ -363,8 +364,11 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   candidate matches or the applicable policy is complete; otherwise it must copy
   one exact supplied observation ID. A single policy is complete after one saved
   observation. A sequence policy may continue saving across calls until its
-  frame_count is reached. Existing saved sequence evidence alone is not a reason to
-  return null while that policy remains incomplete. status must be
+  observable stop_when condition is satisfied or its frame_count upper bound is
+  reached. When a supplied candidate first satisfies stop_when, retain that terminal
+  observation if capacity remains and then close the policy. Existing saved sequence
+  evidence alone is not a reason to return null while that policy remains open.
+  status must be
   completed, incomplete, or failed; description must contain only concise observable
   evidence for that status. When keyframe_save is non-null and save_description is
   true, description must also include the visible facts requested by the matching
@@ -391,7 +395,8 @@ Information-source transport is covered by the required conditional placeholders
 - Saved keyframes and their descriptions arrive inside {{task_state}} and explicitly
   inside {{saved_keyframe}}. For single capture it contains one image placeholder;
   for sequence capture it contains the ordered saved observations, their image
-  placeholders and descriptions, saved_count, frame_count, and completion state.
+  placeholders and descriptions, saved_count, the frame-count upper bound, and the
+  observable stop condition.
 - The applicable keyframe entry and exact save_when condition arrive inside
   {{keyframe_policy}}, as an object whose task_config_ref identifies its source.
 Do not introduce alternate aliases such as {{video_observations}},
@@ -406,11 +411,14 @@ specify views, exact save timing, single-frame versus sequence, frame count and
 interval, the description instruction, and its task_state destination. Every
 keyframe policy must set save_description=true so every retained observation has a
 concise task-relevant description. capture_mode=single requires frame_count=1 and
-stops after one saved observation. capture_mode=sequence requires frame_count
-greater than 1 and may append one matching observation per planning call until that
-count is reached. Every saved observation must receive the requested description.
-Use an empty list when no keyframes are justified. Do not store ordinary
-rolling-window observations as special keyframes.
+stop_when=null, and stops after one saved observation. capture_mode=sequence
+requires frame_count greater than 1, uses that count only as a safety upper bound,
+and requires an observable stop_when condition. It may append one matching
+observation per planning call until stop_when is satisfied or the upper bound is
+reached. The first observation satisfying stop_when is the terminal sequence frame
+and must be retained when capacity remains. Every saved observation must receive the
+requested description. Use an empty list when no keyframes are justified. Do not
+store ordinary rolling-window observations as special keyframes.
 
 Content restrictions:
 - MUST include every top-level field in the output contract and all nested fields

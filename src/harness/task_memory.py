@@ -397,6 +397,11 @@ class TaskMemory:
                 raise ValueError(
                     f"keyframes[{index}].sequence capture requires frame_count>1"
                 )
+            if capture_mode == "sequence":
+                _required_string(
+                    f"keyframes[{index}].stop_when",
+                    policy.get("stop_when"),
+                )
             if policy.get("save_description") is not True:
                 raise ValueError(
                     f"keyframes[{index}].save_description must be true"
@@ -809,7 +814,8 @@ class TaskMemory:
                     )
             if len(records) >= frame_count:
                 raise RuntimeError(
-                    f"keyframe sequence already reached frame_count={frame_count}: "
+                    "keyframe sequence already reached the frame_count upper "
+                    f"bound of {frame_count}: "
                     f"{field_path}"
                 )
             records.append(record)
@@ -949,8 +955,9 @@ class TaskMemory:
                 "task_state_ref": field_path,
                 "capture_mode": "sequence",
                 "saved_count": len(observations),
-                "frame_count": frame_count,
-                "complete": len(observations) >= frame_count,
+                "frame_count_upper_bound": frame_count,
+                "capacity_reached": len(observations) >= frame_count,
+                "stop_when": policy["stop_when"],
                 "observations": observations,
             }
         if not isinstance(saved, Mapping):

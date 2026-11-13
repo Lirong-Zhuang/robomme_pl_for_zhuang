@@ -58,7 +58,7 @@ TASK_NAME = "ButtonUnmaskSwap"
 USE_TASK_CONFIG_EXAMPLE = True
 
 OUTPUT_DIRECTORY = REPO_ROOT / "runs" / "tests" / "agentic_method" / "init_planning"
-OUTPUT_FILE_NAME = "ButtonUnmaskSwap_task_config_with_example_v4.json"
+OUTPUT_FILE_NAME = "ButtonUnmaskSwap_task_config_with_example_v1.json"
 ACTION_CANDIDATES_PATH = (
     REPO_ROOT
     / "src"
@@ -448,6 +448,13 @@ def _validate_task_config(
         if capture_mode == "sequence" and frame_count <= 1:
             raise ValueError(
                 f"keyframes[{index}].sequence capture requires frame_count>1"
+            )
+        if capture_mode == "sequence" and not (
+            isinstance(keyframe.get("stop_when"), str)
+            and keyframe["stop_when"].strip()
+        ):
+            raise ValueError(
+                f"keyframes[{index}].sequence capture requires stop_when"
             )
         if keyframe.get("save_description") is not True:
             raise ValueError(f"keyframes[{index}].save_description must be true")

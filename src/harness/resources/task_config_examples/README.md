@@ -1,8 +1,8 @@
 # Task-config examples organized by information source
 
-This directory contains three complete `task_config.v1` examples. They are named
-by the information sources needed to turn an episode task goal into a concrete,
-ordered subgoal sequence, rather than by task name:
+The active example set contains three complete `task_config.v1` examples. They are
+named by the information sources needed to turn an episode task goal into a
+concrete, ordered subgoal sequence, rather than by task name:
 
 - `task_goal_only.json`
 - `task_goal_plus_video_subgoal_list.json`
@@ -82,11 +82,14 @@ visually similar objects subsequently move or swap; use a sequence policy or
 additional event policies that preserve the identity transformation.
 
 `capture_mode: "single"` uses `frame_count: 1` and stops after one save.
-`capture_mode: "sequence"` uses `frame_count` greater than one and may append one
-matching observation on each planning call until that count is reached. Existing
-partial sequence evidence does not make the policy complete. Every keyframe policy
-sets `save_description: true`, and every retained observation must have the
-description requested by `description_instruction`.
+`capture_mode: "sequence"` uses `frame_count` greater than one as a safety upper
+bound, requires an observable `stop_when`, and may append one matching observation
+on each planning call until `stop_when` is satisfied or the upper bound is reached.
+The first observation satisfying `stop_when` is retained as the terminal frame when
+capacity remains. Existing partial sequence evidence does not close an otherwise
+active policy. Every keyframe policy sets `save_description: true`, and every
+retained observation must have the description requested by
+`description_instruction`.
 
 Those configs also add `{keyframe_policy}` to their user prompts. TaskMemory builds
 this runtime object directly from the applicable `task_config.keyframes[index]`
@@ -96,8 +99,8 @@ visible in every relevant user message without relying on a system-prompt paraph
 They additionally receive `{saved_keyframe}` explicitly: `null` before capture. A
 single policy then receives one retained image-placeholder reference, trusted image
 path, observation ID, and description. A sequence policy receives its ordered saved
-observations and descriptions together with `saved_count`, `frame_count`, and
-completion state. Video-list configs similarly receive the locked ordered list as
+observations and descriptions together with `saved_count`, the frame-count upper
+bound, and the stop condition. Video-list configs similarly receive the locked ordered list as
 `{video_subgoal_list}` on every follow-up call. Their system prompts mark these
 objects, together with `task_goal`, as mandatory subgoal-planning references.
 
@@ -169,16 +172,20 @@ the initial demonstration supplies the container-to-cube correspondence needed t
 instantiate each pickup with the correct target container. That correspondence must
 therefore be encoded in and retained with the video-derived subgoal list.
 
-### `task_goal_plus_keyframes.json` — represented by PickHighlight
+### `task_goal_plus_keyframes.json` — represented by ButtonUnmaskSwap
 
-The PickHighlight task goal says to pick the highlighted cubes but does not identify
-them. Their identities become visible only after the robot presses the button, and
-the highlights then disappear. A keyframe and its description must preserve that
-transient state so later planning calls can generate and update the pickup sequence.
-This represented task needs only a single frame. It demonstrates the information
-source profile, not a universal capture count: tasks whose hidden identities are
-later propagated through motion or swaps may require a sequence or several event
-policies under the same `task_goal + keyframes` profile.
+ButtonUnmaskSwap requires two kinds of eval-time visual memory. One transient view
+preserves the colored-cube positions before visually similar containers hide them.
+The containers then swap while the cubes remain hidden, so an ordered sequence must
+propagate each initial identity to its final container position. The worked config
+therefore demonstrates both a single policy and a sequence policy under the same
+`task_goal + keyframes` source profile.
+
+The represented config demonstrates the full transport mechanism, not a mandatory
+policy count. A new task retains only the policies justified by its own
+information-loss process: one sufficient transient state may use only a single
+policy, while later identity-changing motion may additionally require a sequence or
+other event policies.
 
 These files are also gold/reference outputs and end-to-end smoke-test fixtures. For
 an inference experiment, select an example by source profile rather than by matching

@@ -103,6 +103,7 @@ def _sequence_keyframe_memory(tmp_path: Path) -> TaskMemory:
         {
             "views": ["overall"],
             "save_when": "The tracked containers are moving or settling.",
+            "stop_when": "All tracked containers have settled.",
             "capture_mode": "sequence",
             "frame_count": 2,
             "interval": 16,
@@ -443,8 +444,9 @@ def test_sequence_keyframe_appends_until_frame_count(tmp_path: Path) -> None:
         "task_state_ref": "persistent_facts.keyframes.container_tracking",
         "capture_mode": "sequence",
         "saved_count": 2,
-        "frame_count": 2,
-        "complete": True,
+        "frame_count_upper_bound": 2,
+        "capacity_reached": True,
+        "stop_when": "All tracked containers have settled.",
         "observations": [
             {
                 "observation_id": "overall_1",
@@ -463,7 +465,7 @@ def test_sequence_keyframe_appends_until_frame_count(tmp_path: Path) -> None:
         ],
     }
 
-    with pytest.raises(RuntimeError, match="reached frame_count"):
+    with pytest.raises(RuntimeError, match="frame_count upper bound"):
         memory.save_keyframe_selection(
             keyframe_save="overall_3",
             observation_paths={"overall_3": "/episode/frames/0003.png"},

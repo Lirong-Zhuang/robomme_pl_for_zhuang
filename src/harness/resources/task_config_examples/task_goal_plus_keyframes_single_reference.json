@@ -1,0 +1,103 @@
+{
+  "schema_version": "task_config.v1",
+  "planning": {
+    "information_sources": [
+      "task_goal",
+      "keyframes"
+    ],
+    "task_goal_sufficient": false,
+    "video_subgoal_list": null,
+    "ordering_rules": [
+      "Press the button before selecting any cube.",
+      "When highlights appear, save the configured keyframe and description before the cues disappear.",
+      "Use the saved highlighted-cube identities to generate or regenerate the remaining pickup sequence.",
+      "When several highlighted cubes remain, put down the held cube before picking the next one."
+    ],
+    "stop_condition": "Every cube recorded as highlighted has been picked at least once; the final highlighted cube does not need to be put down."
+  },
+  "verification": {
+    "k": 3,
+    "views": [
+      "overall",
+      "wrist"
+    ],
+    "interval": 16,
+    "interval_unit": "frame",
+    "selection_reason": "Three paired observations are sufficient for button, pickup, and put-down verification, while the transient highlight evidence is preserved separately as a keyframe."
+  },
+  "subgoals": [
+    {
+      "subgoal_key": "press_button",
+      "template": "press the button",
+      "example": "press the button",
+      "action_name": "solve_button",
+      "acceptance": {
+        "completed": "The button completes a visible press cycle and the cube highlights appear in the overall view.",
+        "incomplete": "The press motion is ongoing or the post-press highlighted state has not yet been observed.",
+        "failed": "The press visibly misses the button or a cube is picked before the highlight reveal is captured."
+      }
+    },
+    {
+      "subgoal_key": "pickup_highlighted_cube",
+      "template": "pick up the {ordinal} highlighted cube described as {identity}",
+      "example": "pick up the first highlighted cube described as the red cube at the back left",
+      "action_name": "solve_pickup",
+      "acceptance": {
+        "completed": "The intended cube from the saved highlight keyframe is visibly held and lifted from the table.",
+        "incomplete": "The intended cube is not yet securely held and lifted, or the available views are insufficient to confirm it.",
+        "failed": "A cube not present in the saved highlighted set is grasped, or the intended cube is visibly dropped or irrecoverably displaced."
+      }
+    },
+    {
+      "subgoal_key": "putdown_cube",
+      "template": "place the held cube onto the table",
+      "example": "place the held cube onto the table",
+      "action_name": "solve_putdown",
+      "acceptance": {
+        "completed": "The held cube is released onto a stable table area and the gripper moves away empty.",
+        "incomplete": "The cube remains held or stable release onto the table is not yet visible.",
+        "failed": "The cube is released off the table, onto another object, or into a position that prevents the remaining pickups."
+      }
+    }
+  ],
+  "object_roles": [
+    {
+      "role": "reveal button",
+      "identity": "The button that triggers the transient white highlight cues."
+    },
+    {
+      "role": "highlighted target cube",
+      "identity": "A colored cube bearing a transient white highlighted area in the post-button observation."
+    }
+  ],
+  "task_notes": [
+    "Before any horizontal or lateral motion with a grasped cube, first lift it to a visibly safe clearance above the table and confirm the lift to avoid collisions.",
+    "Treat the saved post-button keyframe and its description as the authority for which cubes were highlighted after the visual cues disappear.",
+    "Track completed highlighted-cube pickups in compact Task State and never replace the saved target set using later unhighlighted observations."
+  ],
+  "vlm_prompts": {
+    "first_planning": {
+      "system_prompt": "Role\nYou perform only the first PickHighlight planning call. Select the first executable subgoal without verifying execution, and check whether a supplied observation matches save_when in the keyframe policy object supplied by the user.\n\nNecessary planning sources\nTask goal and keyframe evidence are jointly required for concrete highlighted-cube planning. Before saved_keyframe exists and before a current observation satisfies save_when, plan only the knowable press-button prefix. If keyframe_save is non-null, use that selected observation together with task goal when forming any concrete next subgoal in the same response. Never plan highlighted-cube identities from task goal alone.\n\nAvailable subgoals, keys, and trusted actions\n- press_button: press the button -> solve_button\n- pickup_highlighted_cube: pick up the [ordinal] highlighted cube described as [identity] -> solve_pickup\n- putdown_cube: place the held cube onto the table -> solve_putdown\n\nTask rules\n1. Highlighted cube identities are unavailable until the button is pressed and the transient highlight observation is saved.\n2. Do not guess cube identities or invent later pickup subgoals.\n3. The currently knowable sequence prefix contains only press_button.\n4. Set next_subgoal_key to press_button, next_subgoal to press the button, and arguments to {}.\n5. The harness resolves action_name from the key; do not output action_name, status, or description.\n\nKeyframe decision\n1. Treat keyframe_policy as the authoritative task-config object and apply its exact save_when condition.\n2. Inspect every supplied current-observation candidate against save_when.\n3. Set keyframe_save to the exact supplied observation ID only when that candidate satisfies save_when.\n4. Otherwise set keyframe_save to null. Never invent an ID, filename, or path.\n\nOutput\nReturn JSON only with exactly subgoal_sequence, next_subgoal_key, next_subgoal, arguments, and keyframe_save. Every sequence entry contains subgoal_key, subgoal, and arguments.",
+      "user_prompt_template": "Task goal\n{task_goal}\n\nApplicable keyframe policy object copied from task config\n{keyframe_policy}\n\nSaved keyframe evidence; null before capture\n{saved_keyframe}\n\nCurrent observations with candidate observation IDs\n{current_observations}\n\nUse task goal together with saved_keyframe when it exists, or with a current observation selected as keyframe_save in this call, as the necessary sources for concrete subgoal planning. Return the currently knowable subgoal_sequence prefix and repeat its first entry as next_subgoal_key, next_subgoal, and arguments. Apply keyframe_policy.save_when to the supplied observations and return the exact matching observation ID as keyframe_save, or null. Do not guess highlighted cube identities, perform verification, output action_name, or invent an observation ID. Output JSON only."
+    },
+    "followup_planning": {
+      "system_prompt": "Role\nYou jointly verify the current PickHighlight subgoal, select the subgoal that should be active next, and decide whether one supplied observation must be saved under the keyframe policy object supplied by the user.\n\nNecessary planning sources\nTask goal and keyframe evidence are jointly required references for subgoal planning. Use saved_keyframe after capture. In the capture call itself, if keyframe_save is non-null, use that selected observation directly together with task goal to construct the next concrete highlighted-cube subgoal. Never infer target identities from task goal alone or replace saved keyframe evidence with later unhighlighted observations.\n\nAvailable subgoals, keys, and trusted actions\n- press_button: press the button -> solve_button\n- pickup_highlighted_cube: pick up a saved highlighted cube -> solve_pickup\n- putdown_cube: place the held cube onto the table -> solve_putdown\n\nMemory rule\nThe saved post-button highlight keyframe and description in compact Task State are the authority for target identities after the cues disappear. Never replace them using later unhighlighted views.\n\nVerification rules\n1. Compare the fixed subgoal-start observations with the sliding recent-observation window and the separately identified current observation.\n2. Judge only against the supplied acceptance criteria.\n3. Use completed only for positive success evidence, incomplete for ongoing or insufficient evidence, and failed only for positive failure evidence.\n\nKeyframe decision\n1. On every call, treat keyframe_policy as the authoritative task-config object and inspect the sliding-window observations and current observation against its exact save_when condition.\n2. Determine policy completion from keyframe_policy.capture_mode, keyframe_policy.frame_count, and saved_keyframe. A single policy is complete after one saved observation; a sequence policy remains incomplete until frame_count observations have been saved.\n3. If the policy is incomplete and one candidate satisfies save_when, copy that candidate's exact supplied observation ID into keyframe_save. Existing partial sequence evidence does not prevent another save.\n4. If no candidate satisfies save_when or the policy is complete, set keyframe_save to null. Never invent an ID, filename, or path.\n5. When keyframe_save is non-null and keyframe_policy.save_description is true, description must also follow keyframe_policy.description_instruction.\n\nPlanning rules\n1. If incomplete, keep the current subgoal key, text, and arguments.\n2. After a completed button press, select the first saved highlighted cube.\n3. After a completed pickup, put the cube down only when another saved target remains.\n4. After a completed put-down, select the next uncompleted saved target.\n5. Emit STOP after the final highlighted-cube pickup.\n6. If failed, retry a trusted subgoal without changing the saved target set when recoverable; otherwise emit STOP.\n7. The harness resolves action_name from next_subgoal_key; do not output action_name.\n\nOutput\nReturn JSON only with exactly status, description, next_subgoal_key, next_subgoal, arguments, and keyframe_save. For STOP use next_subgoal_key=STOP, next_subgoal=STOP, and arguments={}. description must contain concise observable evidence only.",
+      "user_prompt_template": "Task goal\n{task_goal}\n\nApplicable keyframe policy object copied from task config\n{keyframe_policy}\n\nSaved keyframe evidence; null before capture\n{saved_keyframe}\n\nCompact Task State: completed pickups and planning progress\n{task_state}\n\nCurrent execution\n- Key: {current_subgoal_key}\n- Subgoal: {current_subgoal}\n- Acceptance criteria: {acceptance_criteria}\n- Verification parameters: {verification_parameters}\n\nSubgoal-start observations\n{subgoal_start_observations}\n\nSliding-window observations, oldest to newest, with candidate observation IDs\n{recent_observations}\n\nCurrent observation with its candidate observation ID\n{current_observation}\n\nCurrent sequence or known prefix\n{current_subgoal_sequence}\n\nVerify the current subgoal and select what should be active next. Base concrete subgoal planning on task goal together with saved_keyframe, or with the observation selected as keyframe_save in this same call. Apply keyframe_policy.save_when to the sliding-window and current observations and return the exact matching observation ID as keyframe_save, or null. Do not output action_name or invent an observation ID. Output JSON only."
+    }
+  },
+  "keyframes": [
+    {
+      "views": [
+        "overall"
+      ],
+      "save_when": "Immediately after the button press completes, while the cube highlights are visible and before they disappear.",
+      "capture_mode": "single",
+      "frame_count": 1,
+      "interval": 16,
+      "interval_unit": "frame",
+      "save_description": true,
+      "description_instruction": "Describe every highlighted cube using visible identity cues such as color and relative table position; exclude non-highlighted cubes.",
+      "task_state_field": "persistent_facts.keyframes.highlight_reveal"
+    }
+  ]
+}
