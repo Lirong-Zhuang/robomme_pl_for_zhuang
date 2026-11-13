@@ -204,6 +204,16 @@ def _build_direct_messages(
                 )
             )
     messages[1]["content"] += "\n".join(resource_results)
+    image_placeholder_count = sum(
+        message["content"].count("<image>") for message in messages
+    )
+    if image_placeholder_count:
+        raise ValueError(
+            "Standalone init planning has no image inputs, but its assembled "
+            f"messages contain {image_placeholder_count} literal <image> "
+            "placeholder(s). Rewrite resource documentation to describe image "
+            "references without emitting the multimodal control token."
+        )
     return messages
 
 

@@ -79,8 +79,8 @@ entry and adds a `task_config_ref` such as `task_config.keyframes[0]`. Consequen
 the exact `save_when`, view, capture, description, and destination settings are
 visible in every relevant user message without relying on a system-prompt paraphrase.
 They additionally receive `{saved_keyframe}` explicitly: `null` before capture, then
-an object containing the retained `<image>` reference, trusted image path, observation
-ID, and description. Video-list configs similarly receive the locked ordered list as
+an object containing the retained image-placeholder reference, trusted image path,
+observation ID, and description. Video-list configs similarly receive the locked ordered list as
 `{video_subgoal_list}` on every follow-up call. Their system prompts mark these
 objects, together with `task_goal`, as mandatory subgoal-planning references.
 
