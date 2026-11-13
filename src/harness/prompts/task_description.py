@@ -171,8 +171,9 @@ BUTTON_UNMASK_DESCRIPTION = TaskDescription(
     summary=(
         "The ButtonUnmask task evaluates the robot’s spatial memory for identifying "
         "hidden objects through active interaction. Unlike passive observation tasks, "
-        "the robot must first press a button to reveal the scene, then determine "
-        "which container hides the specified cube and pick it up."
+        "the robot must press a button while memorizing the visible colored-cube "
+        "positions before white containers return to cover them, then determine which "
+        "container hides the specified cube and pick it up."
     ),
     task_goal_examples=(
         (
@@ -193,10 +194,10 @@ BUTTON_UNMASK_DESCRIPTION = TaskDescription(
     ),
     operational_notes=(
         (
-            "Button pressing: press the button at the beginning. During the press, "
-            "multiple containers are placed concurrently on the table. Each cube is "
-            "hidden under a container, and some containers may be empty. Memorize "
-            "which container corresponds to each cube."
+            "Button pressing: press the button at the beginning. Early during the "
+            "press, the colored cubes are visible; the containers then return to the "
+            "table and hide them. Some containers may be empty. Memorize which "
+            "container position corresponds to each cube before the cubes are hidden."
         ),
         (
             "Unmasking: identify and pick up the container or containers hiding the "
@@ -309,9 +310,10 @@ BUTTON_UNMASK_SWAP_DESCRIPTION = TaskDescription(
     ),
     operational_notes=(
         (
-            "Button pressing: press both buttons. During pressing, multiple "
-            "containers are placed on the table to enclose the cubes, after which "
-            "some containers swap positions."
+            "Button pressing: press both buttons. Early during pressing, the colored "
+            "cubes are visible; the containers then cover them and keep them hidden "
+            "while some containers swap positions. Remember the initial cube-to-"
+            "container correspondence and track the same containers across the swaps."
         ),
         (
             "Unmasking: pick up the containers hiding the specified cube colors, in "

@@ -37,11 +37,28 @@ from oracle_plus.vlm import VLMSubgoalPlanner27B  # noqa: E402
 # Test settings: edit this block before running.
 # -----------------------------------------------------------------------------
 
-TASK_NAME = "MoveCube"  # BinFill, MoveCube, or PickHighlight
-USE_TASK_CONFIG_EXAMPLE = False
+# Available TASK_NAME values (copy one quoted name into TASK_NAME below):
+# "BinFill"
+# "StopCube"
+# "PickXtimes"
+# "SwingXtimes"
+# "ButtonUnmask"
+# "VideoUnmask"
+# "VideoUnmaskSwap"
+# "ButtonUnmaskSwap"
+# "PickHighlight"
+# "VideoRepick"
+# "VideoPlaceButton"
+# "VideoPlaceOrder"
+# "MoveCube"
+# "InsertPeg"
+# "PatternLock"
+# "RouteStick"
+TASK_NAME = "ButtonUnmaskSwap"
+USE_TASK_CONFIG_EXAMPLE = True
 
 OUTPUT_DIRECTORY = REPO_ROOT / "runs" / "tests" / "agentic_method" / "init_planning"
-OUTPUT_FILE_NAME = "movecube_task_config_without_example_v1.json"
+OUTPUT_FILE_NAME = "movecube_task_config_without_example_v3.json"
 ACTION_CANDIDATES_PATH = (
     REPO_ROOT
     / "src"
