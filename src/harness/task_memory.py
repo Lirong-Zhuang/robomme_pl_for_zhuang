@@ -377,6 +377,30 @@ class TaskMemory:
             raise ValueError("task_config.keyframes must be a list")
         if any(not isinstance(policy, Mapping) for policy in keyframe_policies):
             raise ValueError("every task_config keyframe policy must be an object")
+        for index, policy in enumerate(keyframe_policies):
+            capture_mode = _required_string(
+                f"keyframes[{index}].capture_mode",
+                policy.get("capture_mode"),
+            )
+            if capture_mode not in {"single", "sequence"}:
+                raise ValueError(
+                    f"keyframes[{index}].capture_mode must be single or sequence"
+                )
+            frame_count = policy.get("frame_count")
+            if not isinstance(frame_count, int) or isinstance(frame_count, bool):
+                raise ValueError(f"keyframes[{index}].frame_count must be an integer")
+            if capture_mode == "single" and frame_count != 1:
+                raise ValueError(
+                    f"keyframes[{index}].single capture requires frame_count=1"
+                )
+            if capture_mode == "sequence" and frame_count <= 1:
+                raise ValueError(
+                    f"keyframes[{index}].sequence capture requires frame_count>1"
+                )
+            if policy.get("save_description") is not True:
+                raise ValueError(
+                    f"keyframes[{index}].save_description must be true"
+                )
         self.keyframe_policies = keyframe_policies
         self.resolver = SubgoalResolver(task_config, allowed_action_names)
         self.state_store = TaskStateStore(self.episode_dir / "task_state.json")
@@ -741,30 +765,65 @@ class TaskMemory:
         if not isinstance(policy_index, int) or not (
             0 <= policy_index < len(self.keyframe_policies)
         ):
-            raise ValueError("policy_index does not identify a configured keyframe policy")
+            raise ValueError(
+                "policy_index does not identify a configured keyframe policy"
+            )
 
         policy = self.keyframe_policies[policy_index]
         field_path = _required_string(
             f"keyframes[{policy_index}].task_state_field",
             policy.get("task_state_field"),
         )
+        if description is None:
+            raise ValueError(
+                "description is required for every saved keyframe observation"
+            )
         record = {
             "observation_id": observation_id,
             "image_path": image_path,
-            "description": (
-                _required_string("description", description)
-                if description is not None
-                else None
-            ),
+            "description": _required_string("description", description),
             "policy_index": policy_index,
         }
 
         existing = self._task_state_field_value(state, field_path)
+        capture_mode = policy["capture_mode"]
+        if capture_mode == "sequence":
+            frame_count = policy["frame_count"]
+            if overwrite:
+                records: list[dict[str, Any]] = []
+            elif existing is None:
+                records = []
+            elif isinstance(existing, list):
+                records = existing
+            else:
+                raise ValueError(
+                    f"saved keyframe sequence must be a list: {field_path}"
+                )
+            for saved_record in records:
+                if saved_record.get("observation_id") == observation_id:
+                    if saved_record == record:
+                        return _json_copy(state)
+                    raise RuntimeError(
+                        "keyframe observation ID is already saved with different "
+                        f"content: {observation_id!r}"
+                    )
+            if len(records) >= frame_count:
+                raise RuntimeError(
+                    f"keyframe sequence already reached frame_count={frame_count}: "
+                    f"{field_path}"
+                )
+            records.append(record)
+            return self.set_task_state_field(
+                field_path,
+                records,
+                source=f"keyframe_observation:{observation_id}",
+            )
+
         if existing is not None and not overwrite:
             if existing == record:
                 return _json_copy(state)
             raise RuntimeError(
-                f"keyframe task-state field is already populated: {field_path}"
+                f"single keyframe task-state field is already populated: {field_path}"
             )
         return self.set_task_state_field(
             field_path,
@@ -861,9 +920,45 @@ class TaskMemory:
         saved = self._task_state_field_value(state, field_path)
         if saved is None:
             return None
+        if policy["capture_mode"] == "sequence":
+            if not isinstance(saved, list):
+                raise ValueError(
+                    f"saved keyframe sequence must be a list: {field_path}"
+                )
+            observations = []
+            for index, item in enumerate(saved):
+                if not isinstance(item, Mapping):
+                    raise ValueError(
+                        f"saved keyframe sequence item must be an object: "
+                        f"{field_path}[{index}]"
+                    )
+                observations.append(
+                    {
+                        "observation_id": item.get("observation_id"),
+                        "image": "<image>",
+                        "image_path": _required_string(
+                            "saved keyframe image_path",
+                            item.get("image_path"),
+                        ),
+                        "description": item.get("description"),
+                    }
+                )
+            frame_count = policy["frame_count"]
+            return {
+                "task_config_ref": f"task_config.keyframes[{policy_index}]",
+                "task_state_ref": field_path,
+                "capture_mode": "sequence",
+                "saved_count": len(observations),
+                "frame_count": frame_count,
+                "complete": len(observations) >= frame_count,
+                "observations": observations,
+            }
         if not isinstance(saved, Mapping):
             raise ValueError(f"saved keyframe must be an object: {field_path}")
-        image_path = _required_string("saved keyframe image_path", saved.get("image_path"))
+        image_path = _required_string(
+            "saved keyframe image_path",
+            saved.get("image_path"),
+        )
         return {
             "task_config_ref": f"task_config.keyframes[{policy_index}]",
             "task_state_ref": field_path,

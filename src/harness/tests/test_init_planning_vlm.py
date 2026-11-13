@@ -58,7 +58,7 @@ TASK_NAME = "ButtonUnmaskSwap"
 USE_TASK_CONFIG_EXAMPLE = True
 
 OUTPUT_DIRECTORY = REPO_ROOT / "runs" / "tests" / "agentic_method" / "init_planning"
-OUTPUT_FILE_NAME = "movecube_task_config_without_example_v3.json"
+OUTPUT_FILE_NAME = "ButtonUnmaskSwap_task_config_with_example_v4.json"
 ACTION_CANDIDATES_PATH = (
     REPO_ROOT
     / "src"
@@ -433,6 +433,24 @@ def _validate_task_config(
     for index, keyframe in enumerate(config["keyframes"]):
         if keyframe.get("interval_unit") != "frame":
             raise ValueError(f"keyframes[{index}].interval_unit must be 'frame'")
+        capture_mode = keyframe.get("capture_mode")
+        frame_count = keyframe.get("frame_count")
+        if capture_mode not in {"single", "sequence"}:
+            raise ValueError(
+                f"keyframes[{index}].capture_mode must be single or sequence"
+            )
+        if not isinstance(frame_count, int) or isinstance(frame_count, bool):
+            raise ValueError(f"keyframes[{index}].frame_count must be an integer")
+        if capture_mode == "single" and frame_count != 1:
+            raise ValueError(
+                f"keyframes[{index}].single capture requires frame_count=1"
+            )
+        if capture_mode == "sequence" and frame_count <= 1:
+            raise ValueError(
+                f"keyframes[{index}].sequence capture requires frame_count>1"
+            )
+        if keyframe.get("save_description") is not True:
+            raise ValueError(f"keyframes[{index}].save_description must be true")
 
 
 def main() -> None:

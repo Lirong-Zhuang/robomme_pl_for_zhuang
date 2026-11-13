@@ -97,6 +97,24 @@ def _keyframe_memory(tmp_path: Path) -> TaskMemory:
     return TaskMemory(tmp_path / "episode", config, ALLOWED_ACTIONS)
 
 
+def _sequence_keyframe_memory(tmp_path: Path) -> TaskMemory:
+    config = _task_config()
+    config["keyframes"] = [
+        {
+            "views": ["overall"],
+            "save_when": "The tracked containers are moving or settling.",
+            "capture_mode": "sequence",
+            "frame_count": 2,
+            "interval": 16,
+            "interval_unit": "frame",
+            "save_description": True,
+            "description_instruction": "Describe the tracked container positions.",
+            "task_state_field": "persistent_facts.keyframes.container_tracking",
+        }
+    ]
+    return TaskMemory(tmp_path / "episode", config, ALLOWED_ACTIONS)
+
+
 def test_resolver_maps_key_to_action_and_instantiated_acceptance() -> None:
     resolver = SubgoalResolver(_task_config(), ALLOWED_ACTIONS)
 
@@ -389,6 +407,81 @@ def test_keyframe_selection_rejects_missing_or_untrusted_ids(tmp_path: Path) -> 
         memory.save_keyframe_selection(
             keyframe_save="invented_frame",
             observation_paths={"current_overall": "/episode/frames/0002.png"},
+        )
+
+
+def test_sequence_keyframe_appends_until_frame_count(tmp_path: Path) -> None:
+    memory = _sequence_keyframe_memory(tmp_path)
+    memory.commit_first_plan(
+        task_goal="Track the containers.",
+        planner_output={**_first_plan_output(), "keyframe_save": None},
+    )
+
+    state = memory.save_keyframe_selection(
+        keyframe_save="overall_1",
+        observation_paths={"overall_1": "/episode/frames/0001.png"},
+        description="The tracked container is moving from left toward center.",
+    )
+    assert len(state["persistent_facts"]["keyframes"]["container_tracking"]) == 1
+
+    state = memory.save_keyframe_selection(
+        keyframe_save="overall_2",
+        observation_paths={"overall_2": "/episode/frames/0002.png"},
+        description="The tracked container has settled at center-right.",
+    )
+    saved = state["persistent_facts"]["keyframes"]["container_tracking"]
+    assert [item["observation_id"] for item in saved] == ["overall_1", "overall_2"]
+
+    inputs = memory.build_followup_inputs(
+        verification_parameters={"k": 3},
+        subgoal_start_observations=["start"],
+        recent_observations=["recent"],
+        current_observation="current_overall",
+    )
+    assert inputs["saved_keyframe"] == {
+        "task_config_ref": "task_config.keyframes[0]",
+        "task_state_ref": "persistent_facts.keyframes.container_tracking",
+        "capture_mode": "sequence",
+        "saved_count": 2,
+        "frame_count": 2,
+        "complete": True,
+        "observations": [
+            {
+                "observation_id": "overall_1",
+                "image": "<image>",
+                "image_path": "/episode/frames/0001.png",
+                "description": (
+                    "The tracked container is moving from left toward center."
+                ),
+            },
+            {
+                "observation_id": "overall_2",
+                "image": "<image>",
+                "image_path": "/episode/frames/0002.png",
+                "description": "The tracked container has settled at center-right.",
+            },
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match="reached frame_count"):
+        memory.save_keyframe_selection(
+            keyframe_save="overall_3",
+            observation_paths={"overall_3": "/episode/frames/0003.png"},
+            description="Another later observation.",
+        )
+
+
+def test_keyframe_description_is_required_by_policy(tmp_path: Path) -> None:
+    memory = _sequence_keyframe_memory(tmp_path)
+    memory.commit_first_plan(
+        task_goal="Track the containers.",
+        planner_output={**_first_plan_output(), "keyframe_save": None},
+    )
+
+    with pytest.raises(ValueError, match="description is required"):
+        memory.save_keyframe_selection(
+            keyframe_save="overall_1",
+            observation_paths={"overall_1": "/episode/frames/0001.png"},
         )
 
 

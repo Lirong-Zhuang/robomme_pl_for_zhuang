@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v15_readme_profile_selection"
+INIT_PROMPT_VERSION = "minimal_task_config_v16_repeatable_keyframes"
 
 
 @dataclass(frozen=True)
@@ -221,8 +221,16 @@ Critical context-inference task:
   is sufficient.
 - When video is needed, planning.video_subgoal_list must be an object containing
   description_instruction and task_state_field. Otherwise it must be null.
-- Express the eval-time keyframe decision by returning either a minimal keyframes
-  list or an empty list. Do not expose hidden reasoning.
+- Express the eval-time keyframe decision by returning every justified keyframe
+  policy needed to preserve task-relevant information, or an empty list. The list
+  does not need to be minimal. Do not expose hidden reasoning.
+- Before finalizing keyframe policies, check whether task_goal, all evidence those
+  policies will retain, and ordinary later observations are jointly sufficient to
+  recover every target identity and cross-time correspondence needed at every later
+  planning point. Cover every information-losing environment transition. A single
+  pre-change snapshot is insufficient when visually similar objects subsequently
+  move or swap; use a sequence policy or additional event policies that preserve
+  the identity transformation.
 - Do not assume that every imitation, memory, or manipulation task uses video or
   keyframes. Do not add them merely because the output schema permits them.
 
@@ -352,8 +360,11 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   non-empty, require exactly those fields plus keyframe_save. On every keyframe-task
   call, inspect both the sliding-window observations and current observation against
   save_when in the supplied keyframe_policy object. keyframe_save must be null when no
-  candidate matches or that task-state keyframe is already saved; otherwise it must
-  copy one exact supplied observation ID. status must be
+  candidate matches or the applicable policy is complete; otherwise it must copy
+  one exact supplied observation ID. A single policy is complete after one saved
+  observation. A sequence policy may continue saving across calls until its
+  frame_count is reached. Existing saved sequence evidence alone is not a reason to
+  return null while that policy remains incomplete. status must be
   completed, incomplete, or failed; description must contain only concise observable
   evidence for that status. When keyframe_save is non-null and save_description is
   true, description must also include the visible facts requested by the matching
@@ -378,7 +389,9 @@ Information-source transport is covered by the required conditional placeholders
 - A video-derived subgoal list or strategy saved for later calls arrives inside
   {{task_state}} and explicitly inside {{video_subgoal_list}}.
 - Saved keyframes and their descriptions arrive inside {{task_state}} and explicitly
-  inside {{saved_keyframe}}; its image field contains the image placeholder.
+  inside {{saved_keyframe}}. For single capture it contains one image placeholder;
+  for sequence capture it contains the ordered saved observations, their image
+  placeholders and descriptions, saved_count, frame_count, and completion state.
 - The applicable keyframe entry and exact save_when condition arrive inside
   {{keyframe_policy}}, as an object whose task_config_ref identifies its source.
 Do not introduce alternate aliases such as {{video_observations}},
@@ -386,13 +399,18 @@ Do not introduce alternate aliases such as {{video_observations}},
 mechanically scan both user_prompt_template strings and correct them unless their
 placeholder sets exactly match the applicable conditional sets above.
 
-The task config may include additional keyframe-observation policies when the task
-contains relevant environment changes that ordinary recent history may not retain.
-For each policy specify views, exact save timing, single-frame versus sequence,
-frame count and interval, whether to save a textual description, the description
-instruction, and its task_state destination. Use an empty list when no additional
-keyframes are justified. Do not store ordinary rolling-window observations as
-special keyframes.
+The task config may include any justified keyframe-observation policies when the
+task contains relevant environment changes that ordinary recent history may not
+retain. Do not minimize away evidence needed across later changes. For each policy
+specify views, exact save timing, single-frame versus sequence, frame count and
+interval, the description instruction, and its task_state destination. Every
+keyframe policy must set save_description=true so every retained observation has a
+concise task-relevant description. capture_mode=single requires frame_count=1 and
+stops after one saved observation. capture_mode=sequence requires frame_count
+greater than 1 and may append one matching observation per planning call until that
+count is reached. Every saved observation must receive the requested description.
+Use an empty list when no keyframes are justified. Do not store ordinary
+rolling-window observations as special keyframes.
 
 Content restrictions:
 - MUST include every top-level field in the output contract and all nested fields

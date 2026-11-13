@@ -73,14 +73,31 @@ that ID against the loop's trusted ID-to-image-path mapping and stores the resol
 image reference at the configured `task_state_field`. It never accepts a VLM-invented
 path and does not copy or move the underlying image file.
 
+Keyframe policies are not required to be minimal. Generate every justified policy
+needed to preserve task-relevant information across all later environment changes.
+Before finalizing them, check that `task_goal`, the retained evidence, and ordinary
+later observations can jointly recover every target identity and cross-time
+correspondence needed by later planning. A pre-change snapshot is insufficient when
+visually similar objects subsequently move or swap; use a sequence policy or
+additional event policies that preserve the identity transformation.
+
+`capture_mode: "single"` uses `frame_count: 1` and stops after one save.
+`capture_mode: "sequence"` uses `frame_count` greater than one and may append one
+matching observation on each planning call until that count is reached. Existing
+partial sequence evidence does not make the policy complete. Every keyframe policy
+sets `save_description: true`, and every retained observation must have the
+description requested by `description_instruction`.
+
 Those configs also add `{keyframe_policy}` to their user prompts. TaskMemory builds
 this runtime object directly from the applicable `task_config.keyframes[index]`
 entry and adds a `task_config_ref` such as `task_config.keyframes[0]`. Consequently,
 the exact `save_when`, view, capture, description, and destination settings are
 visible in every relevant user message without relying on a system-prompt paraphrase.
-They additionally receive `{saved_keyframe}` explicitly: `null` before capture, then
-an object containing the retained image-placeholder reference, trusted image path,
-observation ID, and description. Video-list configs similarly receive the locked ordered list as
+They additionally receive `{saved_keyframe}` explicitly: `null` before capture. A
+single policy then receives one retained image-placeholder reference, trusted image
+path, observation ID, and description. A sequence policy receives its ordered saved
+observations and descriptions together with `saved_count`, `frame_count`, and
+completion state. Video-list configs similarly receive the locked ordered list as
 `{video_subgoal_list}` on every follow-up call. Their system prompts mark these
 objects, together with `task_goal`, as mandatory subgoal-planning references.
 
@@ -158,6 +175,10 @@ The PickHighlight task goal says to pick the highlighted cubes but does not iden
 them. Their identities become visible only after the robot presses the button, and
 the highlights then disappear. A keyframe and its description must preserve that
 transient state so later planning calls can generate and update the pickup sequence.
+This represented task needs only a single frame. It demonstrates the information
+source profile, not a universal capture count: tasks whose hidden identities are
+later propagated through motion or swaps may require a sequence or several event
+policies under the same `task_goal + keyframes` profile.
 
 These files are also gold/reference outputs and end-to-end smoke-test fixtures. For
 an inference experiment, select an example by source profile rather than by matching
