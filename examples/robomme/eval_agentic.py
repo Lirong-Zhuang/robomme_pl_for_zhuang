@@ -207,18 +207,28 @@ def _observation_frame_count(obs: Mapping[str, Any]) -> int:
     )
 
 
-def _record_reset_demonstration(
+def _record_video_observations(
     recorder: RolloutRecorder,
     obs: Mapping[str, Any],
+    *,
+    subgoal: str | None,
+    point_yx: tuple[int, int] | None = None,
+    start_index: int = 0,
+    end_index: int | None = None,
+    is_video_demo: bool = False,
 ) -> int:
-    """Record reset demonstration frames, excluding the execution initial state."""
-
     fronts = _columns(obs.get("front_rgb_list", []))
     wrists = _columns(obs.get("wrist_rgb_list", []))
     joints = _columns(obs.get("joint_state_list", []))
     grippers = _columns(obs.get("gripper_state_list", []))
-    demonstration_frame_count = max(_observation_frame_count(obs) - 1, 0)
-    for index in range(demonstration_frame_count):
+    frame_count = min(len(fronts), len(wrists), len(joints), len(grippers))
+    start = min(max(int(start_index), 0), frame_count)
+    end = (
+        frame_count
+        if end_index is None
+        else min(max(int(end_index), start), frame_count)
+    )
+    for index in range(start, end):
         state = np.concatenate(
             [_to_vector(joints[index]), _to_vector(grippers[index])[:1]]
         ).astype(np.float32)
@@ -227,10 +237,46 @@ def _record_reset_demonstration(
             wrist_image=_to_rgb(wrists[index]),
             state=state,
             action=None,
-            is_video_demo=True,
-            subgoal="[demonstration]",
+            is_video_demo=is_video_demo,
+            subgoal=subgoal,
+            point_yx=point_yx,
         )
-    return demonstration_frame_count
+    return end - start
+
+
+def _record_reset_demonstration(
+    recorder: RolloutRecorder,
+    obs: Mapping[str, Any],
+) -> int:
+    """Record reset demonstration frames, excluding the execution initial state."""
+
+    frame_count = _observation_frame_count(obs)
+    if frame_count < 2:
+        return 0
+    return _record_video_observations(
+        recorder,
+        obs,
+        subgoal="[demonstration]",
+        end_index=frame_count - 1,
+        is_video_demo=True,
+    )
+
+
+def _grounding_point_yx(grounding: Mapping[str, Any]) -> tuple[int, int] | None:
+    targets = grounding.get("targets", {})
+    if not isinstance(targets, Mapping):
+        return None
+    for target in targets.values():
+        if not isinstance(target, Mapping):
+            continue
+        point = target.get("point_xy")
+        if (
+            isinstance(point, (list, tuple))
+            and len(point) == 2
+            and all(isinstance(value, (int, float)) for value in point)
+        ):
+            return int(round(point[1])), int(round(point[0]))
+    return None
 
 
 def _filename_text(value: str, *, limit: int = 100) -> str:
@@ -705,9 +751,16 @@ def run_episode(
     memory_dir = repeat_dir / "task_memory" / f"ep_{episode_id}"
     grounding_dir = repeat_dir / "grounding" / f"ep_{episode_id}"
     source_dir = repeat_dir / "information_sources" / f"ep_{episode_id}"
+    video_episode_dir = repeat_dir / "videos" / f"ep_{episode_id}"
     example_dir = repeat_dir / "example"
     vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
-    for stale_dir in (episode_dir, memory_dir, grounding_dir, source_dir):
+    for stale_dir in (
+        episode_dir,
+        memory_dir,
+        grounding_dir,
+        source_dir,
+        video_episode_dir,
+    ):
         if stale_dir.exists():
             shutil.rmtree(stale_dir)
     if vlm_log_path.exists():
@@ -727,16 +780,18 @@ def run_episode(
         "task_goal": None,
         "decisions": [],
         "artifacts": {
-            "episode_log": str((episode_dir / "episode.json").resolve()),
+            "episode_log": str((video_episode_dir / "episode.json").resolve()),
             "vlm_log": str(vlm_log_path.resolve()),
             "image_dir": str(episode_dir.resolve()),
             "task_memory_dir": str(memory_dir.resolve()),
             "grounding_dir": str(grounding_dir.resolve()),
             "information_sources_dir": str(source_dir.resolve()),
+            "video": None,
             "example": None,
         },
     }
     runtime: OraclePlusPlannerRuntime | None = None
+    recorder: RolloutRecorder | None = None
     example_recorder: RolloutRecorder | None = None
     try:
         builder = BenchmarkEnvBuilder(
@@ -765,6 +820,20 @@ def run_episode(
         obs, info = runtime.reset()
         task_goal = _task_goal(info)
         record["task_goal"] = task_goal
+        recorder = RolloutRecorder(
+            video_episode_dir,
+            task_goal,
+            fps=30,
+            streaming=True,
+        )
+        reset_frame_count = _observation_frame_count(obs)
+        if reset_frame_count:
+            _record_video_observations(
+                recorder,
+                obs,
+                subgoal="[initializing...]",
+                start_index=reset_frame_count - 1,
+            )
         example_recorder = RolloutRecorder(
             example_dir,
             task_goal,
@@ -918,6 +987,13 @@ def run_episode(
             execution = memory.current_execution()
             if execution is None:
                 break
+            point_yx = _grounding_point_yx(execution["grounding"])
+            _record_video_observations(
+                recorder,
+                current_obs,
+                subgoal=execution["subgoal"],
+                point_yx=point_yx,
+            )
             frame = camera_frame_from_robomme(
                 current_obs,
                 current_info,
@@ -951,6 +1027,12 @@ def run_episode(
             def collect_step(step: Any) -> None:
                 nonlocal native_step
                 native_step += 1
+                _record_video_observations(
+                    recorder,
+                    step[0],
+                    subgoal=execution["subgoal"],
+                    point_yx=point_yx,
+                )
                 if native_step % verification_stride == 0:
                     recent_pairs.append(_observation_pairs(step[0])[-1])
 
@@ -1099,13 +1181,44 @@ def run_episode(
         record["error"] = f"{type(error).__name__}: {error}"
         record["traceback"] = traceback.format_exc()
     finally:
-        if example_recorder is not None:
-            example_recorder.total_images.clear()
-            example_recorder.close()
-        if runtime is not None:
-            runtime.close()
-        gc.collect()
-    _write_json(episode_dir / "episode.json", record)
+        try:
+            if recorder is not None:
+                record["video_frame_count"] = recorder.frame_count
+                record["video_fps"] = recorder.fps
+                record["video_duration_seconds"] = (
+                    recorder.frame_count / recorder.fps
+                )
+            if recorder is not None and (
+                recorder.has_frames or recorder.stream_error is not None
+            ):
+                video_filename = (
+                    f"{task}_ep_{episode_id}_{record['status']}_"
+                    f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
+                )
+                video_path = video_episode_dir / video_filename
+                try:
+                    recorder.save_video(video_filename)
+                    record["artifacts"]["video"] = str(video_path.resolve())
+                except Exception as video_error:
+                    record["video_error"] = (
+                        f"{type(video_error).__name__}: {video_error}"
+                    )
+        finally:
+            if recorder is not None:
+                recorder.total_images.clear()
+                recorder.close()
+            if example_recorder is not None:
+                example_recorder.total_images.clear()
+                example_recorder.close()
+            if runtime is not None:
+                try:
+                    runtime.close()
+                except Exception as cleanup_error:
+                    record["cleanup_error"] = (
+                        f"{type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+            gc.collect()
+    _write_json(video_episode_dir / "episode.json", record)
     if vlm_trace["calls"]:
         _write_json(vlm_log_path, vlm_trace)
     return record

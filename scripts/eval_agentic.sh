@@ -37,7 +37,7 @@ PLANNER_ATTEMPTS=3
 DEPTH_SCALE=0.001
 
 SAVE_DIR="runs/evaluation/agentic_v1"
-RUN_NAME="test_v1.1"
+RUN_NAME="test_v1.2"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
