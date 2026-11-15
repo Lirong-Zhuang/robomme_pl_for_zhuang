@@ -1080,6 +1080,10 @@ def run_episode(
                 frame=frame,
                 grounded=grounded,
             )
+            artifact_refs = [
+                *grounding_artifacts["masks"].values(),
+                *grounding_artifacts["overlays"].values(),
+            ]
             memory.record_action_started(
                 mask_paths=grounding_artifacts["masks"],
                 overlay_paths=grounding_artifacts["overlays"],
@@ -1113,7 +1117,7 @@ def run_episode(
             last_action_status = action_result.status
             memory.record_action_finished(
                 runtime_status=action_result.status,
-                artifact_refs=list(mask_paths.values()),
+                artifact_refs=artifact_refs,
                 simulator_frame_count=action_result.simulator_frame_count,
             )
             current_obs = _latest_observation(native_execution.obs_batch)
@@ -1222,7 +1226,8 @@ def run_episode(
                     "decision": resolution,
                     "vlm_latency_ms": latency,
                     "request_to_json_ms": request_latency,
-                    "mask_paths": mask_paths,
+                    "mask_paths": grounding_artifacts["masks"],
+                    "overlay_paths": grounding_artifacts["overlays"],
                 }
             )
             current_pair = final_pair
