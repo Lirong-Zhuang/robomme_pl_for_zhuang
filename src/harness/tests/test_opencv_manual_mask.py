@@ -1,15 +1,16 @@
 """Manual RGB-component mask diagnostic for one RoboMME observation.
 
-Required environment: micromamba ``robomme`` (Python, pytest, NumPy, OpenCV).
+Required environment: micromamba ``robomme`` (Python, NumPy, OpenCV).
 
 Run from the repository root::
 
     micromamba activate robomme
     python src/harness/tests/test_opencv_manual_mask.py
 
-Edit the constants below or override them with the environment variables shown
-above. The test is skipped during normal test runs and writes diagnostic
-artifacts only when ``RUN_AGENTIC_OPENCV_MASK_TEST=1``.
+Edit the constants below or override them with the documented environment
+variables. Running this file directly does not require pytest. If pytest is
+installed, its wrapper test remains skipped unless
+``RUN_AGENTIC_OPENCV_MASK_TEST=1``.
 """
 
 from __future__ import annotations
@@ -17,8 +18,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-
-import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -29,7 +28,7 @@ OUTPUT_DIR = REPO_ROOT / "runs" / "agentic" / "test" / "grounding"
 IMAGE_NAME = "current_front_overall.png"
 COLOR_HINT = "red"
 POINT_XY = (120, 110)
-OUTPUT_NAME = "red_test1"
+OUTPUT_NAME = "red_test_1"
 RGB_DISTANCE_THRESHOLD = 70.0
 MIN_COMPONENT_AREA = 50
 MAX_COMPONENT_AREA_FRACTION = 0.08
@@ -91,31 +90,32 @@ def _manual_settings() -> tuple[str, str, tuple[int, int], str, float]:
     return image_name, color_hint, point_xy, output_name, threshold
 
 
-@pytest.mark.manual
-def test_nearest_manual_rgb_component_mask() -> None:
+def run_manual_rgb_component_mask() -> None:
     """Write the matching component nearest a manually supplied image point."""
 
-    if os.environ.get("RUN_AGENTIC_OPENCV_MASK_TEST") != "1":
-        pytest.skip("set RUN_AGENTIC_OPENCV_MASK_TEST=1 to generate mask artifacts")
-
-    cv2 = pytest.importorskip("cv2")
-    np = pytest.importorskip("numpy")
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as error:
+        raise RuntimeError(
+            "the robomme environment must provide NumPy and OpenCV"
+        ) from error
     image_name, color_hint, point_xy, output_name, threshold = _manual_settings()
     image_path = RESOURCE_DIR / image_name
     if not image_path.is_file():
-        pytest.fail(
+        raise FileNotFoundError(
             f"test image does not exist: {image_path}; place the selected image "
             "inside src/harness/tests/test_resource first"
         )
 
     bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if bgr is None:
-        pytest.fail(f"OpenCV could not decode test image: {image_path}")
+        raise RuntimeError(f"OpenCV could not decode test image: {image_path}")
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     height, width = rgb.shape[:2]
     point_x, point_y = point_xy
     if not (0 <= point_x < width and 0 <= point_y < height):
-        pytest.fail(
+        raise ValueError(
             f"point_xy={point_xy} is outside image bounds width={width}, "
             f"height={height}"
         )
@@ -170,7 +170,7 @@ def test_nearest_manual_rgb_component_mask() -> None:
             }
         )
     if not candidates:
-        pytest.fail(
+        raise RuntimeError(
             f"no {color_hint!r} component survived RGB threshold={threshold}, "
             f"min_area={MIN_COMPONENT_AREA}, and "
             f"max_area_fraction={MAX_COMPONENT_AREA_FRACTION}"
@@ -236,3 +236,17 @@ def test_nearest_manual_rgb_component_mask() -> None:
     assert selected_mask_path.is_file()
     assert overlay_path.is_file()
     assert diagnostics_path.is_file()
+
+
+def test_nearest_manual_rgb_component_mask() -> None:
+    """Optional pytest entry point; direct Python execution needs no pytest."""
+
+    import pytest
+
+    if os.environ.get("RUN_AGENTIC_OPENCV_MASK_TEST") != "1":
+        pytest.skip("set RUN_AGENTIC_OPENCV_MASK_TEST=1 to generate mask artifacts")
+    run_manual_rgb_component_mask()
+
+
+if __name__ == "__main__":
+    run_manual_rgb_component_mask()
