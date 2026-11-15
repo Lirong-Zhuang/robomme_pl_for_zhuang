@@ -66,12 +66,35 @@ def _put_payload() -> dict:
     }
 
 
+def _point_grounding(
+    role: str,
+    *,
+    point_xy: tuple[float, float] = (120.0, 90.0),
+    color_hint: str | None = None,
+) -> dict:
+    return {
+        "status": "ok",
+        "image_ref": "current_front",
+        "targets": {
+            role: {
+                "point_xy": list(point_xy),
+                "color_hint": color_hint,
+            }
+        },
+    }
+
+
+def _no_grounding() -> dict:
+    return {"status": "not_required", "image_ref": None, "targets": {}}
+
+
 def _first_plan_output() -> dict:
     return {
         "subgoal_sequence": [_pickup_payload(), _put_payload()],
         "next_subgoal_key": "pickup_cube",
         "next_subgoal": "pick up the first red cube",
         "arguments": {"ordinal": "first", "color": "red"},
+        "grounding": _point_grounding("object", color_hint="red"),
     }
 
 
@@ -203,6 +226,9 @@ def test_first_plan_creates_state_and_append_only_event(tmp_path: Path) -> None:
     execution = memory.current_execution()
     assert execution is not None
     assert execution["action_name"] == "solve_pickup"
+    assert execution["grounding"] == _point_grounding(
+        "object", color_hint="red"
+    )
     assert execution["acceptance"]["completed"] == (
         "The intended red cube is held and lifted."
     )
@@ -210,6 +236,18 @@ def test_first_plan_creates_state_and_append_only_event(tmp_path: Path) -> None:
     events = memory.query_events()
     assert [event["type"] for event in events] == ["plan_created"]
     assert json.loads((memory.episode_dir / "task_state.json").read_text()) == state
+
+
+def test_first_plan_rejects_vlm_supplied_3d_geometry(tmp_path: Path) -> None:
+    memory = _memory(tmp_path)
+    planner_output = _first_plan_output()
+    planner_output["grounding"]["targets"]["object"]["pose"] = [0, 0, 0]
+
+    with pytest.raises(ValueError, match="point_xy and color_hint"):
+        memory.commit_first_plan(
+            task_goal="Put one red cube into the bin.",
+            planner_output=planner_output,
+        )
 
 
 def test_current_key_resolves_trusted_action_callable(tmp_path: Path) -> None:
@@ -323,6 +361,7 @@ def test_keyframe_task_selects_trusted_observation_id_and_saves_path(
             "next_subgoal_key": "put_into_bin",
             "next_subgoal": "put it into the bin",
             "arguments": {},
+            "grounding": _point_grounding("container"),
             "keyframe_save": "current_overall",
         }
     )
@@ -503,6 +542,7 @@ def test_incomplete_retains_current_subgoal_and_increments_attempt(
             "next_subgoal_key": "pickup_cube",
             "next_subgoal": "pick up the first red cube",
             "arguments": {"ordinal": "first", "color": "red"},
+            "grounding": _point_grounding("object", color_hint="red"),
         }
     )
 
@@ -525,6 +565,7 @@ def test_completed_advances_and_resolves_next_action(tmp_path: Path) -> None:
             "next_subgoal_key": "put_into_bin",
             "next_subgoal": "put it into the bin",
             "arguments": {},
+            "grounding": _point_grounding("container"),
         }
     )
 
@@ -548,6 +589,7 @@ def test_completed_stop_has_no_current_action(tmp_path: Path) -> None:
             "next_subgoal_key": "put_into_bin",
             "next_subgoal": "put it into the bin",
             "arguments": {},
+            "grounding": _point_grounding("container"),
         }
     )
 
@@ -558,6 +600,7 @@ def test_completed_stop_has_no_current_action(tmp_path: Path) -> None:
             "next_subgoal_key": "STOP",
             "next_subgoal": "STOP",
             "arguments": {},
+            "grounding": _no_grounding(),
         }
     )
 
@@ -580,6 +623,7 @@ def test_failed_retry_does_not_mark_completion(tmp_path: Path) -> None:
             "next_subgoal_key": "pickup_cube",
             "next_subgoal": "pick up the first red cube",
             "arguments": {"ordinal": "first", "color": "red"},
+            "grounding": _point_grounding("object", color_hint="red"),
         }
     )
 
@@ -601,6 +645,7 @@ def test_dynamic_followup_subgoal_is_appended_to_prefix_plan(tmp_path: Path) -> 
         "next_subgoal_key": "press_button",
         "next_subgoal": "press the button",
         "arguments": {},
+        "grounding": _point_grounding("button"),
     }
     memory.commit_first_plan(task_goal="Reveal the target.", planner_output=first)
 
@@ -611,6 +656,7 @@ def test_dynamic_followup_subgoal_is_appended_to_prefix_plan(tmp_path: Path) -> 
             "next_subgoal_key": "pickup_cube",
             "next_subgoal": "pick up the first red cube",
             "arguments": {"ordinal": "first", "color": "red"},
+            "grounding": _point_grounding("object", color_hint="red"),
         }
     )
 

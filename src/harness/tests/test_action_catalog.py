@@ -15,7 +15,7 @@ CATALOG_PATH = (
 REMAINING_TASK_ACTIONS = {
     "StopCube": {
         "solve_button_ready",
-        "solve_hold_obj_abs_timestep",
+        "solve_hold_abs_timestep",
         "solve_button",
     },
     "PickXtimes": {
@@ -50,9 +50,9 @@ REMAINING_TASK_ACTIONS = {
 }
 
 
-def _load_actions() -> list[dict[str, str]]:
+def _load_actions() -> list[dict]:
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    assert catalog["schema_version"] == "action_catalog.v1"
+    assert catalog["schema_version"] == "action_catalog.v2"
     return catalog["actions"]
 
 
@@ -61,9 +61,139 @@ def test_action_catalog_entries_are_unique_and_described() -> None:
     names = [action["name"] for action in actions]
 
     assert len(names) == len(set(names))
-    assert all(set(action) == {"name", "description"} for action in actions)
+    base_fields = {"name", "description", "perception"}
+    implementation_fields = {"implementation_status", "implementation_note"}
+    optional_fields = implementation_fields | {"semantic_arguments"}
+    assert all(
+        base_fields <= set(action)
+        and set(action) <= base_fields | optional_fields
+        for action in actions
+    )
     assert all(action["name"].strip() for action in actions)
     assert all(action["description"].strip() for action in actions)
+    for action in actions:
+        if "implementation_status" not in action:
+            assert "implementation_note" not in action
+        else:
+            assert action["implementation_status"] in {"incomplete"}
+            assert action["implementation_note"].strip()
+
+        semantic_arguments = action.get("semantic_arguments", [])
+        assert isinstance(semantic_arguments, list)
+        names = [argument["name"] for argument in semantic_arguments]
+        assert len(names) == len(set(names))
+        for argument in semantic_arguments:
+            expected = {"name", "source", "allowed_values"}
+            if "runtime_mapping" in argument:
+                expected.add("runtime_mapping")
+            assert set(argument) == expected
+            assert argument["source"] == "subgoal_text_tokens"
+            assert argument["allowed_values"]
+            if "runtime_mapping" in argument:
+                assert set(argument["runtime_mapping"]) == set(
+                    argument["allowed_values"]
+                )
+
+
+def test_stopcube_wait_action_is_explicitly_deferred() -> None:
+    actions = {action["name"]: action for action in _load_actions()}
+    wait_action = actions["solve_hold_abs_timestep"]
+
+    assert wait_action["implementation_status"] == "incomplete"
+    assert "absolute_timestep" in wait_action["implementation_note"]
+    assert "StopCube" in wait_action["implementation_note"]
+
+
+def test_perception_contracts_limit_vlm_to_2d_point_hints() -> None:
+    allowed_modes = {"none", "vlm_points", "scene_target_set"}
+    allowed_color_policies = {"required", "optional", "not_used", "fixed"}
+    allowed_f2g_outputs = {"pose", "size"}
+
+    for action in _load_actions():
+        perception = action["perception"]
+        assert set(perception) == {"mode", "targets"}
+        assert perception["mode"] in allowed_modes
+        assert isinstance(perception["targets"], list)
+
+        if perception["mode"] == "none":
+            assert perception["targets"] == []
+            continue
+
+        assert perception["targets"]
+        roles = [target["role"] for target in perception["targets"]]
+        assert len(roles) == len(set(roles))
+        for target in perception["targets"]:
+            expected_fields = {
+                "role",
+                "point_required",
+                "color_hint",
+                "segmentation_profile",
+                "f2g_outputs",
+            }
+            if target["color_hint"] == "fixed":
+                expected_fields.add("fixed_color")
+            if "allowed_colors" in target:
+                expected_fields.add("allowed_colors")
+            assert set(target) == expected_fields
+            assert target["role"].strip()
+            assert isinstance(target["point_required"], bool)
+            assert target["color_hint"] in allowed_color_policies
+            if target["color_hint"] == "fixed":
+                assert target["fixed_color"].strip()
+            if "allowed_colors" in target:
+                assert target["color_hint"] == "required"
+                assert target["allowed_colors"]
+                assert len(target["allowed_colors"]) == len(
+                    set(target["allowed_colors"])
+                )
+            assert target["segmentation_profile"].strip()
+            assert set(target["f2g_outputs"]) <= allowed_f2g_outputs
+            assert "pose" in target["f2g_outputs"]
+
+        if perception["mode"] == "vlm_points":
+            assert all(target["point_required"] for target in perception["targets"])
+        else:
+            assert all(
+                not target["point_required"] for target in perception["targets"]
+            )
+
+
+def test_action_perception_roles_match_action_bindings() -> None:
+    expected_roles = {
+        "solve_pickup": {"object"},
+        "solve_put_into_bin": {"container"},
+        "solve_button": {"button"},
+        "grasp_and_lift_peg_side": {"peg"},
+        "solve_push_to_target_with_peg": {"object", "target"},
+        "solve_push_to_target": {"object", "target"},
+        "solve_putonto_target": {"target"},
+        "solve_putdown": set(),
+        "solve_button_ready": {"button"},
+        "solve_hold_abs_timestep": set(),
+        "solve_pickup_bin": {"object"},
+        "solve_swingonto_whenhold": {"target"},
+        "insert_peg": {"peg", "box"},
+        "solve_pattern_direction": {"targets"},
+        "solve_swingonto_with_direction": {"targets"},
+    }
+
+    actions = _load_actions()
+    assert {action["name"] for action in actions} == set(expected_roles)
+    for action in actions:
+        roles = {target["role"] for target in action["perception"]["targets"]}
+        assert roles == expected_roles[action["name"]]
+
+
+def test_peg_endpoints_require_black_or_white() -> None:
+    actions = {action["name"]: action for action in _load_actions()}
+
+    for action_name in ("grasp_and_lift_peg_side", "insert_peg"):
+        peg = next(
+            target
+            for target in actions[action_name]["perception"]["targets"]
+            if target["role"] == "peg"
+        )
+        assert peg["allowed_colors"] == ["black", "white"]
 
 
 def test_catalog_covers_every_non_example_task_oracle_action() -> None:

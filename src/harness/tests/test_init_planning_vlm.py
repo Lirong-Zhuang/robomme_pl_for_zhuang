@@ -259,6 +259,8 @@ def _validate_task_config(
     config: dict[str, Any],
     action_catalog: dict[str, Any],
 ) -> None:
+    if action_catalog.get("schema_version") != "action_catalog.v2":
+        raise ValueError("init planning requires action_catalog.v2")
     if set(config) != _REQUIRED_TOP_LEVEL_FIELDS:
         raise ValueError(
             "Unexpected top-level fields: "
@@ -424,6 +426,29 @@ def _validate_task_config(
 
     for prompt_name in ("first_planning", "followup_planning"):
         prompt_text = "\n".join(prompts[prompt_name].values())
+        prompt_text_casefold = prompt_text.casefold()
+        for required_grounding_term in (
+            "grounding",
+            "point_xy",
+            "color_hint",
+            "opencv",
+            "f2g",
+        ):
+            if required_grounding_term not in prompt_text_casefold:
+                raise ValueError(
+                    f"{prompt_name} prompt omits the 2D grounding contract term "
+                    f"{required_grounding_term!r}"
+                )
+        for forbidden_vlm_output in (
+            "never return depth",
+            "pose",
+            "metric size",
+        ):
+            if forbidden_vlm_output not in prompt_text_casefold:
+                raise ValueError(
+                    f"{prompt_name} prompt does not prohibit VLM geometry output: "
+                    f"{forbidden_vlm_output!r}"
+                )
         mentions_keyframe_save = "keyframe_save" in prompt_text
         if mentions_keyframe_save != uses_keyframes:
             raise ValueError(

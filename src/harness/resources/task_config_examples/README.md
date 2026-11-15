@@ -28,11 +28,18 @@ Every example uses the same two-prompt runtime interface:
 - `first_planning` is called once before any subgoal has executed. It performs no
   verification. It builds the concrete sequence currently inferable from the
   available sources and returns its first `next_subgoal_key`, instantiated subgoal
-  text, and arguments. Every sequence entry uses the same three fields.
+  text, arguments, and a separate `grounding` object for that selected action.
+  Every sequence entry uses only the same three semantic fields; image coordinates
+  never enter the reusable sequence.
 - `followup_planning` is called after a subgoal execution attempt. In one response
   it verifies the current subgoal as `completed`, `incomplete`, or `failed`, gives
-  concise observable evidence, and selects the next key, text, and arguments. An
-  incomplete subgoal remains active; only a completed subgoal advances.
+  concise observable evidence, and selects the next key, text, arguments, and
+  current-image `grounding` object. An incomplete subgoal remains active; only a
+  completed subgoal advances.
+
+The VLM-owned `grounding` object may contain only one 2D `point_xy` per required
+semantic role plus its declared `color_hint`. OpenCV owns mask generation and F2G
+owns every metric pose, location, orientation, and size value.
 
 Each top-level subgoal has a unique stable `subgoal_key`. The VLM never outputs an
 action name. The harness resolves `subgoal_key` to the task config's trusted action

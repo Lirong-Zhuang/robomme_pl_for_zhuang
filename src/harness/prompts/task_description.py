@@ -494,7 +494,8 @@ MOVE_CUBE_DESCRIPTION = TaskDescription(
         (
             "Object-role identities: the target is the purple circular "
             "disk, the cube is the small compact block, and the peg or tool is the "
-            "long thin object."
+            "long thin object with a black head half and a white tail half. When the "
+            "peg is used, the demonstrated black or white grasp half must be selected."
         ),
     ),
     operational_notes=(
@@ -532,8 +533,10 @@ INSERT_PEG_DESCRIPTION = TaskDescription(
     object_roles=(
         (
             "Object-role identities: the manipulated object is the elongated peg, "
-            "whose near and far ends must be distinguished, and the destination is "
-            "the box with robot-left and robot-right insertion sides."
+            "whose head half is temporarily standardized as pure black and whose tail "
+            "half is pure white; the demonstrated endpoint color and near/far identity "
+            "must both be preserved. The destination is the box with robot-left and "
+            "robot-right insertion sides."
         ),
     ),
     operational_notes=(

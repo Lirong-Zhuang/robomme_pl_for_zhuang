@@ -1,65 +1,282 @@
 {
-  "schema_version": "action_catalog.v1",
+  "schema_version": "action_catalog.v2",
   "actions": [
     {
       "name": "solve_pickup",
-      "description": "Grasp a selected compact object, close the gripper, and lift the object from its supporting surface."
+      "description": "Grasp a selected compact object, close the gripper, and lift the object from its supporting surface.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "object",
+            "point_required": true,
+            "color_hint": "required",
+            "segmentation_profile": "compact_colored",
+            "f2g_outputs": ["pose", "size"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_put_into_bin",
-      "description": "Move the currently held object above a bin opening, release it into the bin."
+      "description": "Move the currently held object above a bin opening, release it into the bin.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "container",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "container",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_button",
-      "description": "Move to a specified button, close the gripper and press it, then withdraw."
+      "description": "Move to a specified button, close the gripper and press it, then withdraw.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "button",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "button",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "grasp_and_lift_peg_side",
-      "description": "Approach a long peg from the side, grasp it securely, and lift it from the table."
+      "description": "Approach a long two-ended peg from the side, grasp the center of the demonstrated black or white half selected by the VLM point and color, and lift it from the table. Peg endpoints are temporarily standardized as black head and white tail for deterministic endpoint grounding.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "peg",
+            "point_required": true,
+            "color_hint": "required",
+            "allowed_colors": ["black", "white"],
+            "segmentation_profile": "peg_colored",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_push_to_target_with_peg",
-      "description": "While holding a peg, use the peg to push or hook a cube until the cube reaches its target."
+      "description": "While holding a peg, use the peg to push or hook a cube until the cube reaches its target; the trusted runtime derives the approach direction from grounded cube/target world positions and reuses the peg-end state saved by pickup.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "object",
+            "point_required": true,
+            "color_hint": "required",
+            "segmentation_profile": "compact_colored",
+            "f2g_outputs": ["pose"]
+          },
+          {
+            "role": "target",
+            "point_required": true,
+            "color_hint": "fixed",
+            "fixed_color": "purple",
+            "segmentation_profile": "target",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_push_to_target",
-      "description": "Use direct contact from an empty closed gripper to push a cube across the table to its target."
+      "description": "Use direct contact from an empty closed gripper to push a cube across the table to its target.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "object",
+            "point_required": true,
+            "color_hint": "required",
+            "segmentation_profile": "compact_colored",
+            "f2g_outputs": ["pose", "size"]
+          },
+          {
+            "role": "target",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "target",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_putonto_target",
-      "description": "Move the currently held object above a specified target, place it onto the target, and release it."
+      "description": "Move the currently held object above a specified target, place it onto the target, and release it.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "target",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "target",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_putdown",
-      "description": "Lower the currently held object onto an available table surface, release it, and move the gripper away."
+      "description": "Lower the currently held object onto an available table surface, release it, and move the gripper away.",
+      "perception": {
+        "mode": "none",
+        "targets": []
+      }
     },
     {
       "name": "solve_button_ready",
-      "description": "Move above a specified button and hold a press-ready pose without actuating the button."
+      "description": "Move above a specified button and hold a press-ready pose without actuating the button.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "button",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "button",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_hold_abs_timestep",
-      "description": "Keep the robot static while the environment continues evolving, advancing only to the requested absolute-time checkpoint before observing again."
+      "description": "Keep the robot static while the environment continues evolving, advancing only to the requested absolute-time checkpoint before observing again.",
+      "implementation_status": "incomplete",
+      "implementation_note": "Deferred with the optional StopCube task: absolute_timestep has no catalog-defined semantic resolver yet and must not be treated as execution-ready until that argument source is implemented.",
+      "perception": {
+        "mode": "none",
+        "targets": []
+      }
     },
     {
       "name": "solve_pickup_bin",
-      "description": "Grasp a selected white container from above, close the gripper, and lift the container from the table without treating any hidden cube as the grasp target."
+      "description": "Grasp a selected white container from above, close the gripper, and lift the container from the table without treating any hidden cube as the grasp target.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "object",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "container",
+            "f2g_outputs": ["pose", "size"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_swingonto_whenhold",
-      "description": "While continuing to hold an object, move it above a specified target disk without releasing it."
+      "description": "While continuing to hold an object, move it above a specified target disk without releasing it.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "target",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "target",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "insert_peg",
-      "description": "While holding the selected peg at the demonstrated end, align it with the box and insert it from the specified robot-left or robot-right side."
+      "description": "While holding the selected black or white peg half, ground the opposite free half, align it with the box, and insert from the side named in the subgoal. Peg endpoints are temporarily standardized as black head and white tail; the VLM must select one of those two colors.",
+      "semantic_arguments": [
+        {
+          "name": "direction",
+          "source": "subgoal_text_tokens",
+          "allowed_values": ["left", "right"],
+          "runtime_mapping": {"left": -1, "right": 1}
+        }
+      ],
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "peg",
+            "point_required": true,
+            "color_hint": "required",
+            "allowed_colors": ["black", "white"],
+            "segmentation_profile": "peg_colored",
+            "f2g_outputs": ["pose"]
+          },
+          {
+            "role": "box",
+            "point_required": true,
+            "color_hint": "not_used",
+            "segmentation_profile": "box",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_pattern_direction",
-      "description": "Move the end-effector-mounted stick continuously from its current grid target to the adjacent target in one specified robot-frame direction: forward, backward, left, right, or one of the four diagonals."
+      "description": "Move the end-effector-mounted stick continuously from its current grid target to the adjacent target in one specified robot-frame direction: forward, backward, left, right, or one of the four diagonals.",
+      "semantic_arguments": [
+        {
+          "name": "direction",
+          "source": "subgoal_text_tokens",
+          "allowed_values": ["forward", "backward", "left", "right", "forward-left", "forward-right", "backward-left", "backward-right"]
+        }
+      ],
+      "perception": {
+        "mode": "scene_target_set",
+        "targets": [
+          {
+            "role": "targets",
+            "point_required": false,
+            "color_hint": "not_used",
+            "segmentation_profile": "grid_targets",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     },
     {
       "name": "solve_swingonto_with_direction",
-      "description": "Move the end-effector-mounted stick to the nearest specified-side target while circling the intervening obstacle clockwise or counterclockwise as requested."
+      "description": "Move the end-effector-mounted stick to the nearest specified-side target while circling the intervening obstacle clockwise or counterclockwise as requested.",
+      "semantic_arguments": [
+        {
+          "name": "side",
+          "source": "subgoal_text_tokens",
+          "allowed_values": ["left", "right"]
+        },
+        {
+          "name": "direction",
+          "source": "subgoal_text_tokens",
+          "allowed_values": ["clockwise", "counterclockwise"]
+        }
+      ],
+      "perception": {
+        "mode": "scene_target_set",
+        "targets": [
+          {
+            "role": "targets",
+            "point_required": false,
+            "color_hint": "not_used",
+            "segmentation_profile": "grid_targets",
+            "f2g_outputs": ["pose"]
+          }
+        ]
+      }
     }
   ]
 }

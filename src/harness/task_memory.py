@@ -25,18 +25,22 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any
 
+from .grounding import normalize_vlm_grounding
+
 
 _ACCEPTANCE_STATES = {"completed", "incomplete", "failed"}
 _FOLLOWUP_STATUSES = _ACCEPTANCE_STATES
 _SUBGOAL_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _STOP_KEY = "STOP"
 _STOP_TEXT = "STOP"
+_TASK_STATE_SCHEMA_VERSION = "task_state.v2"
 _PLANNER_SUBGOAL_FIELDS = {"subgoal_key", "subgoal", "arguments"}
 _FIRST_PLAN_FIELDS = {
     "subgoal_sequence",
     "next_subgoal_key",
     "next_subgoal",
     "arguments",
+    "grounding",
 }
 _FOLLOWUP_FIELDS = {
     "status",
@@ -44,6 +48,7 @@ _FOLLOWUP_FIELDS = {
     "next_subgoal_key",
     "next_subgoal",
     "arguments",
+    "grounding",
 }
 _KEYFRAME_SAVE_FIELD = "keyframe_save"
 
@@ -476,9 +481,10 @@ class TaskMemory:
             suffix = ", and keyframe_save" if self.uses_keyframes else ""
             raise ValueError(
                 "first planner output must contain exactly subgoal_sequence, "
-                f"next_subgoal_key, next_subgoal, arguments{suffix}"
+                f"next_subgoal_key, next_subgoal, arguments, grounding{suffix}"
             )
         keyframe_save = self._keyframe_selection(planner_output)
+        grounding = normalize_vlm_grounding(planner_output.get("grounding"))
 
         raw_sequence = planner_output.get("subgoal_sequence")
         if not isinstance(raw_sequence, list) or not raw_sequence:
@@ -503,10 +509,11 @@ class TaskMemory:
             plan_id=plan_id,
             task_goal=_required_string("task_goal", task_goal),
             subgoal_sequence=sequence,
+            grounding=grounding,
             keyframe_save=keyframe_save,
         )
         state = {
-            "schema_version": "task_state.v1",
+            "schema_version": _TASK_STATE_SCHEMA_VERSION,
             "task_config": {
                 "schema_version": self.task_config.get("schema_version"),
                 "sha256": self.task_config_hash,
@@ -519,6 +526,7 @@ class TaskMemory:
                 "next_instance_number": len(sequence) + 1,
             },
             "current_subgoal": sequence[0],
+            "current_grounding": grounding,
             "progress": {
                 "completed_subgoal_ids": [],
             },
@@ -543,6 +551,7 @@ class TaskMemory:
         return {
             "instance_id": current["instance_id"],
             "attempt": current["attempt"],
+            "grounding": _json_copy(state["current_grounding"]),
             **resolved.execution_payload(),
         }
 
@@ -634,9 +643,10 @@ class TaskMemory:
             suffix = ", and keyframe_save" if self.uses_keyframes else ""
             raise ValueError(
                 "follow-up output must contain exactly status, description, "
-                f"next_subgoal_key, next_subgoal, arguments{suffix}"
+                f"next_subgoal_key, next_subgoal, arguments, grounding{suffix}"
             )
         keyframe_save = self._keyframe_selection(planner_output)
+        grounding = normalize_vlm_grounding(planner_output.get("grounding"))
 
         status = _required_string("status", planner_output.get("status"))
         if status not in _FOLLOWUP_STATUSES:
@@ -646,6 +656,8 @@ class TaskMemory:
             planner_output.get("description"),
         )
         next_resolved = self._resolve_next_output(planner_output)
+        if next_resolved is None and grounding["status"] != "not_required":
+            raise ValueError("STOP requires grounding.status='not_required'")
         current_resolved = self.resolver.resolve(
             subgoal_key=current["subgoal_key"],
             subgoal=current["subgoal"],
@@ -666,6 +678,7 @@ class TaskMemory:
             current=current,
             next_resolved=next_resolved,
         )
+        state["current_grounding"] = grounding
         event = self.event_log.append(
             "verification_and_transition",
             subgoal_id=current["instance_id"],
@@ -673,6 +686,7 @@ class TaskMemory:
             status=status,
             description=description,
             next_subgoal=next_instance,
+            grounding=grounding,
             keyframe_save=keyframe_save,
         )
         state["last_verification"] = {
@@ -1001,6 +1015,10 @@ class TaskMemory:
         state = self.load_state()
         if not state:
             raise RuntimeError("task state does not exist; commit the first plan first")
+        if state.get("schema_version") != _TASK_STATE_SCHEMA_VERSION:
+            raise RuntimeError(
+                "task state predates the required 2D grounding contract"
+            )
         if state.get("task_config", {}).get("sha256") != self.task_config_hash:
             raise RuntimeError("task state was created from a different task config")
         return state

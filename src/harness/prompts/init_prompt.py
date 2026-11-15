@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v17_hybrid_keyframes"
+INIT_PROMPT_VERSION = "minimal_task_config_v18_2d_grounding"
 
 
 @dataclass(frozen=True)
@@ -298,6 +298,47 @@ Object-role preservation requirement:
   ambiguity; generic objects that need no special cue need not receive glossary
   entries.
 
+Runtime grounding boundary:
+- Treat each selected action's perception contract from the trusted action resource
+  as authoritative and inline that contract into both generated runtime system
+  prompts. The init planner must not alter target roles, point requirements, color
+  policy, segmentation profile, or F2G outputs.
+- Preserve every allowed_colors restriction. For a peg endpoint restricted to
+  black and white, require the in-task VLM to place point_xy inside the intended
+  half and return exactly black or white as color_hint; do not describe the peg as
+  one undifferentiated target.
+- Treat semantic_arguments with source=subgoal_text_tokens as token contracts.
+  Generated subgoal text must visibly contain the intended semantic words. Runtime
+  extracts independent words such as left/right rather than enumerating or matching
+  the complete subgoal sentence, so do not hide those words behind synonyms.
+- The in-task VLM supplies only current-image 2D point hints and, when requested,
+  one color hint. It must never predict or return depth, camera/world/base position,
+  pose, orientation, Euler angles, quaternion, transform matrix, metric size,
+  point cloud, mask, contour, or bounding box. OpenCV converts the 2D hint into a
+  mask; F2G alone produces every pose, metric location, orientation, and size used
+  by an action.
+- Every first-planning and follow-up response has a top-level grounding object with
+  exactly status, image_ref, and targets. status is ok, ambiguous, or not_required.
+  For ok, image_ref copies the exact supplied current overall-view image ID and
+  targets contains exactly the roles required by the selected action. Each target
+  contains exactly point_xy and color_hint. point_xy is [x, y] in pixels with the
+  origin at the image's top-left and must visibly lie inside the intended object.
+  color_hint is a concise visible color when the action contract requires it and is
+  null when the contract says not_used or fixed. For a fixed policy, the trusted
+  action catalog supplies fixed_color to OpenCV; the VLM predicts only the 2D point
+  and must not repeat or override that color.
+- If a required target cannot be identified reliably in the current overall view,
+  return status=ambiguous with that image_ref and targets={{}}; never invent a point.
+  If perception.mode is none or scene_target_set, or when returning STOP, return
+  status=not_required, image_ref=null, and targets={{}}. scene_target_set delegates
+  whole-scene candidate extraction to the perception backend and therefore must not
+  contain VLM-predicted per-target coordinates.
+- The semantic arguments object remains reserved for reusable subgoal-template and
+  action parameters. Never place image coordinates or F2G geometry in arguments or
+  in subgoal text. subgoal_sequence entries remain semantic and contain exactly
+  subgoal_key, subgoal, and arguments; only the selected next subgoal has the
+  separate top-level grounding object.
+
 The config must contain complete task-specific prompts for the first in-task
 planning call and for later combined verification-and-planning calls. Complete
 means the prompts can be sent to a VLM after replacing their placeholders; do not
@@ -332,11 +373,11 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   task_config.keyframes entry and includes its task_config_ref and exact save_when
   condition. saved_keyframe is null before capture and otherwise explicitly carries
   the saved image and description. The prompt must not verify a subgoal. It must
-  require JSON with exactly subgoal_sequence, next_subgoal_key, next_subgoal, and
-  arguments when keyframes is empty. When keyframes is non-empty, it must require
-  exactly those fields plus keyframe_save. keyframe_save must be either null or one
-  exact observation ID copied from the supplied observation labels; it must never be
-  an invented filename or path. Every subgoal_sequence entry must contain exactly
+  require JSON with exactly subgoal_sequence, next_subgoal_key, next_subgoal,
+  arguments, and grounding when keyframes is empty. When keyframes is non-empty, it
+  must require exactly those fields plus keyframe_save. keyframe_save must be either
+  null or one exact observation ID copied from the supplied observation labels; it
+  must never be an invented filename or path. Every subgoal_sequence entry must contain exactly
   subgoal_key, subgoal, and arguments. The next fields must duplicate the first
   sequence entry. The VLM must not output action_name; the harness resolves it from
   next_subgoal_key. For a task whose later sequence depends on an eval-time transient
@@ -357,10 +398,10 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   supplied nor permitted as a placeholder or requested input. The prompt must
   perform verification from the supplied visual observations and next-subgoal
   planning in one call. When keyframes is empty, require JSON with exactly status,
-  description, next_subgoal_key, next_subgoal, and arguments. When keyframes is
-  non-empty, require exactly those fields plus keyframe_save. On every keyframe-task
-  call, inspect both the sliding-window observations and current observation against
-  save_when in the supplied keyframe_policy object. keyframe_save must be null when no
+  description, next_subgoal_key, next_subgoal, arguments, and grounding. When
+  keyframes is non-empty, require exactly those fields plus keyframe_save. On every
+  keyframe-task call, inspect both the sliding-window observations and current
+  observation against save_when in the supplied keyframe_policy object. keyframe_save must be null when no
   candidate matches or the applicable policy is complete; otherwise it must copy
   one exact supplied observation ID. A single policy is complete after one saved
   observation. A sequence policy may continue saving across calls until its
