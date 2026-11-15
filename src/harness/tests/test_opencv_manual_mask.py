@@ -22,20 +22,25 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RESOURCE_DIR = Path(__file__).resolve().parent / "test_resource"
-OUTPUT_DIR = REPO_ROOT / "runs" / "agentic" / "test" / "grounding"
+OUTPUT_DIR = REPO_ROOT / "runs" / "tests" / "grounding"
 
 # Manual defaults. These can be edited directly for a quick local experiment.
-IMAGE_NAME = "current_front_overall.png"
+IMAGE_NAME = "red_cube_only.png"
 COLOR_HINT = "red"
 POINT_XY = (120, 110)
-OUTPUT_NAME = "red_test_1"
-RGB_DISTANCE_THRESHOLD = 70.0
+OUTPUT_NAME = "red_test_3"
 MIN_COMPONENT_AREA = 50
 MAX_COMPONENT_AREA_FRACTION = 0.08
 MORPHOLOGY_PX = 3
+HSV_HUE_TOLERANCE = 8
+HSV_MIN_SATURATION = 120
+HSV_MIN_VALUE = 20
+WHITE_MAX_SATURATION = 55
+WHITE_MIN_VALUE = 160
+BLACK_MAX_VALUE = 70
 
-# Trusted RGB prototypes used by this diagnostic. They intentionally match the
-# current agentic grounding palette while testing an RGB-distance mask directly.
+# Trusted RGB prototypes used by this diagnostic. OpenCV converts the selected
+# prototype to HSV so illumination changes do not exclude darker object faces.
 RGB_PROTOTYPES = {
     "red": (220, 45, 45),
     "green": (45, 180, 70),
@@ -50,7 +55,7 @@ RGB_PROTOTYPES = {
 }
 
 
-def _manual_settings() -> tuple[str, str, tuple[int, int], str, float]:
+def _manual_settings() -> tuple[str, str, tuple[int, int], str]:
     image_name = os.environ.get("AGENTIC_MASK_IMAGE", IMAGE_NAME).strip()
     color_hint = os.environ.get("AGENTIC_MASK_COLOR", COLOR_HINT).strip().lower()
     point_xy = (
@@ -61,12 +66,6 @@ def _manual_settings() -> tuple[str, str, tuple[int, int], str, float]:
         "AGENTIC_MASK_OUTPUT_NAME",
         OUTPUT_NAME,
     ).strip()
-    threshold = float(
-        os.environ.get(
-            "AGENTIC_MASK_RGB_DISTANCE",
-            RGB_DISTANCE_THRESHOLD,
-        )
-    )
     if not image_name or Path(image_name).name != image_name:
         raise ValueError("AGENTIC_MASK_IMAGE must be one filename inside test_resource")
     if color_hint not in RGB_PROTOTYPES:
@@ -85,9 +84,7 @@ def _manual_settings() -> tuple[str, str, tuple[int, int], str, float]:
             "AGENTIC_MASK_OUTPUT_NAME may contain only letters, numbers, "
             "hyphens, and underscores"
         )
-    if threshold <= 0:
-        raise ValueError("AGENTIC_MASK_RGB_DISTANCE must be positive")
-    return image_name, color_hint, point_xy, output_name, threshold
+    return image_name, color_hint, point_xy, output_name
 
 
 def run_manual_rgb_component_mask() -> None:
@@ -100,7 +97,7 @@ def run_manual_rgb_component_mask() -> None:
         raise RuntimeError(
             "the robomme environment must provide NumPy and OpenCV"
         ) from error
-    image_name, color_hint, point_xy, output_name, threshold = _manual_settings()
+    image_name, color_hint, point_xy, output_name = _manual_settings()
     image_path = RESOURCE_DIR / image_name
     if not image_path.is_file():
         raise FileNotFoundError(
@@ -122,7 +119,31 @@ def run_manual_rgb_component_mask() -> None:
 
     prototype = np.asarray(RGB_PROTOTYPES[color_hint], dtype=np.float32)
     distance = np.linalg.norm(rgb.astype(np.float32) - prototype, axis=2)
-    raw_mask = distance <= threshold
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    prototype_hsv = cv2.cvtColor(
+        np.asarray([[RGB_PROTOTYPES[color_hint]]], dtype=np.uint8),
+        cv2.COLOR_RGB2HSV,
+    )[0, 0]
+    if color_hint == "white":
+        raw_mask = (
+            (hsv[..., 1] <= WHITE_MAX_SATURATION)
+            & (hsv[..., 2] >= WHITE_MIN_VALUE)
+        )
+        mask_rule = "low_saturation_high_value"
+    elif color_hint == "black":
+        raw_mask = hsv[..., 2] <= BLACK_MAX_VALUE
+        mask_rule = "low_value"
+    else:
+        hue_delta = np.abs(
+            hsv[..., 0].astype(np.int16) - int(prototype_hsv[0])
+        )
+        circular_hue_delta = np.minimum(hue_delta, 180 - hue_delta)
+        raw_mask = (
+            (circular_hue_delta <= HSV_HUE_TOLERANCE)
+            & (hsv[..., 1] >= HSV_MIN_SATURATION)
+            & (hsv[..., 2] >= HSV_MIN_VALUE)
+        )
+        mask_rule = "circular_hue_saturation_value"
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (MORPHOLOGY_PX, MORPHOLOGY_PX),
@@ -171,7 +192,7 @@ def run_manual_rgb_component_mask() -> None:
         )
     if not candidates:
         raise RuntimeError(
-            f"no {color_hint!r} component survived RGB threshold={threshold}, "
+            f"no {color_hint!r} component survived mask_rule={mask_rule}, "
             f"min_area={MIN_COMPONENT_AREA}, and "
             f"max_area_fraction={MAX_COMPONENT_AREA_FRACTION}"
         )
@@ -191,12 +212,20 @@ def run_manual_rgb_component_mask() -> None:
     cv2.imwrite(str(raw_mask_path), raw_mask.astype(np.uint8) * 255)
     cv2.imwrite(str(selected_mask_path), selected_mask.astype(np.uint8) * 255)
     overlay_rgb = rgb.copy()
-    green = np.asarray([0, 255, 0], dtype=np.float32)
+    # Blue avoids the olive/yellow mixture produced by blending green over a
+    # red target, which can be mistaken for a second target-point marker.
+    mask_blue = np.asarray([0, 80, 255], dtype=np.float32)
     overlay_rgb[selected_mask] = np.clip(
-        0.55 * overlay_rgb[selected_mask].astype(np.float32) + 0.45 * green,
+        0.55 * overlay_rgb[selected_mask].astype(np.float32) + 0.45 * mask_blue,
         0,
         255,
     ).astype(np.uint8)
+    contours, _ = cv2.findContours(
+        selected_mask.astype(np.uint8),
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    cv2.drawContours(overlay_rgb, contours, -1, (0, 80, 255), 2)
     # Match Oracle Plus target-point rendering: a filled 5 px RGB yellow dot.
     cv2.circle(overlay_rgb, point_xy, 5, (255, 255, 0), -1)
     cv2.imwrite(
@@ -209,9 +238,18 @@ def run_manual_rgb_component_mask() -> None:
         "image_shape_hw": [height, width],
         "color_hint": color_hint,
         "prototype_rgb": list(RGB_PROTOTYPES[color_hint]),
+        "prototype_hsv": [int(value) for value in prototype_hsv],
         "point_xy": list(point_xy),
         "output_name": output_name,
-        "rgb_distance_threshold": threshold,
+        "mask_rule": mask_rule,
+        "hsv_thresholds": {
+            "hue_tolerance": HSV_HUE_TOLERANCE,
+            "min_saturation": HSV_MIN_SATURATION,
+            "min_value": HSV_MIN_VALUE,
+            "white_max_saturation": WHITE_MAX_SATURATION,
+            "white_min_value": WHITE_MIN_VALUE,
+            "black_max_value": BLACK_MAX_VALUE,
+        },
         "raw_mask_pixels": int(np.count_nonzero(raw_mask)),
         "candidate_count": len(candidates),
         "selected": selected,
