@@ -8,6 +8,7 @@ from harness.grounding.observation import depth_statistics
 from harness.grounding.transforms import object_to_world
 from harness.grounding.transforms import rotation_matrix_to_quaternion_wxyz
 from harness.grounding.types import CameraFrame
+from harness.grounding.types import SegmentationResult
 
 
 def _camera_inputs() -> tuple[dict, dict]:
@@ -88,12 +89,75 @@ def test_colored_profile_selects_nearest_matching_component() -> None:
     assert not result.mask[30, 30]
 
 
+def test_colored_profile_keeps_shaded_face_and_has_no_distance_rejection() -> None:
+    pytest.importorskip("cv2")
+    from harness.grounding.opencv_segmenter import OpenCVSegmenter
+
+    rgb = np.full((120, 120, 3), [80, 70, 60], dtype=np.uint8)
+    rgb[8:18, 8:18] = [220, 45, 45]
+    rgb[18:28, 8:18] = [100, 18, 18]
+    depth = np.full((120, 120), 700, dtype=np.int16)
+
+    result = OpenCVSegmenter().segment(
+        _synthetic_frame(rgb, depth),
+        point_xy=(100, 100),
+        color_hint="red",
+        profile_name="compact_colored",
+    )
+
+    assert result.mask[12, 12]
+    assert result.mask[22, 12]
+    assert result.diagnostics["point_distance_px"] > 70
+    assert result.diagnostics["mask_rule"] == "circular_hue_saturation_value"
+
+
+def test_shared_mask_overlay_paints_mask_black_and_point_yellow() -> None:
+    pytest.importorskip("cv2")
+    from harness.grounding.visualization import draw_mask_overlay
+
+    rgb = np.full((20, 20, 3), 180, dtype=np.uint8)
+    mask = np.zeros((20, 20), dtype=bool)
+    mask[5:15, 5:15] = True
+    segmentation = SegmentationResult(
+        mask=mask,
+        confidence=1.0,
+        profile="compact_colored",
+        point_xy=(10, 10),
+    )
+
+    overlay = draw_mask_overlay(rgb, [segmentation])
+
+    assert overlay[6, 6].tolist() == [0, 0, 0]
+    assert overlay[10, 10].tolist() == [255, 255, 0]
+
+
+def test_shared_grounding_overlay_draws_f2g_box_and_point() -> None:
+    pytest.importorskip("cv2")
+    from harness.grounding.visualization import draw_grounding_overlay
+
+    rgb = np.zeros((100, 100, 3), dtype=np.uint8)
+    intrinsic = np.asarray([[100, 0, 50], [0, 100, 50], [0, 0, 1]])
+    object_to_camera = np.eye(4)
+    object_to_camera[2, 3] = 1.0
+
+    overlay = draw_grounding_overlay(
+        rgb,
+        intrinsic=intrinsic,
+        predictions=[
+            (object_to_camera, np.asarray([0.2, 0.2, 0.2]), (20, 20))
+        ],
+    )
+
+    assert overlay[20, 20].tolist() == [255, 255, 0]
+    assert np.any(np.all(overlay == [0, 255, 0], axis=2))
+
+
 def test_target_profile_can_use_trusted_purple_color() -> None:
     pytest.importorskip("cv2")
     from harness.grounding.opencv_segmenter import OpenCVSegmenter
 
     rgb = np.zeros((40, 40, 3), dtype=np.uint8)
-    rgb[12:28, 12:28] = [145, 65, 190]
+    rgb[15:25, 15:25] = [145, 65, 190]
     depth = np.full((40, 40), 700, dtype=np.int16)
 
     result = OpenCVSegmenter().segment(

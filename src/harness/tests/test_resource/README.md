@@ -26,10 +26,11 @@ same object remain in the mask. Outputs are written to:
 runs/tests/grounding/
 ```
 
-The manual mask program writes only `<output_name>_mask_overlay.png`. Its final
-selected mask is painted pure black and the requested point is rendered as the
-same filled yellow dot used by Oracle Plus. Detailed diagnostics are printed to
-the terminal instead of creating additional files.
+The manual mask program calls the same production `OpenCVSegmenter` used by
+Agentic Eval and writes only `<output_name>_mask_overlay.png`. Its final selected
+mask is painted pure black and the requested point is rendered as the same
+filled yellow dot used by Oracle Plus. Detailed diagnostics are printed to the
+terminal instead of creating additional files.
 
 ## Full F2G grounding test
 
@@ -50,5 +51,5 @@ It writes only:
 
 ```text
 runs/tests/grounding/<output_name>_mask_overlay.png
-runs/tests/grounding/<output_name>_grounding.png
+runs/tests/grounding/<output_name>_grounding_overlay.png
 ```

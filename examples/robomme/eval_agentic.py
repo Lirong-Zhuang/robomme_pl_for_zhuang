@@ -39,6 +39,8 @@ from harness.grounding import GroundingContractRegistry
 from harness.grounding import GroundingPipeline
 from harness.grounding import camera_frame_from_robomme
 from harness.grounding import depth_statistics
+from harness.grounding.visualization import draw_grounding_overlay
+from harness.grounding.visualization import draw_mask_overlay
 from harness.init_planning import ACTION_CATALOG_PATH
 from harness.init_planning import build_init_planning_messages
 from harness.init_planning import validate_task_config
@@ -726,9 +728,49 @@ def _save_grounding_artifact(
     directory: Path,
     *,
     execution: Mapping[str, Any],
+    frame: Any,
     grounded: Any,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     mask_paths = _save_masks(directory, grounded)
+    mask_overlay_path = (directory / "mask_overlay.png").resolve()
+    grounding_overlay_path = (directory / "grounding_overlay.png").resolve()
+    iio.imwrite(
+        mask_overlay_path,
+        draw_mask_overlay(frame.rgb, grounded.masks.values()),
+    )
+
+    predictions = []
+    for role, estimate in grounded.request.targets.items():
+        segmentation = grounded.masks[role]
+        predictions.append(
+            (
+                np.asarray(estimate.metadata["T_cam_obj"], dtype=np.float64),
+                np.asarray(estimate.size.xyz, dtype=np.float64),
+                segmentation.point_xy,
+            )
+        )
+    for role, estimates in grounded.request.target_sets.items():
+        for index, estimate in enumerate(estimates):
+            segmentation = grounded.masks[f"{role}_{index}"]
+            predictions.append(
+                (
+                    np.asarray(estimate.metadata["T_cam_obj"], dtype=np.float64),
+                    np.asarray(estimate.size.xyz, dtype=np.float64),
+                    segmentation.point_xy,
+                )
+            )
+    iio.imwrite(
+        grounding_overlay_path,
+        draw_grounding_overlay(
+            frame.rgb,
+            intrinsic=frame.intrinsic,
+            predictions=predictions,
+        ),
+    )
+    overlay_paths = {
+        "mask_overlay": str(mask_overlay_path),
+        "grounding_overlay": str(grounding_overlay_path),
+    }
     _write_json(
         directory / "grounding.json",
         {
@@ -747,9 +789,10 @@ def _save_grounding_artifact(
                 }
                 for role, segmentation in grounded.masks.items()
             },
+            "overlays": overlay_paths,
         },
     )
-    return mask_paths
+    return {"masks": mask_paths, "overlays": overlay_paths}
 
 
 def run_episode(
@@ -1031,12 +1074,16 @@ def run_episode(
                     arguments=execution["arguments"],
                 ),
             )
-            mask_paths = _save_grounding_artifact(
+            grounding_artifacts = _save_grounding_artifact(
                 grounding_call_dir,
                 execution=execution,
+                frame=frame,
                 grounded=grounded,
             )
-            memory.record_action_started(mask_paths=mask_paths)
+            memory.record_action_started(
+                mask_paths=grounding_artifacts["masks"],
+                overlay_paths=grounding_artifacts["overlays"],
+            )
             recent_pairs: deque[tuple[np.ndarray, np.ndarray]] = deque(
                 maxlen=verification_k
             )

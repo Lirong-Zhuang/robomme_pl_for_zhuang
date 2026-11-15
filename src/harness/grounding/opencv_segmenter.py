@@ -13,7 +13,7 @@ from .types import CameraFrame
 from .types import SegmentationResult
 
 
-_RGB_COLORS = {
+RGB_PROTOTYPES = {
     "red": (220, 45, 45),
     "green": (45, 180, 70),
     "blue": (45, 90, 220),
@@ -51,64 +51,71 @@ _COLOR_ALIASES = {
 class SegmentationProfile:
     min_area: int = 50
     max_area_fraction: float = 0.35
-    search_radius_px: int = 80
+    depth_search_radius_px: int = 80
     depth_tolerance_m: float = 0.03
-    color_delta_e: float = 58.0
     morphology_px: int = 5
+    hsv_hue_tolerance: int = 8
+    hsv_min_saturation: int = 120
+    hsv_min_value: int = 20
+    white_max_saturation: int = 55
+    white_min_value: int = 160
+    black_max_value: int = 70
 
 
 DEFAULT_PROFILES = {
     "compact_colored": SegmentationProfile(
         min_area=50,
         max_area_fraction=0.08,
-        search_radius_px=70,
+        depth_search_radius_px=70,
         depth_tolerance_m=0.025,
-        color_delta_e=55,
         morphology_px=3,
     ),
     "peg_colored": SegmentationProfile(
         min_area=50,
         max_area_fraction=0.12,
-        search_radius_px=100,
+        depth_search_radius_px=100,
         depth_tolerance_m=0.035,
-        color_delta_e=58,
         morphology_px=3,
     ),
     "container": SegmentationProfile(
         min_area=100,
         max_area_fraction=0.35,
-        search_radius_px=110,
+        depth_search_radius_px=110,
         depth_tolerance_m=0.05,
         morphology_px=7,
     ),
     "button": SegmentationProfile(
         min_area=50,
         max_area_fraction=0.08,
-        search_radius_px=65,
+        depth_search_radius_px=65,
         depth_tolerance_m=0.018,
         morphology_px=3,
     ),
     "target": SegmentationProfile(
         min_area=80,
         max_area_fraction=0.20,
-        search_radius_px=90,
+        depth_search_radius_px=90,
         depth_tolerance_m=0.025,
         morphology_px=5,
     ),
     "box": SegmentationProfile(
         min_area=100,
         max_area_fraction=0.30,
-        search_radius_px=110,
+        depth_search_radius_px=110,
         depth_tolerance_m=0.05,
         morphology_px=7,
     ),
     "grid_targets": SegmentationProfile(
         min_area=50,
         max_area_fraction=0.08,
-        search_radius_px=0,
+        depth_search_radius_px=0,
         morphology_px=5,
     ),
 }
+
+# Every color-guided action uses the parameters validated by the manual
+# grounding test. Object-specific profiles still govern depth-only masks.
+DEFAULT_COLOR_PROFILE = DEFAULT_PROFILES["compact_colored"]
 
 
 def _morphology(mask: np.ndarray, size: int) -> np.ndarray:
@@ -163,6 +170,7 @@ class OpenCVSegmenter:
     profiles: dict[str, SegmentationProfile] = field(
         default_factory=lambda: dict(DEFAULT_PROFILES)
     )
+    color_profile: SegmentationProfile = DEFAULT_COLOR_PROFILE
 
     def _profile(self, name: str) -> SegmentationProfile:
         try:
@@ -185,7 +193,11 @@ class OpenCVSegmenter:
             raise ValueError(f"point_xy={point_xy} is outside the image")
         if color_hint:
             return self._segment_colored(
-                frame, point_xy, color_hint, profile_name, profile
+                frame,
+                point_xy,
+                color_hint,
+                profile_name,
+                self.color_profile,
             )
         if profile_name in {"compact_colored", "peg_colored"}:
             raise ValueError(f"profile {profile_name!r} requires color_hint")
@@ -199,18 +211,38 @@ class OpenCVSegmenter:
         profile_name: str,
         profile: SegmentationProfile,
     ) -> SegmentationResult:
-        normalized_color = _COLOR_ALIASES.get(color_hint.strip().lower(), color_hint.strip().lower())
-        if normalized_color not in _RGB_COLORS:
+        requested_color = color_hint.strip().lower()
+        normalized_color = _COLOR_ALIASES.get(requested_color, requested_color)
+        if normalized_color not in RGB_PROTOTYPES:
             raise ValueError(
                 f"unsupported color_hint {color_hint!r}; expected one of "
-                f"{sorted(_RGB_COLORS)}"
+                f"{sorted(RGB_PROTOTYPES)}"
             )
-        lab = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
-        prototype = np.asarray(_RGB_COLORS[normalized_color], dtype=np.uint8).reshape(1, 1, 3)
-        prototype_lab = cv2.cvtColor(prototype, cv2.COLOR_RGB2LAB).astype(np.float32)[0, 0]
-        delta = np.linalg.norm(lab - prototype_lab, axis=2)
-        raw_mask = delta <= profile.color_delta_e
-        raw_mask &= np.isfinite(frame.depth_m) & (frame.depth_m > 0)
+        hsv = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2HSV)
+        prototype = np.asarray(
+            [[RGB_PROTOTYPES[normalized_color]]], dtype=np.uint8
+        )
+        prototype_hsv = cv2.cvtColor(prototype, cv2.COLOR_RGB2HSV)[0, 0]
+        if normalized_color == "white":
+            raw_mask = (
+                (hsv[..., 1] <= profile.white_max_saturation)
+                & (hsv[..., 2] >= profile.white_min_value)
+            )
+            mask_rule = "low_saturation_high_value"
+        elif normalized_color == "black":
+            raw_mask = hsv[..., 2] <= profile.black_max_value
+            mask_rule = "low_value"
+        else:
+            hue_delta = np.abs(
+                hsv[..., 0].astype(np.int16) - int(prototype_hsv[0])
+            )
+            circular_hue_delta = np.minimum(hue_delta, 180 - hue_delta)
+            raw_mask = (
+                (circular_hue_delta <= profile.hsv_hue_tolerance)
+                & (hsv[..., 1] >= profile.hsv_min_saturation)
+                & (hsv[..., 2] >= profile.hsv_min_value)
+            )
+            mask_rule = "circular_hue_saturation_value"
         candidates = _components(
             _morphology(raw_mask, profile.morphology_px), profile
         )
@@ -220,19 +252,15 @@ class OpenCVSegmenter:
             )
         for candidate in candidates:
             distance = _distance_to_mask(candidate["mask"], point_xy)
-            mean_delta = float(np.mean(delta[candidate["mask"]]))
             candidate["distance_px"] = distance
-            candidate["mean_color_delta"] = mean_delta
-            candidate["score"] = (
-                distance / max(profile.search_radius_px, 1)
-                + 0.35 * mean_delta / profile.color_delta_e
-            )
-        best = min(candidates, key=lambda item: item["score"])
-        if best["distance_px"] > profile.search_radius_px:
-            raise ValueError(
-                f"nearest color component is {best['distance_px']:.1f}px from VLM point"
-            )
-        confidence = float(np.clip(1.0 - best["score"] / 1.5, 0.05, 1.0))
+        best = min(
+            candidates,
+            key=lambda item: (item["distance_px"], -item["area"]),
+        )
+        image_diagonal = float(np.hypot(*frame.rgb.shape[:2]))
+        confidence = float(
+            np.clip(1.0 - best["distance_px"] / image_diagonal, 0.05, 1.0)
+        )
         return SegmentationResult(
             mask=best["mask"],
             confidence=confidence,
@@ -243,8 +271,23 @@ class OpenCVSegmenter:
                 "area_px": best["area"],
                 "bbox_xywh": best["bbox_xywh"],
                 "point_distance_px": best["distance_px"],
-                "mean_lab_distance": best["mean_color_delta"],
                 "candidate_count": len(candidates),
+                "mask_rule": mask_rule,
+                "prototype_rgb": list(RGB_PROTOTYPES[normalized_color]),
+                "prototype_hsv": [int(value) for value in prototype_hsv],
+                "component_thresholds": {
+                    "min_area": profile.min_area,
+                    "max_area_fraction": profile.max_area_fraction,
+                    "morphology_px": profile.morphology_px,
+                },
+                "hsv_thresholds": {
+                    "hue_tolerance": profile.hsv_hue_tolerance,
+                    "min_saturation": profile.hsv_min_saturation,
+                    "min_value": profile.hsv_min_value,
+                    "white_max_saturation": profile.white_max_saturation,
+                    "white_min_value": profile.white_min_value,
+                    "black_max_value": profile.black_max_value,
+                },
             },
         )
 
@@ -308,7 +351,7 @@ class OpenCVSegmenter:
         )
         region = flood_mask[1:-1, 1:-1] > 0
         yy, xx = np.ogrid[: region.shape[0], : region.shape[1]]
-        radius = profile.search_radius_px * 2
+        radius = profile.depth_search_radius_px * 2
         roi = (xx - point_xy[0]) ** 2 + (yy - point_xy[1]) ** 2 <= radius**2
         return _morphology(region & roi, profile.morphology_px)
 
@@ -320,7 +363,9 @@ class OpenCVSegmenter:
         profile: SegmentationProfile,
     ) -> SegmentationResult:
         depth_m = frame.depth_m
-        seeds = self._seed_pixels(depth_m, point_xy, profile.search_radius_px)
+        seeds = self._seed_pixels(
+            depth_m, point_xy, profile.depth_search_radius_px
+        )
         candidates: list[dict[str, Any]] = []
         for seed in seeds:
             for component in _components(
@@ -329,14 +374,16 @@ class OpenCVSegmenter:
                 distance = _distance_to_mask(component["mask"], point_xy)
                 component["distance_px"] = distance
                 component["seed_xy"] = seed
-                component["score"] = distance / max(profile.search_radius_px, 1)
+                component["score"] = distance / max(
+                    profile.depth_search_radius_px, 1
+                )
                 candidates.append(component)
         if not candidates:
             raise ValueError(
                 f"OpenCV found no depth-connected component near {point_xy} for {profile_name}"
             )
         best = min(candidates, key=lambda item: (item["score"], -item["area"]))
-        if best["distance_px"] > profile.search_radius_px:
+        if best["distance_px"] > profile.depth_search_radius_px:
             raise ValueError(
                 f"nearest depth component is {best['distance_px']:.1f}px from VLM point"
             )

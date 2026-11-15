@@ -36,6 +36,7 @@ for import_root in (SRC_ROOT, TEST_DIR):
 
 from harness.grounding import F2GClient
 from harness.grounding.types import CameraFrame
+from harness.grounding.visualization import draw_grounding_overlay
 import test_opencv_manual_mask as manual_mask
 
 
@@ -64,106 +65,6 @@ def _grounding_input_name() -> str:
             "GROUNDING_INPUT_NAME must be one NPZ filename inside test_resource"
         )
     return name
-
-
-def _box_corners(size_m: object, np: object) -> object:
-    half_x, half_y, half_z = np.asarray(size_m, dtype=np.float64) / 2.0
-    return np.asarray(
-        [
-            [-half_x, -half_y, -half_z],
-            [half_x, -half_y, -half_z],
-            [half_x, half_y, -half_z],
-            [-half_x, half_y, -half_z],
-            [-half_x, -half_y, half_z],
-            [half_x, -half_y, half_z],
-            [half_x, half_y, half_z],
-            [-half_x, half_y, half_z],
-        ],
-        dtype=np.float64,
-    )
-
-
-def _project_points(
-    points_object: object,
-    object_to_camera: object,
-    intrinsic: object,
-    np: object,
-) -> object:
-    points = np.asarray(points_object, dtype=np.float64)
-    transform = np.asarray(object_to_camera, dtype=np.float64)
-    camera = (transform[:3, :3] @ points.T).T + transform[:3, 3]
-    if np.any(camera[:, 2] <= 1e-6):
-        raise ValueError("F2G box contains points behind the camera")
-    homogeneous = (np.asarray(intrinsic, dtype=np.float64) @ camera.T).T
-    return homogeneous[:, :2] / homogeneous[:, 2:3]
-
-
-def _draw_grounding_box(
-    rgb: object,
-    *,
-    object_to_camera: object,
-    size_m: object,
-    intrinsic: object,
-    point_xy: tuple[int, int],
-    cv2: object,
-    np: object,
-) -> object:
-    output = rgb.copy()
-    corners = _box_corners(size_m, np)
-    pixels = _project_points(corners, object_to_camera, intrinsic, np)
-    pixels = np.rint(pixels).astype(int)
-    edges = (
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 0),
-        (4, 5),
-        (5, 6),
-        (6, 7),
-        (7, 4),
-        (0, 4),
-        (1, 5),
-        (2, 6),
-        (3, 7),
-    )
-    for start, end in edges:
-        cv2.line(
-            output,
-            tuple(int(value) for value in pixels[start]),
-            tuple(int(value) for value in pixels[end]),
-            (0, 255, 0),
-            2,
-            cv2.LINE_AA,
-        )
-
-    size = np.asarray(size_m, dtype=np.float64)
-    axis_points = np.asarray(
-        [
-            [0.0, 0.0, 0.0],
-            [size[0] / 2.0, 0.0, 0.0],
-            [0.0, size[1] / 2.0, 0.0],
-            [0.0, 0.0, size[2] / 2.0],
-        ]
-    )
-    axes = np.rint(
-        _project_points(axis_points, object_to_camera, intrinsic, np)
-    ).astype(int)
-    origin = tuple(int(value) for value in axes[0])
-    for endpoint, color in zip(
-        axes[1:],
-        ((255, 0, 0), (0, 255, 0), (0, 80, 255)),
-        strict=True,
-    ):
-        cv2.line(
-            output,
-            origin,
-            tuple(int(value) for value in endpoint),
-            color,
-            3,
-            cv2.LINE_AA,
-        )
-    cv2.circle(output, point_xy, 5, (255, 255, 0), -1)
-    return output
 
 
 def run_manual_grounding_test() -> None:
@@ -231,17 +132,21 @@ def run_manual_grounding_test() -> None:
     )
     health = client.health()
     prediction = client.predict(frame, mask)
-    grounded_rgb = _draw_grounding_box(
+    grounded_rgb = draw_grounding_overlay(
         rgb,
-        object_to_camera=prediction.object_to_camera,
-        size_m=prediction.size_m,
         intrinsic=intrinsic,
-        point_xy=point_xy,
-        cv2=cv2,
-        np=np,
+        predictions=[
+            (
+                prediction.object_to_camera,
+                prediction.size_m,
+                point_xy,
+            )
+        ],
     )
     manual_mask.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    grounding_path = manual_mask.OUTPUT_DIR / f"{output_name}_grounding.png"
+    grounding_path = (
+        manual_mask.OUTPUT_DIR / f"{output_name}_grounding_overlay.png"
+    )
     cv2.imwrite(
         str(grounding_path),
         cv2.cvtColor(grounded_rgb, cv2.COLOR_RGB2BGR),
@@ -255,7 +160,7 @@ def run_manual_grounding_test() -> None:
                 "f2g_metadata": dict(prediction.metadata),
                 "artifacts": {
                     "mask_overlay": str(mask_result["mask_overlay_path"]),
-                    "grounding": str(grounding_path.resolve()),
+                    "grounding_overlay": str(grounding_path.resolve()),
                 },
             },
             ensure_ascii=False,
