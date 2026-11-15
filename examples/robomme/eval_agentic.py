@@ -706,6 +706,22 @@ def _save_masks(directory: Path, grounded: Any) -> dict[str, str]:
     return paths
 
 
+def _save_grounding_input(directory: Path, frame: Any) -> Path:
+    """Persist the aligned RGB-D camera inputs needed to replay F2G."""
+
+    directory.mkdir(parents=True, exist_ok=True)
+    path = (directory / "grounding_input.npz").resolve()
+    np.savez_compressed(
+        path,
+        rgb=frame.rgb,
+        depth=frame.depth,
+        intrinsic=frame.intrinsic,
+        world_to_camera=frame.world_to_camera,
+        depth_scale=np.asarray(frame.depth_scale, dtype=np.float64),
+    )
+    return path
+
+
 def _save_grounding_artifact(
     directory: Path,
     *,
@@ -1002,6 +1018,9 @@ def run_episode(
             )
             if "depth_statistics" not in record:
                 record["depth_statistics"] = depth_statistics(frame)
+            active_call_index = decision_index - 1
+            grounding_call_dir = grounding_dir / f"call_{active_call_index}"
+            _save_grounding_input(grounding_call_dir, frame)
             grounded = pipeline.build_action_request(
                 action_name=execution["action_name"],
                 grounding=execution["grounding"],
@@ -1012,9 +1031,8 @@ def run_episode(
                     arguments=execution["arguments"],
                 ),
             )
-            active_call_index = decision_index - 1
             mask_paths = _save_grounding_artifact(
-                grounding_dir / f"call_{active_call_index}",
+                grounding_call_dir,
                 execution=execution,
                 grounded=grounded,
             )

@@ -7,9 +7,8 @@ Run from the repository root::
     micromamba activate robomme
     python src/harness/tests/test_opencv_manual_mask.py
 
-Edit the constants below or override them with the documented environment
-variables. Running this file directly does not require pytest. If pytest is
-installed, its wrapper test remains skipped unless
+Edit the configuration constants below before running. Direct execution does
+not require pytest. If pytest is installed, its wrapper remains skipped unless
 ``RUN_AGENTIC_OPENCV_MASK_TEST=1``.
 """
 
@@ -56,22 +55,14 @@ RGB_PROTOTYPES = {
 
 
 def _manual_settings() -> tuple[str, str, tuple[int, int], str]:
-    image_name = os.environ.get("AGENTIC_MASK_IMAGE", IMAGE_NAME).strip()
-    color_hint = os.environ.get("AGENTIC_MASK_COLOR", COLOR_HINT).strip().lower()
-    point_xy = (
-        int(os.environ.get("AGENTIC_MASK_X", POINT_XY[0])),
-        int(os.environ.get("AGENTIC_MASK_Y", POINT_XY[1])),
-    )
-    output_name = os.environ.get(
-        "AGENTIC_MASK_OUTPUT_NAME",
-        OUTPUT_NAME,
-    ).strip()
+    image_name = IMAGE_NAME.strip()
+    color_hint = COLOR_HINT.strip().lower()
+    point_xy = (int(POINT_XY[0]), int(POINT_XY[1]))
+    output_name = OUTPUT_NAME.strip()
     if not image_name or Path(image_name).name != image_name:
-        raise ValueError("AGENTIC_MASK_IMAGE must be one filename inside test_resource")
+        raise ValueError("IMAGE_NAME must be one filename inside test_resource")
     if color_hint not in RGB_PROTOTYPES:
-        raise ValueError(
-            f"AGENTIC_MASK_COLOR must be one of {sorted(RGB_PROTOTYPES)}"
-        )
+        raise ValueError(f"COLOR_HINT must be one of {sorted(RGB_PROTOTYPES)}")
     if (
         not output_name
         or Path(output_name).name != output_name
@@ -81,13 +72,13 @@ def _manual_settings() -> tuple[str, str, tuple[int, int], str]:
         )
     ):
         raise ValueError(
-            "AGENTIC_MASK_OUTPUT_NAME may contain only letters, numbers, "
+            "OUTPUT_NAME may contain only letters, numbers, "
             "hyphens, and underscores"
         )
     return image_name, color_hint, point_xy, output_name
 
 
-def run_manual_rgb_component_mask() -> None:
+def run_manual_rgb_component_mask() -> dict[str, object]:
     """Write the matching component nearest a manually supplied image point."""
 
     try:
@@ -204,13 +195,16 @@ def run_manual_rgb_component_mask() -> None:
     selected_mask = selected.pop("mask")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     artifact_stem = output_name
-    raw_mask_path = OUTPUT_DIR / f"{artifact_stem}_raw_mask.png"
-    selected_mask_path = OUTPUT_DIR / f"{artifact_stem}_selected_mask.png"
-    overlay_path = OUTPUT_DIR / f"{artifact_stem}_overlay.png"
-    diagnostics_path = OUTPUT_DIR / f"{artifact_stem}_diagnostics.json"
+    overlay_path = OUTPUT_DIR / f"{artifact_stem}_mask_overlay.png"
+    for legacy_suffix in (
+        "raw_mask.png",
+        "selected_mask.png",
+        "overlay.png",
+        "diagnostics.json",
+        "grounding.png",
+    ):
+        (OUTPUT_DIR / f"{artifact_stem}_{legacy_suffix}").unlink(missing_ok=True)
 
-    cv2.imwrite(str(raw_mask_path), raw_mask.astype(np.uint8) * 255)
-    cv2.imwrite(str(selected_mask_path), selected_mask.astype(np.uint8) * 255)
     overlay_rgb = rgb.copy()
     overlay_rgb[selected_mask] = (0, 0, 0)
     # Match Oracle Plus target-point rendering: a filled 5 px RGB yellow dot.
@@ -244,23 +238,21 @@ def run_manual_rgb_component_mask() -> None:
             {key: value for key, value in candidate.items() if key != "mask"}
             for candidate in candidates
         ],
-        "artifacts": {
-            "raw_mask": str(raw_mask_path.resolve()),
-            "selected_mask": str(selected_mask_path.resolve()),
-            "overlay": str(overlay_path.resolve()),
-        },
+        "mask_overlay": str(overlay_path.resolve()),
     }
-    diagnostics_path.write_text(
-        json.dumps(diagnostics, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
     print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
 
     assert int(np.count_nonzero(selected_mask)) >= MIN_COMPONENT_AREA
-    assert raw_mask_path.is_file()
-    assert selected_mask_path.is_file()
     assert overlay_path.is_file()
-    assert diagnostics_path.is_file()
+    return {
+        "rgb": rgb,
+        "mask": selected_mask,
+        "point_xy": point_xy,
+        "output_name": output_name,
+        "image_path": image_path,
+        "mask_overlay_path": overlay_path,
+        "diagnostics": diagnostics,
+    }
 
 
 def test_nearest_manual_rgb_component_mask() -> None:
