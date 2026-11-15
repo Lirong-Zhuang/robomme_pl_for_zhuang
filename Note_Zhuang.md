@@ -30,6 +30,61 @@ Although it still shows an `NA / Insufficient Info` branch, the current
 `task_config.v1` contract uses only `completed`, `incomplete`, and `failed`;
 insufficient visual evidence is treated as `incomplete`.
 
+## Benchmark submodule synchronization
+
+`third_party/robomme_benchmark` is a Git submodule. The PL repository records
+one exact benchmark commit rather than copying the benchmark files or following
+the tip of a branch. Its configured URL is the personal fork
+`https://github.com/Lirong-Zhuang/robomme_bm_for_zhuang.git`; the source team's
+repository must not be used as the push target.
+
+When a benchmark change is made locally, first commit and push it to the
+benchmark fork. Then return to the PL repository, commit the updated submodule
+pointer, and push the PL branch. The benchmark commit must be pushed before the
+PL pointer so that another machine can fetch the referenced commit.
+
+After those changes have been pushed, update the server from the PL repository
+root with:
+
+```bash
+git pull --ff-only origin dev_agentic
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+Verify the result with:
+
+```bash
+git status --short
+git submodule status third_party/robomme_benchmark
+```
+
+`git status --short` should have no output. The benchmark SHA should match the
+commit recorded by the PL repository, with a blank prefix rather than `+` or
+`-`. If the server shows a diff that replaces the new benchmark SHA with an old
+one, do **not** commit that diff: it means the PL pointer was pulled but the
+submodule working directory was not updated. Run the synchronization commands
+above instead. If that reverse pointer was already staged, unstage it with:
+
+```bash
+git restore --staged third_party/robomme_benchmark
+```
+
+The following one-time server configuration makes normal Git operations recurse
+into submodules, but the explicit `sync` and `update` commands above remain the
+safest deployment procedure:
+
+```bash
+git config submodule.recurse true
+git config fetch.recurseSubmodules on-demand
+```
+
+Do not use `git submodule update --remote` for deployment. It may follow a
+remote branch tip instead of checking out the exact benchmark commit pinned by
+the PL repository. Before updating, check
+`git -C third_party/robomme_benchmark status --short` and preserve any genuine
+server-side changes rather than overwriting them.
+
 # Trinity
 
 **Base version: Trinity v2.2. Current development branch: Oracle Plus.**
