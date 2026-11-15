@@ -2,14 +2,9 @@
 
 Required services and environments:
 
-1. In terminal A, start the service in the micromamba ``f2g`` environment,
-   using the same paths configured in ``scripts/eval_agentic.sh``::
+1. In terminal A, start the configured standalone F2G service::
 
-       micromamba run -n f2g python scripts/f2g_pose_server.py \
-       --checkpoint /path/to/f2g-pose.pt \
-       --radio-repository /path/to/RADIO \
-       --radio-checkpoint /path/to/radio-v2.5-l_half.pth.tar \
-       --host 127.0.0.1 --port 8765
+       bash scripts/serve_f2g_for_test.sh
 
 2. Edit the configuration block below, then run this file from the repository
    root in the ``robomme`` environment::

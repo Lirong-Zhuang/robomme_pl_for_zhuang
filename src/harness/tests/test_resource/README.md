@@ -42,6 +42,7 @@ point, mask, output, NPZ, and F2G endpoint settings are in the configuration
 block near the top of that file, so the test itself is launched with one line:
 
 ```bash
+bash scripts/serve_f2g_for_test.sh  # terminal A
 python src/harness/tests/test_grounding.py
 ```
 
