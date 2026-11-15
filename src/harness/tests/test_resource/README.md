@@ -34,6 +34,6 @@ runs/agentic/test/grounding/
 ```
 
 The generated artifacts are the raw shade-tolerant color mask, the nearest
-selected component mask, a blue mask overlay and outline, the requested point
-rendered as the same filled yellow dot used by Oracle Plus, and a JSON
-diagnostics file.
+selected component mask, an overlay with the selected pixels painted pure
+black, the requested point rendered as the same filled yellow dot used by
+Oracle Plus, and a JSON diagnostics file.

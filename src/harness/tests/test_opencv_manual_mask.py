@@ -212,20 +212,7 @@ def run_manual_rgb_component_mask() -> None:
     cv2.imwrite(str(raw_mask_path), raw_mask.astype(np.uint8) * 255)
     cv2.imwrite(str(selected_mask_path), selected_mask.astype(np.uint8) * 255)
     overlay_rgb = rgb.copy()
-    # Blue avoids the olive/yellow mixture produced by blending green over a
-    # red target, which can be mistaken for a second target-point marker.
-    mask_blue = np.asarray([0, 80, 255], dtype=np.float32)
-    overlay_rgb[selected_mask] = np.clip(
-        0.55 * overlay_rgb[selected_mask].astype(np.float32) + 0.45 * mask_blue,
-        0,
-        255,
-    ).astype(np.uint8)
-    contours, _ = cv2.findContours(
-        selected_mask.astype(np.uint8),
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
-    )
-    cv2.drawContours(overlay_rgb, contours, -1, (0, 80, 255), 2)
+    overlay_rgb[selected_mask] = (0, 0, 0)
     # Match Oracle Plus target-point rendering: a filled 5 px RGB yellow dot.
     cv2.circle(overlay_rgb, point_xy, 5, (255, 255, 0), -1)
     cv2.imwrite(
