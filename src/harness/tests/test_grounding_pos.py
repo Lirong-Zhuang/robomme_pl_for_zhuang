@@ -38,6 +38,7 @@ import os
 from pathlib import Path
 import sys
 from typing import Any
+from urllib.parse import quote
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -487,6 +488,12 @@ def run_manual_grounding_pose_test() -> None:
         ),
         encoding="utf-8",
     )
+    viewer_url_base = os.environ.get("POSE_VIEWER_URL_BASE", "").rstrip("/")
+    viewer_url = (
+        f"{viewer_url_base}/{quote(viewer_path.name)}"
+        if viewer_url_base
+        else None
+    )
     print(
         json.dumps(
             {
@@ -503,7 +510,10 @@ def run_manual_grounding_pose_test() -> None:
                     "confidence": segmentation.confidence,
                     "diagnostics": dict(segmentation.diagnostics),
                 },
-                "artifacts": {"pose_viewer": str(viewer_path)},
+                "artifacts": {
+                    "pose_viewer": str(viewer_path),
+                    "pose_viewer_url": viewer_url,
+                },
             },
             ensure_ascii=False,
             indent=2,

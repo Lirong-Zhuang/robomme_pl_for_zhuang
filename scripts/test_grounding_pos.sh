@@ -15,9 +15,13 @@ MAMBA_EXE="${MAMBA_EXE:-$MAMBA_ROOT_PREFIX/bin/micromamba}"
 F2G_HOST="127.0.0.1"
 F2G_PORT=8765
 F2G_STARTUP_TIMEOUT="${F2G_STARTUP_TIMEOUT:-300}"
+POSE_VIEWER_HOST="127.0.0.1"
+POSE_VIEWER_PORT="${POSE_VIEWER_PORT:-8000}"
 OUTPUT_DIR="$REPO_ROOT/runs/tests/grounding"
 F2G_LOG="$OUTPUT_DIR/test_grounding_pos_f2g.log"
+POSE_VIEWER_LOG="$OUTPUT_DIR/test_grounding_pos_http.log"
 F2G_PID=""
+POSE_VIEWER_PID=""
 
 stop_process() {
     local pid=$1
@@ -30,6 +34,7 @@ stop_process() {
 cleanup() {
     local exit_code=$?
     trap - EXIT INT TERM
+    stop_process "$POSE_VIEWER_PID"
     stop_process "$F2G_PID"
     exit "$exit_code"
 }
@@ -45,6 +50,11 @@ if ! command -v lsof &>/dev/null; then
 fi
 if lsof -iTCP:"$F2G_PORT" -sTCP:LISTEN &>/dev/null; then
     echo "ERROR: port $F2G_PORT is already in use; stop the existing service first." >&2
+    exit 1
+fi
+if lsof -iTCP:"$POSE_VIEWER_PORT" -sTCP:LISTEN &>/dev/null; then
+    echo "ERROR: pose-viewer port $POSE_VIEWER_PORT is already in use." >&2
+    echo "Choose another one, for example: POSE_VIEWER_PORT=8001 bash scripts/test_grounding_pos.sh" >&2
     exit 1
 fi
 
@@ -72,9 +82,43 @@ done
 echo "F2G is ready at http://$F2G_HOST:$F2G_PORT"
 echo "Running the interactive grounding-pose diagnostic..."
 
+POSE_VIEWER_URL_BASE="http://$POSE_VIEWER_HOST:$POSE_VIEWER_PORT" \
 PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
 "$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
     python "$REPO_ROOT/src/harness/tests/test_grounding_pos.py"
 
 echo "Pose viewer generated successfully."
 echo "F2G log: $F2G_LOG"
+
+# F2G is no longer needed once the self-contained page has been generated.
+stop_process "$F2G_PID"
+F2G_PID=""
+
+echo "Starting the pose-viewer web server..."
+"$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
+    python -m http.server "$POSE_VIEWER_PORT" \
+    --bind "$POSE_VIEWER_HOST" \
+    --directory "$OUTPUT_DIR" \
+    >"$POSE_VIEWER_LOG" 2>&1 &
+POSE_VIEWER_PID=$!
+
+start_time=$SECONDS
+until lsof -iTCP:"$POSE_VIEWER_PORT" -sTCP:LISTEN &>/dev/null; do
+    if ! kill -0 "$POSE_VIEWER_PID" 2>/dev/null; then
+        echo "ERROR: pose-viewer web server exited before listening." >&2
+        tail -n 100 "$POSE_VIEWER_LOG" >&2
+        exit 1
+    fi
+    if ((SECONDS - start_time >= 30)); then
+        echo "ERROR: pose-viewer web server startup timed out." >&2
+        tail -n 100 "$POSE_VIEWER_LOG" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+echo
+echo "Pose viewer is ready. Open the pose_viewer_url printed above."
+echo "If VS Code does not forward it automatically, forward port $POSE_VIEWER_PORT."
+echo "Keep this terminal open while viewing; press Ctrl+C to stop the web server."
+wait "$POSE_VIEWER_PID"
