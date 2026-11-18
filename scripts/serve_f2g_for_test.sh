@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-# Standalone F2G service for src/harness/tests/test_grounding.py.
+# Standalone F2G service for the manual grounding diagnostics.
+# Use scripts/test_grounding_pos.sh when the service and pose-viewer test should
+# run together in one terminal.
 # Edit this configuration block if the server paths differ.
 
 set -Eeuo pipefail
