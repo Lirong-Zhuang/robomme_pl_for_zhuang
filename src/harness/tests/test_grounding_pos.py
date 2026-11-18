@@ -240,6 +240,8 @@ def _viewer_html(
     size_m: Any,
     segmentation: Any,
     f2g_metadata: dict[str, Any],
+    ground_truth_object_to_camera: Any | None = None,
+    ground_truth_size_m: Any | None = None,
 ) -> str:
     import numpy as np
 
@@ -264,6 +266,39 @@ def _viewer_html(
         dtype=np.float64,
     )
     box_corners = (rotation @ local_corners.T).T + origin
+    ground_truth_box_corners: list[list[float]] = []
+    ground_truth_text = "not supplied"
+    if ground_truth_object_to_camera is not None or ground_truth_size_m is not None:
+        if ground_truth_object_to_camera is None or ground_truth_size_m is None:
+            raise ValueError(
+                "ground-truth transform and size must be supplied together"
+            )
+        ground_truth_transform = np.asarray(
+            ground_truth_object_to_camera,
+            dtype=np.float64,
+        )
+        ground_truth_size = np.asarray(
+            ground_truth_size_m,
+            dtype=np.float64,
+        ).reshape(3)
+        if ground_truth_transform.shape != (4, 4):
+            raise ValueError("ground-truth transform must have shape 4x4")
+        ground_truth_half = ground_truth_size / 2.0
+        ground_truth_local_corners = np.sign(local_corners) * ground_truth_half
+        ground_truth_box_corners_array = (
+            ground_truth_transform[:3, :3]
+            @ ground_truth_local_corners.T
+        ).T + ground_truth_transform[:3, 3]
+        ground_truth_box_corners = (
+            ground_truth_box_corners_array.round(7).tolist()
+        )
+        ground_truth_text = json.dumps(
+            {
+                "T_cam_obj": ground_truth_transform.tolist(),
+                "size_m": ground_truth_size.tolist(),
+            },
+            indent=2,
+        )
     axis_length = max(float(np.max(size)) * 0.8, 0.02)
     axes = np.stack(
         (
@@ -277,6 +312,7 @@ def _viewer_html(
         "points": points.round(7).tolist(),
         "colors": colors.tolist(),
         "boxCorners": box_corners.round(7).tolist(),
+        "groundTruthBoxCorners": ground_truth_box_corners,
         "axes": axes.round(7).tolist(),
         "origin": origin.round(7).tolist(),
     }
@@ -346,6 +382,7 @@ def _viewer_html(
         <div class="card"><div class="label">T_cam_obj</div><div class="value">{matrix_text}</div></div>
         <div class="card"><div class="label">Extent XYZ, metres</div><div class="value">{size_text}</div></div>
         <div class="card"><div class="label">Point cloud</div><div class="value">{len(points)} displayed / {total_masked_points} valid masked depth points</div></div>
+        <div class="card"><div class="label">Simulator ground truth</div><div class="value">{ground_truth_text}</div></div>
       </div>
       <details><summary>Segmentation diagnostics</summary><div class="value">{diagnostics_text}</div></details>
       <details><summary>F2G metadata</summary><div class="value">{metadata_text}</div></details>
@@ -359,6 +396,7 @@ def _viewer_html(
       </div>
       <div class="legend">
         <div><span class="swatch" style="background:#ffd43b"></span>F2G OBB</div>
+        <div><span class="swatch" style="background:#48dbe8"></span>Simulator GT OBB</div>
         <div><span class="swatch" style="background:#ff4b4b"></span>X axis</div>
         <div><span class="swatch" style="background:#42d66b"></span>Y axis</div>
         <div><span class="swatch" style="background:#4b91ff"></span>Z axis</div>
@@ -394,7 +432,7 @@ def _viewer_html(
     }}
     function sceneSpan() {{
       let maximum = 0.001;
-      for (const point of data.points.concat(data.boxCorners, data.axes)) {{
+      for (const point of data.points.concat(data.boxCorners, data.groundTruthBoxCorners, data.axes)) {{
         maximum = Math.max(maximum, Math.abs(point[0] - data.origin[0]), Math.abs(point[1] - data.origin[1]), Math.abs(point[2] - data.origin[2]));
       }}
       return maximum * 2.35;
@@ -427,6 +465,10 @@ def _viewer_html(
 
       const box = data.boxCorners.map(project);
       for (const edge of boxEdges) drawLine(box[edge[0]], box[edge[1]], "#ffd43b", 2.0);
+      if (data.groundTruthBoxCorners.length === 8) {{
+        const groundTruthBox = data.groundTruthBoxCorners.map(project);
+        for (const edge of boxEdges) drawLine(groundTruthBox[edge[0]], groundTruthBox[edge[1]], "#48dbe8", 2.4);
+      }}
       const projectedAxes = data.axes.map(project);
       for (let index = 0; index < 3; index += 1) drawLine(projectedAxes[0], projectedAxes[index + 1], axisColors[index], 3.0);
       ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(projectedAxes[0][0], projectedAxes[0][1], 3.2, 0, Math.PI * 2); ctx.fill();

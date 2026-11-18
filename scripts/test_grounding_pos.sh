@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# One-command launcher for the interactive F2G pose-viewer diagnostic.
+# One-command launcher for an interactive F2G pose-viewer diagnostic.
 # It starts the F2G service in the background, waits until it is ready, runs
 # test_grounding_pos.py in the RoboMME environment, and always stops the service.
 
@@ -18,8 +18,10 @@ F2G_STARTUP_TIMEOUT="${F2G_STARTUP_TIMEOUT:-300}"
 POSE_VIEWER_HOST="127.0.0.1"
 POSE_VIEWER_PORT="${POSE_VIEWER_PORT:-8000}"
 OUTPUT_DIR="$REPO_ROOT/runs/tests/grounding"
-F2G_LOG="$OUTPUT_DIR/test_grounding_pos_f2g.log"
-POSE_VIEWER_LOG="$OUTPUT_DIR/test_grounding_pos_http.log"
+GROUNDING_TEST_SCRIPT="${GROUNDING_TEST_SCRIPT:-$REPO_ROOT/src/harness/tests/test_grounding_pos.py}"
+GROUNDING_TEST_LOG_STEM="${GROUNDING_TEST_LOG_STEM:-test_grounding_pos}"
+F2G_LOG="$OUTPUT_DIR/${GROUNDING_TEST_LOG_STEM}_f2g.log"
+POSE_VIEWER_LOG="$OUTPUT_DIR/${GROUNDING_TEST_LOG_STEM}_http.log"
 F2G_PID=""
 POSE_VIEWER_PID=""
 
@@ -42,6 +44,10 @@ trap cleanup EXIT INT TERM
 
 if [[ ! -x "$MAMBA_EXE" ]]; then
     echo "ERROR: micromamba is not executable: $MAMBA_EXE" >&2
+    exit 1
+fi
+if [[ ! -f "$GROUNDING_TEST_SCRIPT" ]]; then
+    echo "ERROR: grounding test does not exist: $GROUNDING_TEST_SCRIPT" >&2
     exit 1
 fi
 if ! command -v lsof &>/dev/null; then
@@ -85,7 +91,7 @@ echo "Running the interactive grounding-pose diagnostic..."
 POSE_VIEWER_URL_BASE="http://$POSE_VIEWER_HOST:$POSE_VIEWER_PORT" \
 PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
 "$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
-    python "$REPO_ROOT/src/harness/tests/test_grounding_pos.py"
+    python "$GROUNDING_TEST_SCRIPT"
 
 echo "Pose viewer generated successfully."
 echo "F2G log: $F2G_LOG"
