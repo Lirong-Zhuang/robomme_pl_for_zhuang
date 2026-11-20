@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
 # More usage of Swift, please refer to https://swift.readthedocs.io/en/latest/BestPractices/Qwen3-VL-Best-Practice.html
 
 
@@ -6,19 +10,30 @@
 # data/robomme_preprocessed_data/qwenvl/grounded_subgoal_train.jsonl
 # data/robomme_preprocessed_data/memer/grounded_subgoal_train.jsonl
 
-DATASET_PATH='data/robomme_preprocessed_dup_binfill_data/qwenvl/simple_subgoal_train.jsonl'
+DATASET_PATH='data/robomme_preprocessed_binfill_data/qwenvl/simple_subgoal_train.jsonl'
 RUN_NAME='qwenvl_baseline_v1.3_simple_subgoal'
 OUTPUT_DIR="runs/ckpts/vlm_subgoal_predictor/${RUN_NAME}"
+QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
 
-PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' \
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+
+if [[ ! -d "$QWEN_BACKBONE_PATH" ]]; then
+    echo "ERROR: Qwen backbone directory not found: $QWEN_BACKBONE_PATH" >&2
+    exit 1
+fi
+
+echo "Qwen backbone: $QWEN_BACKBONE_PATH"
+
+PYTORCH_ALLOC_CONF='expandable_segments:True' \
 IMAGE_MAX_TOKEN_NUM=256 \
 VIDEO_MAX_TOKEN_NUM=64 \
 FPS_MAX_FRAMES=10 \
 NPROC_PER_NODE=1 \
 CUDA_VISIBLE_DEVICES=0 \
 swift sft \
-    --model 'Qwen/Qwen3-VL-4B-Instruct' \
-    --dataset $DATASET_PATH \
+    --model "$QWEN_BACKBONE_PATH" \
+    --dataset "$DATASET_PATH" \
     --split_dataset_ratio 0.1 \
     --eval_strategy steps \
     --eval_steps 50 \
@@ -48,8 +63,8 @@ swift sft \
     --save_total_limit 2 \
     --logging_steps 50 \
     --max_length 3200 \
-    --output_dir $OUTPUT_DIR \
-    --run_name $RUN_NAME \
+    --output_dir "$OUTPUT_DIR" \
+    --run_name "$RUN_NAME" \
     --warmup_ratio 0.05 \
     --dataset_num_proc 8 \
     --dataloader_num_workers 8
