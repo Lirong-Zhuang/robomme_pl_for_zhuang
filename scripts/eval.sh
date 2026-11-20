@@ -24,7 +24,7 @@ cd "$REPO_ROOT"
 #   perceptual-tokendrop-context, perceptual-tokendrop-modul, perceptual-tokendrop-expert
 #   recurrent-rmt-context, recurrent-rmt-modul, recurrent-rmt-expert
 #   recurrent-ttt-context, recurrent-ttt-modul, recurrent-ttt-expert
-MODEL_TYPE="pi05_baseline_lora"
+MODEL_TYPE="symbolic_simpleSG_qwenvl"
 
 # Run the full evaluation matrix sequentially. Each seed/repeat has an
 # independent result directory and a freshly started symbolic policy server.
@@ -32,13 +32,13 @@ SEEDS=(0 42 7)
 NUM_REPEATS=3
 # A 20,000-step run saves its final checkpoint at step 19,999 because training
 # steps are zero-indexed (0..19,999).
-CKPT_ID=20000
+CKPT_ID=79999
 GPU_ID_SERVER=0
 GPU_ID_CLIENT=0
 
 # Pure pi0.5 LoRA policy: no predictor, subgoal, or observation history.
-POLICY_CONFIG="pi05_baseline_lora"
-POLICY_DIR="runs/ckpts/pi05_baseline_lora/vla_baseline_v2/$CKPT_ID"
+POLICY_CONFIG=""
+POLICY_DIR="/data/public/RoboMME/checkpoints/mme_vla_suite/symbolic-simple-subgoal/$CKPT_ID"
 
 # Set PORT=0 to choose a free port automatically.
 HOST="0.0.0.0"
@@ -62,7 +62,7 @@ SAVE_DIR="runs/evaluation"
 # Optional name shared by every seed/repeat in this evaluation run. Results are
 # written under <SAVE_DIR>/<policy>/<EVAL_RUN_NAME>/seed<seed>/repeat<repeat>/.
 # Leave empty to use the predictor name (qwenvl, memer, gemini, or oracle).
-EVAL_RUN_NAME="baseline_v6"
+EVAL_RUN_NAME="baseline_v4"
 # Preserve completed tasks/episodes and continue with anything still missing.
 OVERWRITE=false
 
