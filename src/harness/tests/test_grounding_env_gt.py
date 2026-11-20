@@ -1,21 +1,23 @@
-"""BinFill reset -> simulator GT mask -> F2G pose diagnostic.
+"""BinFill reset -> simulator GT point -> OpenCV mask -> F2G diagnostic.
 
-This test deliberately bypasses the Agentic VLM point and OpenCV segmenter.
-It creates one raw BinFill evaluation scene, calls only ``env.reset()``, picks
-the most visible red cube from the simulator segmentation IDs, and sends that
-cube's exact RGB-D mask to F2G.  The generated viewer compares the observed
-masked point cloud, F2G OBB, and simulator ground-truth OBB in camera space.
+This test deliberately bypasses only the Agentic VLM point. It creates one raw
+BinFill evaluation scene, calls only ``env.reset()``, picks
+the most visible red cube from the simulator segmentation IDs, and uses the
+center of its GT mask only as the input point. OpenCV then selects the nearest
+red component in the grounding-camera RGB image, and only that OpenCV mask is
+sent to F2G. The simulator GT mask and OBB are retained only for evaluation.
 
 Run through the one-terminal launcher from the repository root::
 
     bash scripts/test_grounding_env_gt.sh
 
 Set ``BIN_FILL_EPISODE_ID`` to reproduce a different test episode.  No robot
-action, demonstration wrapper, planner, or grounding segmenter is invoked.
+action, demonstration wrapper, or planner is invoked.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 import itertools
 import json
 import os
@@ -34,16 +36,23 @@ for import_root in (SRC_ROOT, THIRD_PARTY_ROOT, TEST_DIR):
         sys.path.insert(0, str(import_root))
 
 from harness.grounding import F2GClient
+from harness.grounding import OpenCVSegmenter
 from harness.grounding.types import CameraFrame
-from harness.grounding.types import SegmentationResult
+from harness.grounding.visualization import draw_grounding_overlay
+from harness.grounding.visualization import draw_mask_overlay
 from robomme.env_record_wrapper import BenchmarkEnvBuilder
 import robomme.robomme_env  # noqa: F401  # register BinFill with Gymnasium
+from robomme.robomme_env.BinFill import BinFill
 import test_grounding_pos as pose_viewer
 
 
 EPISODE_ID = int(os.environ.get("BIN_FILL_EPISODE_ID", "0"))
 F2G_URL = os.environ.get("F2G_URL", "http://127.0.0.1:8765")
 DEPTH_SCALE = float(os.environ.get("ROBOMME_DEPTH_SCALE", "0.001"))
+GROUNDING_CAMERA_RESOLUTION = int(
+    os.environ.get("GROUNDING_CAMERA_RESOLUTION", "512")
+)
+GROUNDING_CAMERA_NAME = "grounding_camera"
 MAX_DISPLAY_POINTS = 4096
 OUTPUT_DIR = Path(
     os.environ.get(
@@ -51,6 +60,25 @@ OUTPUT_DIR = Path(
         str(REPO_ROOT / "runs" / "tests" / "grounding"),
     )
 ).expanduser()
+
+
+class _BinFillWithGroundingCamera(BinFill):
+    """Keep the policy camera unchanged and add a native grounding camera."""
+
+    @property
+    def _default_sensor_configs(self):
+        base_configs = list(super()._default_sensor_configs)
+        if len(base_configs) != 1 or base_configs[0].uid != "base_camera":
+            raise RuntimeError(
+                "BinFill camera configuration changed; expected one base_camera"
+            )
+        grounding_camera = replace(
+            base_configs[0],
+            uid=GROUNDING_CAMERA_NAME,
+            width=GROUNDING_CAMERA_RESOLUTION,
+            height=GROUNDING_CAMERA_RESOLUTION,
+        )
+        return [*base_configs, grounding_camera]
 
 
 def _to_numpy(value: Any) -> Any:
@@ -87,11 +115,15 @@ def _matrix(value: Any, rows: int, columns: int) -> Any:
     return np.asarray(array, dtype=np.float64).reshape(-1, rows, columns)[-1]
 
 
-def _raw_camera_frame(observation: dict[str, Any]) -> tuple[CameraFrame, Any]:
+def _raw_camera_frame(
+    observation: dict[str, Any],
+    *,
+    camera_name: str = GROUNDING_CAMERA_NAME,
+) -> tuple[CameraFrame, Any]:
     import numpy as np
 
-    sensor_data = observation["sensor_data"]["base_camera"]
-    sensor_param = observation["sensor_param"]["base_camera"]
+    sensor_data = observation["sensor_data"][camera_name]
+    sensor_param = observation["sensor_param"][camera_name]
     rgb = _image(sensor_data["rgb"], channels=3)
     if rgb.dtype != np.uint8:
         if np.issubdtype(rgb.dtype, np.floating) and float(np.nanmax(rgb)) <= 1.0:
@@ -109,7 +141,10 @@ def _raw_camera_frame(observation: dict[str, Any]) -> tuple[CameraFrame, Any]:
             intrinsic=intrinsic,
             world_to_camera=extrinsic,
             depth_scale=DEPTH_SCALE,
-            image_ref=f"binfill_test_ep_{EPISODE_ID}_reset",
+            image_ref=(
+                f"binfill_test_ep_{EPISODE_ID}_{camera_name}_"
+                f"{rgb.shape[1]}x{rgb.shape[0]}_reset"
+            ),
         ),
         np.asarray(segmentation),
     )
@@ -226,11 +261,13 @@ def _point_cloud_gt_consistency(
 
 
 def run_environment_ground_truth_test() -> None:
-    import gymnasium as gym
+    import cv2
     import numpy as np
 
     if EPISODE_ID < 0:
         raise ValueError("BIN_FILL_EPISODE_ID must be non-negative")
+    if GROUNDING_CAMERA_RESOLUTION <= 0:
+        raise ValueError("GROUNDING_CAMERA_RESOLUTION must be positive")
     builder = BenchmarkEnvBuilder(
         env_id="BinFill",
         dataset="test",
@@ -249,36 +286,58 @@ def run_environment_ground_truth_test() -> None:
     if difficulty:
         env_kwargs["difficulty"] = difficulty
 
-    env = gym.make("BinFill", **env_kwargs)
+    env = _BinFillWithGroundingCamera(**env_kwargs)
     try:
         # This is intentionally the only environment transition in this test.
         observation, _ = env.reset()
         base_env = env.unwrapped
         frame, raw_segmentation = _raw_camera_frame(observation)
-        actor, segmentation_ids, mask = _most_visible_red_cube(
+        base_camera_rgb = _image(
+            observation["sensor_data"]["base_camera"]["rgb"],
+            channels=3,
+        )
+        actor, segmentation_ids, simulator_gt_mask = _most_visible_red_cube(
             base_env,
             raw_segmentation,
         )
-        pixel_y, pixel_x = np.nonzero(mask)
+        pixel_y, pixel_x = np.nonzero(simulator_gt_mask)
         point_xy = (
             int(np.rint(np.mean(pixel_x))),
             int(np.rint(np.mean(pixel_y))),
         )
-        segmentation = SegmentationResult(
-            mask=mask,
-            confidence=1.0,
-            profile="simulator_ground_truth",
+        segmentation = OpenCVSegmenter().segment(
+            frame,
             point_xy=point_xy,
+            color_hint="red",
+            profile_name="compact_colored",
+        )
+        segmentation = replace(
+            segmentation,
             diagnostics={
-                "source": "BinFill base_camera segmentation",
+                **dict(segmentation.diagnostics),
+                "source": f"BinFill {GROUNDING_CAMERA_NAME} RGB via OpenCV",
+                "input_point_source": "simulator GT mask centroid",
                 "actor_name": str(getattr(actor, "name", "unnamed")),
                 "segmentation_ids": segmentation_ids,
-                "mask_pixels": int(np.count_nonzero(mask)),
-                "bypassed": ["VLM point", "OpenCV segmenter"],
+                "simulator_gt_mask_pixels": int(
+                    np.count_nonzero(simulator_gt_mask)
+                ),
+                "bypassed": ["VLM point"],
                 "environment_transitions": ["reset"],
                 "robot_actions": 0,
             },
         )
+        mask = segmentation.mask
+        mask_intersection = int(np.count_nonzero(mask & simulator_gt_mask))
+        mask_union = int(np.count_nonzero(mask | simulator_gt_mask))
+        opencv_mask_comparison = {
+            "opencv_mask_pixels": int(np.count_nonzero(mask)),
+            "simulator_gt_mask_pixels": int(
+                np.count_nonzero(simulator_gt_mask)
+            ),
+            "intersection_pixels": mask_intersection,
+            "iou": float(mask_intersection / mask_union) if mask_union else 1.0,
+        }
         points_camera, colors_rgb, total_points = pose_viewer._masked_camera_cloud(
             frame,
             mask,
@@ -294,9 +353,16 @@ def run_environment_ground_truth_test() -> None:
             ground_truth_size,
         )
 
-        client = F2GClient(base_url=F2G_URL)
+        client = F2GClient(
+            base_url=F2G_URL,
+            input_size=(GROUNDING_CAMERA_RESOLUTION, GROUNDING_CAMERA_RESOLUTION),
+        )
         health = client.health()
         prediction = client.predict(frame, mask)
+        if prediction.points_camera is None:
+            raise RuntimeError(
+                "F2G response did not include its completed point cloud"
+            )
 
         predicted_transform = np.asarray(
             prediction.object_to_camera,
@@ -315,8 +381,8 @@ def run_environment_ground_truth_test() -> None:
         )
         if point_cloud_consistency["inside_fraction"] < 0.9:
             diagnosis_hint = (
-                "GT-masked depth cloud is inconsistent with the simulator GT "
-                "box; inspect RGB-depth-segmentation alignment or camera transforms"
+                "OpenCV-masked depth cloud is inconsistent with the simulator "
+                "GT box; inspect the OpenCV mask or RGB-depth alignment"
             )
         elif (
             center_error_m > 0.02
@@ -324,7 +390,7 @@ def run_environment_ground_truth_test() -> None:
             or rotation_error_deg > 20.0
         ):
             diagnosis_hint = (
-                "GT-masked depth cloud agrees with the simulator, but F2G has a "
+                "OpenCV-masked depth cloud agrees with the simulator, but F2G has a "
                 "large pose/size error; the remaining failure is downstream of "
                 "mask acquisition"
             )
@@ -335,12 +401,30 @@ def run_environment_ground_truth_test() -> None:
             )
 
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        stem = f"binfill_ep_{EPISODE_ID}_red_gt_mask"
+        stem = f"binfill_ep_{EPISODE_ID}_red_opencv_mask"
         viewer_path = (OUTPUT_DIR / f"{stem}_pose_viewer.html").resolve()
+        overlay_path = (OUTPUT_DIR / f"{stem}_grounding_overlay.png").resolve()
         input_path = (OUTPUT_DIR / f"{stem}_input.npz").resolve()
+        masked_rgb = draw_mask_overlay(frame.rgb, [segmentation])
+        overlay_rgb = draw_grounding_overlay(
+            masked_rgb,
+            intrinsic=frame.intrinsic,
+            predictions=[
+                (
+                    predicted_transform,
+                    predicted_size,
+                    point_xy,
+                )
+            ],
+        )
+        if not cv2.imwrite(
+            str(overlay_path),
+            cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR),
+        ):
+            raise RuntimeError(f"failed to write grounding overlay: {overlay_path}")
         viewer_path.write_text(
             pose_viewer._viewer_html(
-                rgb=frame.rgb,
+                rgb=overlay_rgb,
                 point_xy=point_xy,
                 points_camera=points_camera,
                 colors_rgb=colors_rgb,
@@ -349,6 +433,7 @@ def run_environment_ground_truth_test() -> None:
                 size_m=predicted_size,
                 segmentation=segmentation,
                 f2g_metadata=dict(prediction.metadata),
+                completed_points_camera=prediction.points_camera,
                 ground_truth_object_to_camera=ground_truth_camera,
                 ground_truth_size_m=ground_truth_size,
             ),
@@ -361,11 +446,13 @@ def run_environment_ground_truth_test() -> None:
             intrinsic=frame.intrinsic,
             world_to_camera=frame.world_to_camera,
             depth_scale=np.asarray(frame.depth_scale),
-            simulator_mask=mask,
+            opencv_mask=mask,
+            simulator_gt_mask=simulator_gt_mask,
             simulator_T_cam_obj=ground_truth_camera,
             simulator_size_m=ground_truth_size,
             f2g_T_cam_obj=predicted_transform,
             f2g_size_m=predicted_size,
+            f2g_completed_points_cam_m=prediction.points_camera,
         )
         viewer_url_base = os.environ.get("POSE_VIEWER_URL_BASE", "").rstrip("/")
         viewer_url = (
@@ -382,14 +469,28 @@ def run_environment_ground_truth_test() -> None:
                         "seed": seed,
                         "difficulty": difficulty,
                         "robot_actions": 0,
-                        "mask_source": "simulator ground truth",
-                        "bypassed": ["VLM point", "OpenCV segmenter"],
+                        "input_point_source": "simulator GT mask centroid",
+                        "mask_source": (
+                            "OpenCV nearest red component from grounding_camera RGB"
+                        ),
+                        "cameras": {
+                            "base_camera": {
+                                "width": int(base_camera_rgb.shape[1]),
+                                "height": int(base_camera_rgb.shape[0]),
+                            },
+                            GROUNDING_CAMERA_NAME: {
+                                "width": int(frame.rgb.shape[1]),
+                                "height": int(frame.rgb.shape[0]),
+                            },
+                        },
+                        "bypassed": ["VLM point"],
                     },
                     "selected_actor": {
                         "name": str(getattr(actor, "name", "unnamed")),
                         "segmentation_ids": segmentation_ids,
-                        "mask_pixels": int(np.count_nonzero(mask)),
+                        "input_point_xy": list(point_xy),
                     },
+                    "opencv_mask_vs_simulator_gt": opencv_mask_comparison,
                     "f2g_health": health,
                     "comparison": {
                         "center_error_m": center_error_m,
@@ -409,11 +510,15 @@ def run_environment_ground_truth_test() -> None:
                     "f2g": {
                         "T_cam_obj": predicted_transform.tolist(),
                         "size_m": predicted_size.tolist(),
+                        "completed_point_count": int(
+                            prediction.points_camera.shape[0]
+                        ),
                         "metadata": dict(prediction.metadata),
                     },
                     "artifacts": {
                         "pose_viewer": str(viewer_path),
                         "pose_viewer_url": viewer_url,
+                        "grounding_overlay": str(overlay_path),
                         "reproduction_npz": str(input_path),
                     },
                 },
@@ -421,6 +526,9 @@ def run_environment_ground_truth_test() -> None:
                 indent=2,
             )
         )
+        assert viewer_path.is_file()
+        assert overlay_path.is_file()
+        assert input_path.is_file()
     finally:
         env.close()
 

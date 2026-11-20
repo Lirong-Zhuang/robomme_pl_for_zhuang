@@ -105,9 +105,14 @@ class F2GClient:
         return F2GPrediction(
             object_to_camera=np.asarray(transform, dtype=np.float64),
             size_m=np.asarray(size, dtype=np.float64),
+            points_camera=(
+                np.asarray(result["points_cam_m"], dtype=np.float64)
+                if "points_cam_m" in result
+                else None
+            ),
             metadata={
                 key: value
                 for key, value in result.items()
-                if key not in {"T_cam_obj", "size_m"}
+                if key not in {"T_cam_obj", "size_m", "points_cam_m"}
             },
         )

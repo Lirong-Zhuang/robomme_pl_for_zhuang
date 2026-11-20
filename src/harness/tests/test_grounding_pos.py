@@ -18,15 +18,11 @@ test processes, use the following two-terminal workflow:
        python src/harness/tests/test_grounding_pos.py
 
 The configured PNG and ``grounding_input.npz`` must both be present in
-``test_resource``.  Unlike ``test_grounding.py``, this diagnostic writes no
-overlay PNGs.  It writes one self-contained HTML page containing the source
-image, the masked RGB-D point cloud, the F2G oriented bounding box, and the F2G
-object-frame axes.  Drag the 3D view to rotate, use the mouse wheel to zoom,
-and press ``r`` to reset the view.
-
-The current F2G HTTP protocol returns pose and metric size, but not F2G's
-completed shape.  The displayed cloud is therefore the observed masked depth
-cloud.  It is intentionally labelled as such in the viewer.
+``test_resource``.  This diagnostic writes a grounding-overlay PNG and one
+self-contained HTML page containing that overlay, the observed masked RGB-D
+cloud, F2G's completed cloud, its oriented bounding box, and its object-frame
+axes.  Drag the 3D view to rotate, use the mouse wheel to zoom, and press ``r``
+to reset the view.
 """
 
 from __future__ import annotations
@@ -226,6 +222,7 @@ def _viewer_html(
     size_m: Any,
     segmentation: Any,
     f2g_metadata: dict[str, Any],
+    completed_points_camera: Any | None = None,
     ground_truth_object_to_camera: Any | None = None,
     ground_truth_size_m: Any | None = None,
 ) -> str:
@@ -235,6 +232,23 @@ def _viewer_html(
     size = np.asarray(size_m, dtype=np.float64).reshape(3)
     points = np.asarray(points_camera, dtype=np.float64)
     colors = np.asarray(colors_rgb, dtype=np.uint8)
+    completed_points = (
+        np.empty((0, 3), dtype=np.float64)
+        if completed_points_camera is None
+        else np.asarray(completed_points_camera, dtype=np.float64)
+    )
+    if completed_points.ndim != 2 or completed_points.shape[1] != 3:
+        raise ValueError("completed F2G points must have shape Nx3")
+    if not np.all(np.isfinite(completed_points)):
+        raise ValueError("completed F2G points must be finite")
+    if completed_points.shape[0] > 8192:
+        selected = np.linspace(
+            0,
+            completed_points.shape[0] - 1,
+            8192,
+            dtype=np.int64,
+        )
+        completed_points = completed_points[selected]
     origin = transform[:3, 3]
     rotation = transform[:3, :3]
     half = size / 2.0
@@ -297,6 +311,7 @@ def _viewer_html(
     payload = {
         "points": points.round(7).tolist(),
         "colors": colors.tolist(),
+        "completedPoints": completed_points.round(7).tolist(),
         "boxCorners": box_corners.round(7).tolist(),
         "groundTruthBoxCorners": ground_truth_box_corners,
         "axes": axes.round(7).tolist(),
@@ -367,7 +382,7 @@ def _viewer_html(
       <div class="cards">
         <div class="card"><div class="label">T_cam_obj</div><div class="value">{matrix_text}</div></div>
         <div class="card"><div class="label">Extent XYZ, metres</div><div class="value">{size_text}</div></div>
-        <div class="card"><div class="label">Point cloud</div><div class="value">{len(points)} displayed / {total_masked_points} valid masked depth points</div></div>
+        <div class="card"><div class="label">Point clouds</div><div class="value">{len(points)} displayed / {total_masked_points} valid masked depth points · {len(completed_points)} F2G completed points</div></div>
         <div class="card"><div class="label">Simulator ground truth</div><div class="value">{ground_truth_text}</div></div>
       </div>
       <details><summary>Segmentation diagnostics</summary><div class="value">{diagnostics_text}</div></details>
@@ -381,6 +396,7 @@ def _viewer_html(
         <div class="hud-line" id="angles"></div>
       </div>
       <div class="legend">
+        <div><span class="swatch" style="background:#9aa0a6"></span>F2G completed cloud</div>
         <div><span class="swatch" style="background:#ffd43b"></span>F2G OBB</div>
         <div><span class="swatch" style="background:#48dbe8"></span>Simulator GT OBB</div>
         <div><span class="swatch" style="background:#ff4b4b"></span>X axis</div>
@@ -418,7 +434,7 @@ def _viewer_html(
     }}
     function sceneSpan() {{
       let maximum = 0.001;
-      for (const point of data.points.concat(data.boxCorners, data.groundTruthBoxCorners, data.axes)) {{
+      for (const point of data.points.concat(data.completedPoints, data.boxCorners, data.groundTruthBoxCorners, data.axes)) {{
         maximum = Math.max(maximum, Math.abs(point[0] - data.origin[0]), Math.abs(point[1] - data.origin[1]), Math.abs(point[2] - data.origin[2]));
       }}
       return maximum * 2.35;
@@ -440,6 +456,12 @@ def _viewer_html(
       ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
       const scale = Math.min(width, height) * .78 / sceneSpan() * zoom;
       const project = point => {{ const p = rotated(point); return [width / 2 + p[0] * scale, height / 2 - p[1] * scale, p[2]]; }};
+
+      const projectedCompleted = data.completedPoints.map(project).sort((a, b) => a[2] - b[2]);
+      for (const point of projectedCompleted) {{
+        ctx.fillStyle = "#9aa0a6";
+        ctx.beginPath(); ctx.arc(point[0], point[1], 1.6, 0, Math.PI * 2); ctx.fill();
+      }}
 
       const projectedPoints = data.points.map((point, index) => {{ const p = project(point); return [p[0], p[1], p[2], index]; }});
       projectedPoints.sort((a, b) => a[2] - b[2]);
@@ -532,6 +554,7 @@ def run_manual_grounding_pose_test() -> None:
             size_m=prediction.size_m,
             segmentation=segmentation,
             f2g_metadata=dict(prediction.metadata),
+            completed_points_camera=prediction.points_camera,
         ),
         encoding="utf-8",
     )
@@ -570,6 +593,33 @@ def run_manual_grounding_pose_test() -> None:
     assert np.isfinite(prediction.object_to_camera).all()
     assert viewer_path.is_file()
     assert overlay_path.is_file()
+
+
+def test_viewer_embeds_completed_f2g_points_in_gray() -> None:
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    transform = np.eye(4)
+    transform[2, 3] = 1.0
+    html = _viewer_html(
+        rgb=np.zeros((20, 20, 3), dtype=np.uint8),
+        point_xy=(10, 10),
+        points_camera=np.asarray([[0.0, 0.0, 1.0]]),
+        colors_rgb=np.asarray([[255, 0, 0]], dtype=np.uint8),
+        total_masked_points=1,
+        object_to_camera=transform,
+        size_m=np.asarray([0.1, 0.1, 0.1]),
+        segmentation=SimpleNamespace(diagnostics={}),
+        f2g_metadata={},
+        completed_points_camera=np.asarray(
+            [[0.0, 0.0, 1.0], [0.01, 0.0, 1.0]]
+        ),
+    )
+
+    assert '"completedPoints":[[0.0,0.0,1.0],[0.01,0.0,1.0]]' in html
+    assert "2 F2G completed points" in html
+    assert "#9aa0a6" in html
 
 
 def test_manual_grounding_pose() -> None:

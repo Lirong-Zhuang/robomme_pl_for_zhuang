@@ -102,11 +102,12 @@ class F2GRequestHandler(BaseHTTPRequestHandler):
                     intrinsic,
                     mask,
                     depth_scale=depth_scale,
-                    return_shape=False,
+                    return_shape=True,
                 )
             response = {
                 "T_cam_obj": _json_array(result["T_cam_obj"]),
                 "size_m": _json_array(result["size_m"]),
+                "points_cam_m": _json_array(result["points_cam_m"]),
                 "coordinate_frame": "camera: x right, y down, z forward",
                 "protocol": "f2g-npz-v1",
             }

@@ -101,6 +101,7 @@ class SegmentationResult:
 class F2GPrediction:
     object_to_camera: np.ndarray
     size_m: np.ndarray
+    points_camera: np.ndarray | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -112,5 +113,13 @@ class F2GPrediction:
             raise ValueError("F2G size_m must contain three positive values")
         if not np.all(np.isfinite(transform)) or not np.all(np.isfinite(size)):
             raise ValueError("F2G prediction must contain finite values")
+        points = self.points_camera
+        if points is not None:
+            points = np.asarray(points, dtype=np.float64)
+            if points.ndim != 2 or points.shape[1] != 3:
+                raise ValueError("F2G points_camera must have shape Nx3")
+            if not np.all(np.isfinite(points)):
+                raise ValueError("F2G points_camera must contain finite values")
         object.__setattr__(self, "object_to_camera", transform)
         object.__setattr__(self, "size_m", size)
+        object.__setattr__(self, "points_camera", points)

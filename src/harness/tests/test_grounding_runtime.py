@@ -64,11 +64,15 @@ def test_f2g_client_resizes_only_serialized_inputs(
         with np.load(io.BytesIO(request.data)) as payload:
             captured.update({key: payload[key] for key in payload.files})
         return json.dumps(
-            {"T_cam_obj": np.eye(4).tolist(), "size_m": [0.1, 0.1, 0.1]}
+            {
+                "T_cam_obj": np.eye(4).tolist(),
+                "size_m": [0.1, 0.1, 0.1],
+                "points_cam_m": [[0.0, 0.0, 0.7], [0.01, 0.0, 0.7]],
+            }
         ).encode()
 
     monkeypatch.setattr(F2GClient, "_request", fake_request)
-    F2GClient(input_size=input_size).predict(frame, mask)
+    prediction = F2GClient(input_size=input_size).predict(frame, mask)
 
     target_height, target_width = input_size
     assert captured["rgb"].shape == (target_height, target_width, 3)
@@ -83,6 +87,11 @@ def test_f2g_client_resizes_only_serialized_inputs(
         ],
     )
     assert frame.rgb.shape == (12, 16, 3)
+    np.testing.assert_allclose(
+        prediction.points_camera,
+        [[0.0, 0.0, 0.7], [0.01, 0.0, 0.7]],
+    )
+    assert "points_cam_m" not in prediction.metadata
 
 
 def test_object_to_world_uses_world_to_camera_extrinsic() -> None:

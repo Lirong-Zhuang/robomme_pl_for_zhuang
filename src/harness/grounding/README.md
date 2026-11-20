@@ -4,9 +4,10 @@ This package is the only owner of object perception for the new harness path.
 The in-task VLM supplies image-space `point_xy` and, only for catalog actions
 that require it, `color_hint`. OpenCV turns that hint into a binary mask. F2G
 turns aligned RGB, raw depth, camera intrinsics, and that mask into
-`T_cam_obj` and metric `size_m`. The transform module converts the prediction
-to a world-frame `ObjectEstimate`, which the action registry binds to the
-ported Oracle Plus function.
+`T_cam_obj`, metric `size_m`, and a completed camera-frame point cloud. The
+transform module converts the pose and size prediction to a world-frame
+`ObjectEstimate`, which the action registry binds to the ported Oracle Plus
+function.
 
 ## Process boundary
 
