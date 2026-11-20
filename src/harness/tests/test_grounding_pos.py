@@ -59,7 +59,9 @@ import test_opencv_manual_mask as manual_mask
 IMAGE_NAME = "red_cube_only.png"
 COLOR_HINT = "red"
 POINT_XY = (120, 110)
-OUTPUT_NAME = "red_grounding_pose_1"
+OUTPUT_DIR = Path(
+    os.environ.get("GROUNDING_OUTPUT_DIR", str(manual_mask.OUTPUT_DIR))
+).expanduser()
 GROUNDING_INPUT_NAME = "grounding_input.npz"
 F2G_URL = "http://127.0.0.1:8765"
 MAX_DISPLAY_POINTS = 2048
@@ -78,22 +80,6 @@ def _safe_resource_name(value: str, *, setting: str) -> str:
     name = value.strip()
     if not name or Path(name).name != name:
         raise ValueError(f"{setting} must be one filename inside test_resource")
-    return name
-
-
-def _safe_output_name() -> str:
-    name = OUTPUT_NAME.strip()
-    if (
-        not name
-        or Path(name).name != name
-        or any(
-            not (character.isalnum() or character in {"-", "_"})
-            for character in name
-        )
-    ):
-        raise ValueError(
-            "OUTPUT_NAME may contain only letters, numbers, hyphens, and underscores"
-        )
     return name
 
 
@@ -489,7 +475,11 @@ def _viewer_html(
 
 
 def run_manual_grounding_pose_test() -> None:
+    import cv2
     import numpy as np
+
+    from harness.grounding.visualization import draw_grounding_overlay
+    from harness.grounding.visualization import draw_mask_overlay
 
     rgb, depth, intrinsic, depth_scale, world_to_camera = (
         _load_rgb_and_grounding_input()
@@ -511,11 +501,26 @@ def run_manual_grounding_pose_test() -> None:
     client = F2GClient(base_url=F2G_URL)
     health = client.health()
     prediction = client.predict(frame, segmentation.mask)
-    output_name = _safe_output_name()
-    manual_mask.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    viewer_path = (
-        manual_mask.OUTPUT_DIR / f"{output_name}_pose_viewer.html"
-    ).resolve()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    viewer_path = (OUTPUT_DIR / "pose_viewer.html").resolve()
+    overlay_path = (OUTPUT_DIR / "grounding_overlay.png").resolve()
+    masked_rgb = draw_mask_overlay(rgb, [segmentation])
+    overlay_rgb = draw_grounding_overlay(
+        masked_rgb,
+        intrinsic=intrinsic,
+        predictions=[
+            (
+                prediction.object_to_camera,
+                prediction.size_m,
+                segmentation.point_xy,
+            )
+        ],
+    )
+    if not cv2.imwrite(
+        str(overlay_path),
+        cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR),
+    ):
+        raise RuntimeError(f"failed to write grounding overlay: {overlay_path}")
     viewer_path.write_text(
         _viewer_html(
             rgb=rgb,
@@ -555,6 +560,7 @@ def run_manual_grounding_pose_test() -> None:
                 "artifacts": {
                     "pose_viewer": str(viewer_path),
                     "pose_viewer_url": viewer_url,
+                    "grounding_overlay": str(overlay_path),
                 },
             },
             ensure_ascii=False,
@@ -563,6 +569,7 @@ def run_manual_grounding_pose_test() -> None:
     )
     assert np.isfinite(prediction.object_to_camera).all()
     assert viewer_path.is_file()
+    assert overlay_path.is_file()
 
 
 def test_manual_grounding_pose() -> None:

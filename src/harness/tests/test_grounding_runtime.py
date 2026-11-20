@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import io
+import json
+
 import numpy as np
 import pytest
 
+from harness.grounding.f2g_client import F2GClient
 from harness.grounding.observation import camera_frame_from_robomme
 from harness.grounding.observation import depth_statistics
 from harness.grounding.transforms import object_to_world
@@ -43,6 +47,42 @@ def test_adapter_rejects_signed_depth_overflow() -> None:
 
     with pytest.raises(ValueError, match="negative integers"):
         camera_frame_from_robomme(obs, info, depth_scale=0.001)
+
+
+@pytest.mark.parametrize("input_size", [(256, 256), (512, 512), (768, 768)])
+def test_f2g_client_resizes_only_serialized_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    input_size: tuple[int, int],
+) -> None:
+    obs, info = _camera_inputs()
+    frame = camera_frame_from_robomme(obs, info, depth_scale=0.001)
+    mask = np.zeros((12, 16), dtype=bool)
+    mask[2:10, 4:12] = True
+    captured: dict[str, np.ndarray] = {}
+
+    def fake_request(_client: F2GClient, request) -> bytes:
+        with np.load(io.BytesIO(request.data)) as payload:
+            captured.update({key: payload[key] for key in payload.files})
+        return json.dumps(
+            {"T_cam_obj": np.eye(4).tolist(), "size_m": [0.1, 0.1, 0.1]}
+        ).encode()
+
+    monkeypatch.setattr(F2GClient, "_request", fake_request)
+    F2GClient(input_size=input_size).predict(frame, mask)
+
+    target_height, target_width = input_size
+    assert captured["rgb"].shape == (target_height, target_width, 3)
+    assert captured["depth"].shape == input_size
+    assert captured["mask"].shape == input_size
+    np.testing.assert_allclose(
+        captured["intrinsic"],
+        [
+            [100 * target_width / 16, 0, 8 * target_width / 16],
+            [0, 100 * target_height / 12, 6 * target_height / 12],
+            [0, 0, 1],
+        ],
+    )
+    assert frame.rgb.shape == (12, 16, 3)
 
 
 def test_object_to_world_uses_world_to_camera_extrinsic() -> None:

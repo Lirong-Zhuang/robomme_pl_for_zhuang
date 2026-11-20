@@ -12,16 +12,19 @@ cd "$REPO_ROOT"
 EVAL_MAMBA_ENV="robomme"
 MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-/data/zhuanglr/micromamba}"
 MAMBA_EXE="${MAMBA_EXE:-$MAMBA_ROOT_PREFIX/bin/micromamba}"
+
+# Output configuration. Edit this name for each experiment.
+RUN_NAME="${GROUNDING_RUN_NAME:-grounding_pose_run}"
+
 F2G_HOST="127.0.0.1"
 F2G_PORT=8765
 F2G_STARTUP_TIMEOUT="${F2G_STARTUP_TIMEOUT:-300}"
 POSE_VIEWER_HOST="127.0.0.1"
 POSE_VIEWER_PORT="${POSE_VIEWER_PORT:-8000}"
-OUTPUT_DIR="$REPO_ROOT/runs/tests/grounding"
+OUTPUT_DIR="$REPO_ROOT/runs/tests/grounding/$RUN_NAME"
 GROUNDING_TEST_SCRIPT="${GROUNDING_TEST_SCRIPT:-$REPO_ROOT/src/harness/tests/test_grounding_pos.py}"
-GROUNDING_TEST_LOG_STEM="${GROUNDING_TEST_LOG_STEM:-test_grounding_pos}"
-F2G_LOG="$OUTPUT_DIR/${GROUNDING_TEST_LOG_STEM}_f2g.log"
-POSE_VIEWER_LOG="$OUTPUT_DIR/${GROUNDING_TEST_LOG_STEM}_http.log"
+F2G_LOG="$OUTPUT_DIR/f2g.log"
+POSE_VIEWER_LOG="$OUTPUT_DIR/http.log"
 F2G_PID=""
 POSE_VIEWER_PID=""
 
@@ -42,6 +45,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [[ ! "$RUN_NAME" =~ ^[[:alnum:]_-]+$ ]]; then
+    echo "ERROR: RUN_NAME may contain only letters, numbers, hyphens, and underscores." >&2
+    exit 1
+fi
 if [[ ! -x "$MAMBA_EXE" ]]; then
     echo "ERROR: micromamba is not executable: $MAMBA_EXE" >&2
     exit 1
@@ -89,6 +96,7 @@ echo "F2G is ready at http://$F2G_HOST:$F2G_PORT"
 echo "Running the interactive grounding-pose diagnostic..."
 
 POSE_VIEWER_URL_BASE="http://$POSE_VIEWER_HOST:$POSE_VIEWER_PORT" \
+GROUNDING_OUTPUT_DIR="$OUTPUT_DIR" \
 PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
 "$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
     python "$GROUNDING_TEST_SCRIPT"

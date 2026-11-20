@@ -10,6 +10,7 @@ from urllib.error import URLError
 from urllib.request import Request
 from urllib.request import urlopen
 
+import cv2
 import numpy as np
 
 from .types import CameraFrame
@@ -26,6 +27,7 @@ class F2GClient:
 
     base_url: str = "http://127.0.0.1:8765"
     timeout_s: float = 120.0
+    input_size: tuple[int, int] = (256, 256)
 
     def _request(self, request: Request) -> bytes:
         try:
@@ -52,13 +54,37 @@ class F2GClient:
         mask = np.asarray(mask)
         if mask.shape != frame.depth.shape:
             raise ValueError("F2G mask must be aligned with RGB and depth")
+        target_height, target_width = self.input_size
+        if target_height <= 0 or target_width <= 0:
+            raise ValueError("F2G input_size must contain positive height/width")
+
+        source_height, source_width = frame.rgb.shape[:2]
+        rgb = cv2.resize(
+            frame.rgb,
+            (target_width, target_height),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        depth = cv2.resize(
+            frame.depth,
+            (target_width, target_height),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        mask = cv2.resize(
+            mask.astype(np.uint8),
+            (target_width, target_height),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        intrinsic = frame.intrinsic.copy()
+        intrinsic[0, :] *= target_width / source_width
+        intrinsic[1, :] *= target_height / source_height
+
         buffer = io.BytesIO()
         np.savez_compressed(
             buffer,
-            rgb=frame.rgb,
-            depth=frame.depth,
-            intrinsic=frame.intrinsic,
-            mask=mask.astype(np.uint8) * 255,
+            rgb=rgb,
+            depth=depth,
+            intrinsic=intrinsic,
+            mask=mask * 255,
             depth_scale=np.asarray(frame.depth_scale, dtype=np.float64),
         )
         request = Request(

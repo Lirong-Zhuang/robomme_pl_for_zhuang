@@ -45,7 +45,12 @@ EPISODE_ID = int(os.environ.get("BIN_FILL_EPISODE_ID", "0"))
 F2G_URL = os.environ.get("F2G_URL", "http://127.0.0.1:8765")
 DEPTH_SCALE = float(os.environ.get("ROBOMME_DEPTH_SCALE", "0.001"))
 MAX_DISPLAY_POINTS = 4096
-OUTPUT_DIR = REPO_ROOT / "runs" / "tests" / "grounding"
+OUTPUT_DIR = Path(
+    os.environ.get(
+        "GROUNDING_OUTPUT_DIR",
+        str(REPO_ROOT / "runs" / "tests" / "grounding"),
+    )
+).expanduser()
 
 
 def _to_numpy(value: Any) -> Any:
