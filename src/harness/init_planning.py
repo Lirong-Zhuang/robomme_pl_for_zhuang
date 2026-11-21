@@ -61,6 +61,18 @@ FOLLOWUP_PLACEHOLDERS = {
     "{recent_observations}",
     "{current_subgoal_sequence}",
 }
+REQUIRED_VLM_GROUNDING_SYSTEM_PHRASES = (
+    "vlm grounding",
+    (
+        "vlm grounding requirement is determined by the selected action's "
+        "trusted perception contract, not by the vlm."
+    ),
+    "apply pixel-grounding rules only when perception.mode=vlm_points.",
+    (
+        "for perception.mode=none, perception.mode=scene_target_set, or stop, "
+        "return exactly"
+    ),
+)
 
 
 DIRECT_SERVICE_ADAPTER = """
@@ -210,6 +222,14 @@ def validate_task_config(
             if term not in text:
                 raise ValueError(f"{name} prompt omits {term!r}")
         system_prompt = prompt["system_prompt"]
+        system_prompt_casefold = " ".join(system_prompt.casefold().split())
+        for phrase in REQUIRED_VLM_GROUNDING_SYSTEM_PHRASES:
+            normalized_phrase = " ".join(phrase.casefold().split())
+            if normalized_phrase not in system_prompt_casefold:
+                raise ValueError(
+                    f"{name} system prompt omits required VLM grounding "
+                    f"routing text: {phrase!r}"
+                )
         tokens = set(re.findall(r"\b[a-z][a-z0-9_]*\b", system_prompt))
         if tokens & subgoal_keys != subgoal_keys:
             raise ValueError(f"{name} system prompt omits a subgoal key")

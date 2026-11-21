@@ -14,9 +14,11 @@ __all__ = [
     "GroundingOutput",
     "GroundingPipeline",
     "OpenCVSegmenter",
+    "camera_frame_from_maniskill",
     "camera_frame_from_robomme",
     "depth_statistics",
     "normalize_vlm_grounding",
+    "remap_grounding_points",
 ]
 
 
@@ -31,7 +33,12 @@ def __getattr__(name: str) -> Any:
         from . import grounder
 
         return getattr(grounder, name)
-    if name in {"camera_frame_from_robomme", "depth_statistics"}:
+    if name in {
+        "camera_frame_from_maniskill",
+        "camera_frame_from_robomme",
+        "depth_statistics",
+        "remap_grounding_points",
+    }:
         from . import observation
 
         return getattr(observation, name)

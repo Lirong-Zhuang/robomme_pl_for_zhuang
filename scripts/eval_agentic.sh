@@ -36,8 +36,13 @@ MAX_INITIAL_OBSERVATIONS=16
 PLANNER_ATTEMPTS=3
 DEPTH_SCALE=0.001
 
+# Native square resolution used by the independent grounding camera and F2G.
+# The VLM/policy camera remains unchanged at its task-defined resolution.
+# Change this value to 256, 512, 768, 1024, etc. before launching eval.
+GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
+
 SAVE_DIR="runs/evaluation/agentic_v1"
-RUN_NAME="test_v1.3"
+RUN_NAME="test_v1.4"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
@@ -106,8 +111,8 @@ if [[ -z "$TASKS" || -z "$RUN_NAME" ]]; then
     echo "ERROR: TASKS and RUN_NAME must not be empty." >&2
     exit 1
 fi
-if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_DECISIONS < 1)); then
-    echo "ERROR: episode, repeat, and decision counts must be positive." >&2
+if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_DECISIONS < 1 || GROUNDING_CAMERA_RESOLUTION < 1)); then
+    echo "ERROR: episode/repeat/decision counts and grounding resolution must be positive." >&2
     exit 1
 fi
 if ! command -v lsof &>/dev/null; then
@@ -179,6 +184,7 @@ args=(
     --f2g-url "http://$F2G_HOST:$F2G_PORT"
     --pre-eval-gpu-snapshot "$GPU_BASELINE_FILE"
     --depth-scale "$DEPTH_SCALE"
+    --grounding-camera-resolution "$GROUNDING_CAMERA_RESOLUTION"
     --tasks "$TASKS"
     --episode-ids "$EPISODE_IDS"
     --num-episodes "$NUM_EPISODES"

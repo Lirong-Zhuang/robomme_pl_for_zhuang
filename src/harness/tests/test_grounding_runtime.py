@@ -7,8 +7,10 @@ import numpy as np
 import pytest
 
 from harness.grounding.f2g_client import F2GClient
+from harness.grounding.observation import camera_frame_from_maniskill
 from harness.grounding.observation import camera_frame_from_robomme
 from harness.grounding.observation import depth_statistics
+from harness.grounding.observation import remap_grounding_points
 from harness.grounding.transforms import object_to_world
 from harness.grounding.transforms import rotation_matrix_to_quaternion_wxyz
 from harness.grounding.types import CameraFrame
@@ -47,6 +49,62 @@ def test_adapter_rejects_signed_depth_overflow() -> None:
 
     with pytest.raises(ValueError, match="negative integers"):
         camera_frame_from_robomme(obs, info, depth_scale=0.001)
+
+
+def test_maniskill_adapter_selects_named_grounding_camera() -> None:
+    rgb = np.full((1, 24, 32, 3), 127, dtype=np.uint8)
+    depth = np.full((1, 24, 32, 1), 800, dtype=np.int16)
+    intrinsic = np.asarray(
+        [[[200, 0, 16], [0, 200, 12], [0, 0, 1]]], dtype=np.float32
+    )
+    extrinsic = np.asarray(
+        [[[1, 0, 0, 0.1], [0, 1, 0, 0.2], [0, 0, 1, 0.3]]],
+        dtype=np.float32,
+    )
+    raw_obs = {
+        "sensor_data": {
+            "grounding_camera": {"rgb": rgb, "depth": depth},
+        },
+        "sensor_param": {
+            "grounding_camera": {
+                "intrinsic_cv": intrinsic,
+                "extrinsic_cv": extrinsic,
+            },
+        },
+    }
+
+    frame = camera_frame_from_maniskill(
+        raw_obs,
+        camera_name="grounding_camera",
+        depth_scale=0.001,
+    )
+
+    assert frame.rgb.shape == (24, 32, 3)
+    assert frame.depth.shape == (24, 32)
+    assert depth_statistics(frame)["median_m"] == pytest.approx(0.8)
+    np.testing.assert_allclose(frame.intrinsic, intrinsic[0])
+    np.testing.assert_allclose(frame.world_to_camera[:3], extrinsic[0])
+
+
+def test_grounding_points_are_remapped_to_high_resolution_camera() -> None:
+    grounding = {
+        "status": "ok",
+        "image_ref": "current_front",
+        "targets": {
+            "object": {"point_xy": [128.0, 64.0], "color_hint": "red"},
+        },
+    }
+
+    remapped = remap_grounding_points(
+        grounding,
+        source_shape=(256, 256),
+        target_shape=(768, 768),
+    )
+
+    assert remapped["targets"]["object"]["point_xy"] == pytest.approx(
+        [385.0, 193.0]
+    )
+    assert grounding["targets"]["object"]["point_xy"] == [128.0, 64.0]
 
 
 @pytest.mark.parametrize("input_size", [(256, 256), (512, 512), (768, 768)])
@@ -184,7 +242,7 @@ def test_shared_grounding_overlay_draws_f2g_box_and_point() -> None:
     pytest.importorskip("cv2")
     from harness.grounding.visualization import draw_grounding_overlay
 
-    rgb = np.zeros((100, 100, 3), dtype=np.uint8)
+    rgb = np.full((100, 100, 3), [180, 160, 140], dtype=np.uint8)
     intrinsic = np.asarray([[100, 0, 50], [0, 100, 50], [0, 0, 1]])
     object_to_camera = np.eye(4)
     object_to_camera[2, 3] = 1.0
@@ -199,6 +257,9 @@ def test_shared_grounding_overlay_draws_f2g_box_and_point() -> None:
 
     assert overlay[20, 20].tolist() == [255, 255, 0]
     assert np.any(np.all(overlay == [0, 255, 0], axis=2))
+    # The F2G overlay is drawn directly on the camera RGB. In particular, it
+    # must not inherit the black region used by the separate OpenCV mask view.
+    assert overlay[45, 45].tolist() == rgb[45, 45].tolist()
 
 
 def test_target_profile_can_use_trusted_purple_color() -> None:

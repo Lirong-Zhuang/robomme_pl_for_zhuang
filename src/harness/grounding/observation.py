@@ -92,6 +92,91 @@ def camera_frame_from_robomme(
     )
 
 
+def camera_frame_from_maniskill(
+    obs: Mapping[str, Any],
+    *,
+    camera_name: str,
+    depth_scale: float,
+    image_ref: str = "current_front",
+) -> CameraFrame:
+    """Read one aligned RGB-D frame from a raw ManiSkill observation."""
+
+    try:
+        sensor_data = obs["sensor_data"][camera_name]
+        sensor_param = obs["sensor_param"][camera_name]
+    except KeyError as error:
+        raise ValueError(
+            f"ManiSkill observation is missing camera field {error.args[0]!r} "
+            f"for {camera_name!r}"
+        ) from error
+
+    rgb = _image(sensor_data["rgb"], channels=3)
+    if rgb.ndim != 3 or rgb.shape[-1] not in (3, 4):
+        raise ValueError(
+            f"camera {camera_name!r} RGB must be HxWx3/4, got {rgb.shape}"
+        )
+    rgb = rgb[..., :3]
+    if rgb.dtype != np.uint8:
+        if np.issubdtype(rgb.dtype, np.floating) and np.nanmax(rgb) <= 1.0:
+            rgb = np.rint(np.clip(rgb, 0, 1) * 255).astype(np.uint8)
+        else:
+            rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+
+    depth = _image(sensor_data["depth"], channels=None)
+    if depth.ndim != 2:
+        raise ValueError(
+            f"camera {camera_name!r} depth must be HxW, got {depth.shape}"
+        )
+    intrinsic = _matrix(sensor_param["intrinsic_cv"], 3, 3)
+    extrinsic = _matrix(sensor_param["extrinsic_cv"], 3, 4)
+    return CameraFrame(
+        rgb=np.ascontiguousarray(rgb),
+        depth=np.ascontiguousarray(depth),
+        intrinsic=intrinsic,
+        world_to_camera=extrinsic,
+        depth_scale=depth_scale,
+        image_ref=image_ref,
+    )
+
+
+def remap_grounding_points(
+    grounding: Mapping[str, Any],
+    *,
+    source_shape: tuple[int, int],
+    target_shape: tuple[int, int],
+) -> dict[str, Any]:
+    """Map points between same-view cameras with different resolutions."""
+
+    source_height, source_width = source_shape
+    target_height, target_width = target_shape
+    if min(source_height, source_width, target_height, target_width) <= 0:
+        raise ValueError("camera image dimensions must be positive")
+    remapped = dict(grounding)
+    remapped_targets: dict[str, Any] = {}
+    targets = grounding.get("targets", {})
+    if not isinstance(targets, Mapping):
+        raise ValueError("grounding.targets must be an object")
+    for role, target in targets.items():
+        if not isinstance(target, Mapping):
+            raise ValueError(f"grounding target {role!r} must be an object")
+        point = target.get("point_xy")
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            remapped_targets[str(role)] = dict(target)
+            continue
+        x, y = (float(point[0]), float(point[1]))
+        mapped_x = (x + 0.5) * target_width / source_width - 0.5
+        mapped_y = (y + 0.5) * target_height / source_height - 0.5
+        remapped_targets[str(role)] = {
+            **dict(target),
+            "point_xy": [
+                float(np.clip(mapped_x, 0, target_width - 1)),
+                float(np.clip(mapped_y, 0, target_height - 1)),
+            ],
+        }
+    remapped["targets"] = remapped_targets
+    return remapped
+
+
 def depth_statistics(frame: CameraFrame) -> dict[str, float | int]:
     """Return a small diagnostic used to verify the server's depth unit."""
 

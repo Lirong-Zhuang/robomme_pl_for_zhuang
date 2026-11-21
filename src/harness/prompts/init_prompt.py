@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v18_2d_grounding"
+INIT_PROMPT_VERSION = "minimal_task_config_v19_vlm_grounding_routing"
 
 
 @dataclass(frozen=True)
@@ -298,7 +298,18 @@ Object-role preservation requirement:
   ambiguity; generic objects that need no special cue need not receive glossary
   entries.
 
-Runtime grounding boundary:
+Runtime VLM grounding boundary:
+- Name this output contract and its section in both generated runtime system
+  prompts exactly ``VLM grounding``. The JSON field remains named grounding.
+- The selected action's trusted perception.mode determines whether VLM grounding
+  is required. The in-task VLM must never decide this from visual difficulty,
+  confidence, or its own judgment.
+- Both generated runtime system prompts must include these exact sentences:
+  ``VLM grounding requirement is determined by the selected action's trusted
+  perception contract, not by the VLM.``
+  ``Apply pixel-grounding rules only when perception.mode=vlm_points.``
+  ``For perception.mode=none, perception.mode=scene_target_set, or STOP, return
+  exactly {{"status":"not_required","image_ref":null,"targets":{{}}}}.``
 - Treat each selected action's perception contract from the trusted action resource
   as authoritative and inline that contract into both generated runtime system
   prompts. The init planner must not alter target roles, point requirements, color
@@ -311,12 +322,12 @@ Runtime grounding boundary:
   Generated subgoal text must visibly contain the intended semantic words. Runtime
   extracts independent words such as left/right rather than enumerating or matching
   the complete subgoal sentence, so do not hide those words behind synonyms.
-- The in-task VLM supplies only current-image 2D point hints and, when requested,
-  one color hint. It must never predict or return depth, camera/world/base position,
-  pose, orientation, Euler angles, quaternion, transform matrix, metric size,
-  point cloud, mask, contour, or bounding box. OpenCV converts the 2D hint into a
-  mask; F2G alone produces every pose, metric location, orientation, and size used
-  by an action.
+- Only when perception.mode=vlm_points, the in-task VLM supplies current-image 2D
+  point hints and, when requested, one color hint. It must never predict or return
+  depth, camera/world/base position, pose, orientation, Euler angles, quaternion,
+  transform matrix, metric size, point cloud, mask, contour, or bounding box.
+  OpenCV converts the 2D hint into a mask; F2G alone produces every pose, metric
+  location, orientation, and size used by an action.
 - Every first-planning and follow-up response has a top-level grounding object with
   exactly status, image_ref, and targets. status is ok, ambiguous, or not_required.
   For ok, image_ref copies the exact supplied current overall-view image ID and
@@ -330,9 +341,9 @@ Runtime grounding boundary:
 - If a required target cannot be identified reliably in the current overall view,
   return status=ambiguous with that image_ref and targets={{}}; never invent a point.
   If perception.mode is none or scene_target_set, or when returning STOP, return
-  status=not_required, image_ref=null, and targets={{}}. scene_target_set delegates
-  whole-scene candidate extraction to the perception backend and therefore must not
-  contain VLM-predicted per-target coordinates.
+  exactly status=not_required, image_ref=null, and targets={{}}. scene_target_set
+  delegates whole-scene candidate extraction to the perception backend and
+  therefore must not contain VLM-predicted per-target coordinates.
 - The semantic arguments object remains reserved for reusable subgoal-template and
   action parameters. Never place image coordinates or F2G geometry in arguments or
   in subgoal text. subgoal_sequence entries remain semantic and contain exactly

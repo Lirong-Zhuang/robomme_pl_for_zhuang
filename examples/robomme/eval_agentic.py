@@ -14,6 +14,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import asdict
 from dataclasses import is_dataclass
+from dataclasses import replace
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -37,18 +38,23 @@ from harness.actions import resolve_action_arguments
 from harness.grounding import F2GClient
 from harness.grounding import GroundingContractRegistry
 from harness.grounding import GroundingPipeline
-from harness.grounding import camera_frame_from_robomme
+from harness.grounding import camera_frame_from_maniskill
 from harness.grounding import depth_statistics
+from harness.grounding import remap_grounding_points
 from harness.grounding.visualization import draw_grounding_overlay
-from harness.grounding.visualization import draw_mask_overlay
 from harness.init_planning import ACTION_CATALOG_PATH
 from harness.init_planning import build_init_planning_messages
 from harness.init_planning import validate_task_config
+from harness.prompts.init_prompt import INIT_PROMPT_VERSION
 from harness.task_memory import TaskMemory
 from harness.vlm_client import AgenticVLMClient
 from oracle_plus.action_runtime import OraclePlusPlannerRuntime
+from robomme import robomme_env
 from robomme.env_record_wrapper import BenchmarkEnvBuilder
 from utils import RolloutRecorder
+
+
+GROUNDING_CAMERA_NAME = "grounding_camera"
 
 
 def _csv(value: str) -> list[str]:
@@ -83,6 +89,12 @@ def parse_args() -> argparse.Namespace:
         help="GPU snapshot captured before the F2G and VLM services start",
     )
     parser.add_argument("--depth-scale", type=float, default=0.001)
+    parser.add_argument(
+        "--grounding-camera-resolution",
+        type=int,
+        default=768,
+        help="native square resolution used by grounding_camera and F2G",
+    )
     parser.add_argument("--tasks", default="BinFill")
     parser.add_argument("--episode-ids", default="")
     parser.add_argument("--num-episodes", type=int, default=10)
@@ -104,6 +116,65 @@ def parse_args() -> argparse.Namespace:
         default=True,
     )
     return parser.parse_args()
+
+
+def _make_env_with_grounding_camera(
+    builder: BenchmarkEnvBuilder,
+    episode_id: int,
+    *,
+    resolution: int,
+    **kwargs: Any,
+) -> Any:
+    """Construct one benchmark env with a high-resolution camera clone.
+
+    RoboMME registers concrete task classes with Gymnasium, so the sensor
+    property must be extended while ``gym.make`` constructs the environment.
+    The original class property is restored immediately afterward.
+    """
+
+    if resolution <= 0:
+        raise ValueError("grounding camera resolution must be positive")
+    task_type = getattr(robomme_env, builder.env_id, None)
+    if not isinstance(task_type, type):
+        raise ValueError(f"RoboMME task class was not found: {builder.env_id!r}")
+    original = getattr(task_type, "_default_sensor_configs", None)
+    if not isinstance(original, property) or original.fget is None:
+        raise TypeError(
+            f"{builder.env_id}._default_sensor_configs must be a readable property"
+        )
+    had_own_property = "_default_sensor_configs" in task_type.__dict__
+    own_property = task_type.__dict__.get("_default_sensor_configs")
+
+    def sensor_configs(instance: Any) -> list[Any]:
+        base_configs = list(original.fget(instance))
+        if any(config.uid == GROUNDING_CAMERA_NAME for config in base_configs):
+            raise RuntimeError(
+                f"{builder.env_id} already defines {GROUNDING_CAMERA_NAME!r}"
+            )
+        base_camera = next(
+            (config for config in base_configs if config.uid == "base_camera"),
+            None,
+        )
+        if base_camera is None:
+            raise RuntimeError(
+                f"{builder.env_id} camera configuration has no 'base_camera'"
+            )
+        grounding_camera = replace(
+            base_camera,
+            uid=GROUNDING_CAMERA_NAME,
+            width=resolution,
+            height=resolution,
+        )
+        return [*base_configs, grounding_camera]
+
+    setattr(task_type, "_default_sensor_configs", property(sensor_configs))
+    try:
+        return builder.make_env_for_episode(episode_id, **kwargs)
+    finally:
+        if had_own_property:
+            setattr(task_type, "_default_sensor_configs", own_property)
+        else:
+            delattr(task_type, "_default_sensor_configs")
 
 
 def _jsonable(value: Any) -> Any:
@@ -728,16 +799,18 @@ def _save_grounding_artifact(
     directory: Path,
     *,
     execution: Mapping[str, Any],
+    effective_grounding: Mapping[str, Any],
     frame: Any,
     grounded: Any,
 ) -> dict[str, Any]:
+    """Save F2G predictions on the untouched grounding-camera RGB image.
+
+    OpenCV masks are retained as standalone binary artifacts for replay and
+    auditing, but are deliberately not painted into the prediction overlay.
+    """
+
     mask_paths = _save_masks(directory, grounded)
-    mask_overlay_path = (directory / "mask_overlay.png").resolve()
     grounding_overlay_path = (directory / "grounding_overlay.png").resolve()
-    iio.imwrite(
-        mask_overlay_path,
-        draw_mask_overlay(frame.rgb, grounded.masks.values()),
-    )
 
     predictions = []
     for role, estimate in grounded.request.targets.items():
@@ -767,10 +840,7 @@ def _save_grounding_artifact(
             predictions=predictions,
         ),
     )
-    overlay_paths = {
-        "mask_overlay": str(mask_overlay_path),
-        "grounding_overlay": str(grounding_overlay_path),
-    }
+    overlay_paths = {"grounding_overlay": str(grounding_overlay_path)}
     _write_json(
         directory / "grounding.json",
         {
@@ -779,6 +849,12 @@ def _save_grounding_artifact(
             "subgoal": execution["subgoal"],
             "arguments": execution["arguments"],
             "vlm_grounding": execution["grounding"],
+            "grounding_camera_grounding": effective_grounding,
+            "grounding_camera": {
+                "name": GROUNDING_CAMERA_NAME,
+                "width": int(frame.rgb.shape[1]),
+                "height": int(frame.rgb.shape[0]),
+            },
             "action_request": grounded.request,
             "masks": {
                 role: {
@@ -860,8 +936,10 @@ def run_episode(
             gui_render=False,
             max_steps=args.max_steps,
         )
-        env = builder.make_env_for_episode(
+        env = _make_env_with_grounding_camera(
+            builder,
             episode_id,
+            resolution=args.grounding_camera_resolution,
             max_steps=args.max_steps,
             include_front_depth=True,
             include_front_camera_extrinsic=True,
@@ -920,7 +998,13 @@ def run_episode(
         executor = ActionExecutor(runtime, registry)
         contracts = GroundingContractRegistry.from_catalog(ACTION_CATALOG_PATH)
         pipeline = GroundingPipeline(
-            f2g_client=F2GClient(base_url=args.f2g_url)
+            f2g_client=F2GClient(
+                base_url=args.f2g_url,
+                input_size=(
+                    args.grounding_camera_resolution,
+                    args.grounding_camera_resolution,
+                ),
+            )
         )
         memory = TaskMemory(
             memory_dir,
@@ -1037,7 +1121,6 @@ def run_episode(
         )
 
         current_obs: Mapping[str, Any] = _latest_observation(obs)
-        current_info: Mapping[str, Any] = info
         current_pair = initial_pairs[-1]
         del initial_pairs
         _release_columnar_observation(obs)
@@ -1053,20 +1136,46 @@ def run_episode(
                 subgoal=execution["subgoal"],
                 point_yx=point_yx,
             )
-            frame = camera_frame_from_robomme(
-                current_obs,
-                current_info,
+            raw_observation = runtime.env.unwrapped.get_obs()
+            frame = camera_frame_from_maniskill(
+                raw_observation,
+                camera_name=GROUNDING_CAMERA_NAME,
                 depth_scale=args.depth_scale,
                 image_ref="current_front",
             )
+            expected_grounding_shape = (
+                args.grounding_camera_resolution,
+                args.grounding_camera_resolution,
+            )
+            if frame.rgb.shape[:2] != expected_grounding_shape:
+                raise RuntimeError(
+                    f"{GROUNDING_CAMERA_NAME} produced {frame.rgb.shape[:2]}, "
+                    f"expected {expected_grounding_shape}"
+                )
+            policy_rgb = _to_rgb(current_obs["front_rgb_list"])
+            effective_grounding = remap_grounding_points(
+                execution["grounding"],
+                source_shape=policy_rgb.shape[:2],
+                target_shape=frame.rgb.shape[:2],
+            )
             if "depth_statistics" not in record:
                 record["depth_statistics"] = depth_statistics(frame)
+                record["grounding_camera"] = {
+                    "name": GROUNDING_CAMERA_NAME,
+                    "configured_resolution": args.grounding_camera_resolution,
+                    "native_shape": list(frame.rgb.shape[:2]),
+                    "policy_camera_shape": list(policy_rgb.shape[:2]),
+                    "f2g_input_size": [
+                        args.grounding_camera_resolution,
+                        args.grounding_camera_resolution,
+                    ],
+                }
             active_call_index = decision_index - 1
             grounding_call_dir = grounding_dir / f"call_{active_call_index}"
             _save_grounding_input(grounding_call_dir, frame)
             grounded = pipeline.build_action_request(
                 action_name=execution["action_name"],
-                grounding=execution["grounding"],
+                grounding=effective_grounding,
                 frame=frame,
                 arguments=resolve_action_arguments(
                     execution["action_name"],
@@ -1077,6 +1186,7 @@ def run_episode(
             grounding_artifacts = _save_grounding_artifact(
                 grounding_call_dir,
                 execution=execution,
+                effective_grounding=effective_grounding,
                 frame=frame,
                 grounded=grounded,
             )
@@ -1121,7 +1231,6 @@ def run_episode(
                 simulator_frame_count=action_result.simulator_frame_count,
             )
             current_obs = _latest_observation(native_execution.obs_batch)
-            current_info = native_execution.info
             _release_columnar_observation(native_execution.obs_batch)
 
             call_dir = episode_dir / f"call_{decision_index}"
@@ -1304,6 +1413,7 @@ def main() -> None:
         ("history_size", args.history_size),
         ("history_stride", args.history_stride),
         ("planner_attempts", args.planner_attempts),
+        ("grounding_camera_resolution", args.grounding_camera_resolution),
     ):
         if value < 1:
             raise ValueError(f"{name} must be positive")
@@ -1331,6 +1441,8 @@ def main() -> None:
         "history_size": args.history_size,
         "history_stride": args.history_stride,
         "depth_scale": args.depth_scale,
+        "grounding_camera_resolution": args.grounding_camera_resolution,
+        "init_prompt_version": INIT_PROMPT_VERSION,
         "use_task_config_examples": args.use_task_config_examples,
         "vlm_model_path": client.server_metadata.get("model_path"),
         "f2g_checkpoint": f2g_health.get("checkpoint"),
@@ -1444,6 +1556,8 @@ def main() -> None:
         "vlm": metrics,
         "f2g": f2g_health,
         "depth_scale": args.depth_scale,
+        "grounding_camera_resolution": args.grounding_camera_resolution,
+        "init_prompt_version": INIT_PROMPT_VERSION,
     }
     _write_json(run_dir / "summary.json", summary)
     client.close()

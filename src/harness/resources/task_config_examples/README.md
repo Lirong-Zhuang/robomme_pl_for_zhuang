@@ -37,7 +37,8 @@ Every example uses the same two-prompt runtime interface:
   current-image `grounding` object. An incomplete subgoal remains active; only a
   completed subgoal advances.
 
-The VLM-owned `grounding` object may contain only one 2D `point_xy` per required
+The `VLM grounding` output contract uses a `grounding` object that may contain
+only one 2D `point_xy` per required
 semantic role plus its declared `color_hint`. OpenCV owns mask generation and F2G
 owns every metric pose, location, orientation, and size value.
 

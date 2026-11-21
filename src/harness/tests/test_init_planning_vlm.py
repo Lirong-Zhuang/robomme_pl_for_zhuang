@@ -372,6 +372,27 @@ def _validate_task_config(
     selected_action_names = {subgoal["action_name"] for subgoal in subgoals}
     for prompt_name in ("first_planning", "followup_planning"):
         system_prompt = prompts[prompt_name]["system_prompt"]
+        system_prompt_casefold = " ".join(system_prompt.casefold().split())
+        for required_vlm_grounding_phrase in (
+            "vlm grounding",
+            (
+                "vlm grounding requirement is determined by the selected "
+                "action's trusted perception contract, not by the vlm."
+            ),
+            "apply pixel-grounding rules only when perception.mode=vlm_points.",
+            (
+                "for perception.mode=none, perception.mode=scene_target_set, "
+                "or stop, return exactly"
+            ),
+        ):
+            normalized_phrase = " ".join(
+                required_vlm_grounding_phrase.casefold().split()
+            )
+            if normalized_phrase not in system_prompt_casefold:
+                raise ValueError(
+                    f"{prompt_name} system prompt omits required VLM grounding "
+                    f"routing text: {required_vlm_grounding_phrase!r}"
+                )
         prompt_tokens = set(re.findall(r"\b[a-z][a-z0-9_]*\b", system_prompt))
         mentioned_subgoal_keys = subgoal_keys & prompt_tokens
         if mentioned_subgoal_keys != subgoal_keys:
