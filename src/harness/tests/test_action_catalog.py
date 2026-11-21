@@ -108,6 +108,11 @@ def test_perception_contracts_limit_vlm_to_2d_point_hints() -> None:
     allowed_modes = {"none", "vlm_points", "scene_target_set"}
     allowed_color_policies = {"required", "optional", "not_used", "fixed"}
     allowed_f2g_outputs = {"pose", "size"}
+    vlm_backends = {
+        "grasp_grounding",
+        "side_grasp_grounding",
+        "location_grounding",
+    }
 
     for action in _load_actions():
         perception = action["perception"]
@@ -123,17 +128,25 @@ def test_perception_contracts_limit_vlm_to_2d_point_hints() -> None:
         roles = [target["role"] for target in perception["targets"]]
         assert len(roles) == len(set(roles))
         for target in perception["targets"]:
-            expected_fields = {
+            common_fields = {
                 "role",
                 "point_required",
                 "color_hint",
-                "segmentation_profile",
-                "f2g_outputs",
+                "grounding_backend",
+                "point_semantics",
             }
             if target["color_hint"] == "fixed":
-                expected_fields.add("fixed_color")
+                common_fields.add("fixed_color")
             if "allowed_colors" in target:
-                expected_fields.add("allowed_colors")
+                common_fields.add("allowed_colors")
+            backend = target["grounding_backend"]
+            if backend == "location_grounding":
+                expected_fields = common_fields | {"geometry_outputs"}
+            else:
+                expected_fields = common_fields | {
+                    "segmentation_profile",
+                    "f2g_outputs",
+                }
             assert set(target) == expected_fields
             assert target["role"].strip()
             assert isinstance(target["point_required"], bool)
@@ -146,9 +159,21 @@ def test_perception_contracts_limit_vlm_to_2d_point_hints() -> None:
                 assert len(target["allowed_colors"]) == len(
                     set(target["allowed_colors"])
                 )
-            assert target["segmentation_profile"].strip()
-            assert set(target["f2g_outputs"]) <= allowed_f2g_outputs
-            assert "pose" in target["f2g_outputs"]
+            assert target["point_semantics"].strip()
+            if perception["mode"] == "vlm_points":
+                assert backend in vlm_backends
+                assert any(
+                    word in target["point_semantics"].casefold()
+                    for word in ("center", "centroid")
+                )
+            else:
+                assert backend == "scene_grounding"
+            if backend == "location_grounding":
+                assert target["geometry_outputs"] == ["position"]
+            else:
+                assert target["segmentation_profile"].strip()
+                assert set(target["f2g_outputs"]) <= allowed_f2g_outputs
+                assert "pose" in target["f2g_outputs"]
 
         if perception["mode"] == "vlm_points":
             assert all(target["point_required"] for target in perception["targets"])
@@ -163,6 +188,7 @@ def test_action_perception_roles_match_action_bindings() -> None:
         "solve_pickup": {"object"},
         "solve_put_into_bin": {"container"},
         "solve_button": {"button"},
+        "grasp_and_lift_peg": {"peg"},
         "grasp_and_lift_peg_side": {"peg"},
         "solve_push_to_target_with_peg": {"object", "target"},
         "solve_push_to_target": {"object", "target"},

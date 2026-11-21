@@ -10,6 +10,7 @@ from typing import Any
 from .button import solve_button
 from .button import solve_button_ready
 from .oracle_reference import ORACLE_ACTION_REFERENCES
+from .peg import grasp_and_lift_peg
 from .peg import grasp_and_lift_peg_side
 from .peg import insert_peg
 from .pick_place import solve_pickup
@@ -98,6 +99,11 @@ class CatalogAction:
                     raise ValueError(
                         f"argument {binding.size_argument!r} is owned by grounding"
                     )
+                if estimate.size is None:
+                    raise ValueError(
+                        f"action {self.name!r} target role {binding.role!r} "
+                        "requires grounded size"
+                    )
                 kwargs[binding.size_argument] = estimate.size
             if binding.label_argument is not None:
                 if binding.label_argument in request.arguments:
@@ -153,6 +159,11 @@ def build_action_registry() -> dict[str, CatalogAction]:
             "solve_button",
             solve_button,
             targets=(TargetBinding("button", "button_pose"),),
+        ),
+        CatalogAction(
+            "grasp_and_lift_peg",
+            grasp_and_lift_peg,
+            targets=(TargetBinding("peg", "peg_pose"),),
         ),
         CatalogAction(
             "grasp_and_lift_peg_side",

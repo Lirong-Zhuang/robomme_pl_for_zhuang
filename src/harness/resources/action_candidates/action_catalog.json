@@ -11,6 +11,8 @@
             "role": "object",
             "point_required": true,
             "color_hint": "required",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "visible center of the compact object to grasp",
             "segmentation_profile": "compact_colored",
             "f2g_outputs": ["pose", "size"]
           }
@@ -27,8 +29,9 @@
             "role": "container",
             "point_required": true,
             "color_hint": "not_used",
-            "segmentation_profile": "container",
-            "f2g_outputs": ["pose"]
+            "grounding_backend": "location_grounding",
+            "point_semantics": "center of the bin opening where the held object should be released",
+            "geometry_outputs": ["position"]
           }
         ]
       }
@@ -43,7 +46,26 @@
             "role": "button",
             "point_required": true,
             "color_hint": "not_used",
-            "segmentation_profile": "button",
+            "grounding_backend": "location_grounding",
+            "point_semantics": "center of the visible button cap to press",
+            "geometry_outputs": ["position"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "grasp_and_lift_peg",
+      "description": "Approach the long peg near its visible center, grasp the whole peg without selecting a black or white endpoint, and lift it when the later action treats the two ends interchangeably.",
+      "perception": {
+        "mode": "vlm_points",
+        "targets": [
+          {
+            "role": "peg",
+            "point_required": true,
+            "color_hint": "not_used",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "visible center of the complete long peg, not the center of one colored half",
+            "segmentation_profile": "peg",
             "f2g_outputs": ["pose"]
           }
         ]
@@ -60,6 +82,8 @@
             "point_required": true,
             "color_hint": "required",
             "allowed_colors": ["black", "white"],
+            "grounding_backend": "side_grasp_grounding",
+            "point_semantics": "center of the selected black or white peg half to grasp",
             "segmentation_profile": "peg_colored",
             "f2g_outputs": ["pose"]
           }
@@ -68,7 +92,7 @@
     },
     {
       "name": "solve_push_to_target_with_peg",
-      "description": "While holding a peg, use the peg to push or hook a cube until the cube reaches its target; the trusted runtime derives the approach direction from grounded cube/target world positions and reuses the peg-end state saved by pickup.",
+      "description": "While holding a peg, use it to push or hook a cube until the cube reaches its target; the trusted runtime derives the approach direction from grounded cube/target world positions and uses the centered peg-grasp state saved by pickup.",
       "perception": {
         "mode": "vlm_points",
         "targets": [
@@ -76,6 +100,8 @@
             "role": "object",
             "point_required": true,
             "color_hint": "required",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "visible center of the cube to move",
             "segmentation_profile": "compact_colored",
             "f2g_outputs": ["pose"]
           },
@@ -84,6 +110,8 @@
             "point_required": true,
             "color_hint": "fixed",
             "fixed_color": "purple",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "center of the purple destination disk",
             "segmentation_profile": "target",
             "f2g_outputs": ["pose"]
           }
@@ -100,6 +128,8 @@
             "role": "object",
             "point_required": true,
             "color_hint": "required",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "visible center of the cube to push",
             "segmentation_profile": "compact_colored",
             "f2g_outputs": ["pose", "size"]
           },
@@ -107,6 +137,8 @@
             "role": "target",
             "point_required": true,
             "color_hint": "not_used",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "center of the destination target",
             "segmentation_profile": "target",
             "f2g_outputs": ["pose"]
           }
@@ -123,6 +155,8 @@
             "role": "target",
             "point_required": true,
             "color_hint": "not_used",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "center of the placement target",
             "segmentation_profile": "target",
             "f2g_outputs": ["pose"]
           }
@@ -147,8 +181,9 @@
             "role": "button",
             "point_required": true,
             "color_hint": "not_used",
-            "segmentation_profile": "button",
-            "f2g_outputs": ["pose"]
+            "grounding_backend": "location_grounding",
+            "point_semantics": "center of the visible button cap",
+            "geometry_outputs": ["position"]
           }
         ]
       }
@@ -173,6 +208,8 @@
             "role": "object",
             "point_required": true,
             "color_hint": "not_used",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "visible center of the container body to grasp",
             "segmentation_profile": "container",
             "f2g_outputs": ["pose", "size"]
           }
@@ -189,6 +226,8 @@
             "role": "target",
             "point_required": true,
             "color_hint": "not_used",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "center of the destination target",
             "segmentation_profile": "target",
             "f2g_outputs": ["pose"]
           }
@@ -214,6 +253,8 @@
             "point_required": true,
             "color_hint": "required",
             "allowed_colors": ["black", "white"],
+            "grounding_backend": "side_grasp_grounding",
+            "point_semantics": "center of the free black or white peg half that will enter the box",
             "segmentation_profile": "peg_colored",
             "f2g_outputs": ["pose"]
           },
@@ -221,6 +262,8 @@
             "role": "box",
             "point_required": true,
             "color_hint": "not_used",
+            "grounding_backend": "grasp_grounding",
+            "point_semantics": "center of the insertion box opening",
             "segmentation_profile": "box",
             "f2g_outputs": ["pose"]
           }
@@ -244,6 +287,8 @@
             "role": "targets",
             "point_required": false,
             "color_hint": "not_used",
+            "grounding_backend": "scene_grounding",
+            "point_semantics": "not supplied by the VLM; discover the full target set",
             "segmentation_profile": "grid_targets",
             "f2g_outputs": ["pose"]
           }
@@ -272,6 +317,8 @@
             "role": "targets",
             "point_required": false,
             "color_hint": "not_used",
+            "grounding_backend": "scene_grounding",
+            "point_semantics": "not supplied by the VLM; discover the full target set",
             "segmentation_profile": "grid_targets",
             "f2g_outputs": ["pose"]
           }

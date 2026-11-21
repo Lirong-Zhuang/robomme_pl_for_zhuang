@@ -286,7 +286,7 @@ def test_action_events_do_not_mark_subgoal_completed(tmp_path: Path) -> None:
     assert finished["runtime_status"] == "returned"
 
 
-def test_followup_inputs_include_compact_state_and_current_acceptance(
+def test_followup_inputs_include_only_completed_subgoal_history_and_acceptance(
     tmp_path: Path,
 ) -> None:
     memory = _memory(tmp_path)
@@ -305,7 +305,7 @@ def test_followup_inputs_include_compact_state_and_current_acceptance(
     assert inputs["acceptance_criteria"]["completed"] == (
         "The intended red cube is held and lifted."
     )
-    assert inputs["task_state"]["event_cursor"] == 1
+    assert inputs["task_state"] == []
     assert "robot_state" not in inputs
     assert "action_name" not in inputs
     assert "keyframe_policy" not in inputs
@@ -549,6 +549,12 @@ def test_incomplete_retains_current_subgoal_and_increments_attempt(
     assert state["current_subgoal"]["instance_id"] == "sg-0001"
     assert state["current_subgoal"]["attempt"] == 2
     assert state["progress"]["completed_subgoal_ids"] == []
+    inputs = memory.build_followup_inputs(
+        verification_parameters={"k": 3},
+        subgoal_start_observations=["start"],
+        recent_observations=["recent"],
+    )
+    assert inputs["task_state"] == []
 
 
 def test_completed_advances_and_resolves_next_action(tmp_path: Path) -> None:
@@ -574,6 +580,53 @@ def test_completed_advances_and_resolves_next_action(tmp_path: Path) -> None:
     execution = memory.current_execution()
     assert execution is not None
     assert execution["action_name"] == "solve_put_into_bin"
+    inputs = memory.build_followup_inputs(
+        verification_parameters={"k": 3},
+        subgoal_start_observations=["start"],
+        recent_observations=["recent"],
+    )
+    assert inputs["task_state"] == ["pick up the first red cube"]
+
+
+def test_followup_history_collects_multiple_completed_subgoals_in_order(
+    tmp_path: Path,
+) -> None:
+    memory = _memory(tmp_path)
+    memory.commit_first_plan(
+        task_goal="Put one red cube into the bin, then press the button.",
+        planner_output=_first_plan_output(),
+    )
+    memory.commit_followup(
+        {
+            "status": "completed",
+            "description": "The red cube is visibly held above the table.",
+            "next_subgoal_key": "put_into_bin",
+            "next_subgoal": "put it into the bin",
+            "arguments": {},
+            "grounding": _point_grounding("container"),
+        }
+    )
+    memory.commit_followup(
+        {
+            "status": "completed",
+            "description": "The cube is released into the bin.",
+            "next_subgoal_key": "press_button",
+            "next_subgoal": "press the button",
+            "arguments": {},
+            "grounding": _point_grounding("button"),
+        }
+    )
+
+    inputs = memory.build_followup_inputs(
+        verification_parameters={"k": 3},
+        subgoal_start_observations=["start"],
+        recent_observations=["recent"],
+    )
+
+    assert inputs["task_state"] == [
+        "pick up the first red cube",
+        "put it into the bin",
+    ]
 
 
 def test_completed_stop_has_no_current_action(tmp_path: Path) -> None:
@@ -630,6 +683,12 @@ def test_failed_retry_does_not_mark_completion(tmp_path: Path) -> None:
     assert state["progress"]["completed_subgoal_ids"] == []
     assert state["current_subgoal"]["instance_id"] == "sg-0001"
     assert state["current_subgoal"]["attempt"] == 2
+    inputs = memory.build_followup_inputs(
+        verification_parameters={"k": 3},
+        subgoal_start_observations=["start"],
+        recent_observations=["recent"],
+    )
+    assert inputs["task_state"] == []
 
 
 def test_dynamic_followup_subgoal_is_appended_to_prefix_plan(tmp_path: Path) -> None:

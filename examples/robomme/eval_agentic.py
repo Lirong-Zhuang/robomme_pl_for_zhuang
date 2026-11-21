@@ -55,6 +55,8 @@ from utils import RolloutRecorder
 
 
 GROUNDING_CAMERA_NAME = "grounding_camera"
+VLM_GROUNDING_IMAGE_SHAPE = (256, 256)
+ROBOMME_EPISODE_STATUSES = frozenset({"success", "fail", "timeout", "error"})
 
 
 def _csv(value: str) -> list[str]:
@@ -209,6 +211,31 @@ def _write_json(path: Path, value: Any) -> None:
         encoding="utf-8",
     )
     os.replace(temporary, path)
+
+
+def _emit_vlm_call_output(
+    readable_log_path: Path,
+    *,
+    call_index: int,
+    call_type: str,
+    attempt: Mapping[str, Any],
+) -> None:
+    """Print and persist one visually separated VLM response."""
+
+    attempt_index = int(attempt["attempt"])
+    raw_response = str(attempt.get("raw_response", "")).rstrip()
+    validation_error = attempt.get("validation_error")
+    title = f"VLM CALL {call_index} | {call_type} | ATTEMPT {attempt_index}"
+    separator = "=" * 96
+    block_lines = ["", separator, title, "-" * 96, raw_response]
+    if validation_error:
+        block_lines.extend(["-" * 96, f"REJECTED: {validation_error}"])
+    block_lines.extend([separator, ""])
+    block = "\n".join(block_lines)
+    print(block, flush=True)
+    readable_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with readable_log_path.open("a", encoding="utf-8") as stream:
+        stream.write(block)
 
 
 def _to_rgb(value: Any) -> np.ndarray:
@@ -803,18 +830,28 @@ def _save_grounding_artifact(
     frame: Any,
     grounded: Any,
 ) -> dict[str, Any]:
-    """Save F2G predictions on the untouched grounding-camera RGB image.
+    """Save backend predictions on the untouched grounding-camera RGB image.
 
     OpenCV masks are retained as standalone binary artifacts for replay and
     auditing, but are deliberately not painted into the prediction overlay.
+    Location-only targets are drawn as point crosses and have no mask or F2G box.
     """
 
     mask_paths = _save_masks(directory, grounded)
     grounding_overlay_path = (directory / "grounding_overlay.png").resolve()
 
     predictions = []
+    location_points: list[tuple[int, int]] = []
     for role, estimate in grounded.request.targets.items():
-        segmentation = grounded.masks[role]
+        segmentation = grounded.masks.get(role)
+        if segmentation is None:
+            location = estimate.metadata.get("location", {})
+            depth_pixel = location.get("depth_pixel_xy")
+            if isinstance(depth_pixel, (list, tuple)) and len(depth_pixel) == 2:
+                location_points.append(
+                    (int(round(depth_pixel[0])), int(round(depth_pixel[1])))
+                )
+            continue
         predictions.append(
             (
                 np.asarray(estimate.metadata["T_cam_obj"], dtype=np.float64),
@@ -832,14 +869,19 @@ def _save_grounding_artifact(
                     segmentation.point_xy,
                 )
             )
-    iio.imwrite(
-        grounding_overlay_path,
-        draw_grounding_overlay(
-            frame.rgb,
-            intrinsic=frame.intrinsic,
-            predictions=predictions,
-        ),
+    overlay = draw_grounding_overlay(
+        frame.rgb,
+        intrinsic=frame.intrinsic,
+        predictions=predictions,
     )
+    for x, y in location_points:
+        x0, x1 = max(0, x - 8), min(overlay.shape[1], x + 9)
+        y0, y1 = max(0, y - 8), min(overlay.shape[0], y + 9)
+        if 0 <= y < overlay.shape[0]:
+            overlay[y, x0:x1] = [255, 0, 255]
+        if 0 <= x < overlay.shape[1]:
+            overlay[y0:y1, x] = [255, 0, 255]
+    iio.imwrite(grounding_overlay_path, overlay)
     overlay_paths = {"grounding_overlay": str(grounding_overlay_path)}
     _write_json(
         directory / "grounding.json",
@@ -889,6 +931,9 @@ def run_episode(
     video_episode_dir = repeat_dir / "videos" / f"ep_{episode_id}"
     example_dir = repeat_dir / "example"
     vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
+    readable_vlm_log_path = (
+        repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}_readable.txt"
+    )
     for stale_dir in (
         episode_dir,
         memory_dir,
@@ -900,6 +945,8 @@ def run_episode(
             shutil.rmtree(stale_dir)
     if vlm_log_path.exists():
         vlm_log_path.unlink()
+    if readable_vlm_log_path.exists():
+        readable_vlm_log_path.unlink()
     episode_dir.mkdir(parents=True)
     vlm_trace: dict[str, Any] = {
         "task": task,
@@ -912,11 +959,13 @@ def run_episode(
         "episode_id": episode_id,
         "repeat_id": repeat_id,
         "status": "error",
+        "termination_reason": None,
         "task_goal": None,
         "decisions": [],
         "artifacts": {
             "episode_log": str((video_episode_dir / "episode.json").resolve()),
             "vlm_log": str(vlm_log_path.resolve()),
+            "vlm_readable_log": str(readable_vlm_log_path.resolve()),
             "image_dir": str(episode_dir.resolve()),
             "task_memory_dir": str(memory_dir.resolve()),
             "grounding_dir": str(grounding_dir.resolve()),
@@ -1037,6 +1086,11 @@ def run_episode(
             inputs=first_inputs,
         )
         image_shape = initial_pairs[-1][0].shape[:2]
+        if image_shape != VLM_GROUNDING_IMAGE_SHAPE:
+            raise RuntimeError(
+                "VLM grounding prompt declares a 256x256 current overall image, "
+                f"but the runtime produced {image_shape}"
+            )
 
         def commit_first(output: dict[str, Any]) -> None:
             _validate_next_grounding(memory, contracts, output, image_shape)
@@ -1060,6 +1114,12 @@ def run_episode(
         def record_first_attempt(attempt: dict[str, Any]) -> None:
             first_attempts.append(attempt)
             _write_json(vlm_log_path, vlm_trace)
+            _emit_vlm_call_output(
+                readable_vlm_log_path,
+                call_index=0,
+                call_type="first_planning",
+                attempt=attempt,
+            )
 
         first_output, raw, latency, request_latency = _infer_and_commit(
             client=client,
@@ -1124,7 +1184,9 @@ def run_episode(
         current_pair = initial_pairs[-1]
         del initial_pairs
         _release_columnar_observation(obs)
-        last_action_status = "ongoing"
+        terminal_action_status: str | None = None
+        terminal_action_evaluation: dict[str, Any] | None = None
+        decision_limit_reached = False
         for decision_index in range(1, args.max_decisions + 1):
             execution = memory.current_execution()
             if execution is None:
@@ -1224,7 +1286,6 @@ def run_episode(
                 raise RuntimeError("ActionExecutor did not retain native execution")
             final_pair = _observation_pairs(native_execution.obs_batch)[-1]
             recent_pairs.append(final_pair)
-            last_action_status = action_result.status
             memory.record_action_finished(
                 runtime_status=action_result.status,
                 artifact_refs=artifact_refs,
@@ -1232,6 +1293,42 @@ def run_episode(
             )
             current_obs = _latest_observation(native_execution.obs_batch)
             _release_columnar_observation(native_execution.obs_batch)
+
+            # Match Oracle Plus: a stopped native execution is terminal for the
+            # episode. In particular, never ask the VLM to retry after timeout;
+            # the environment has already reached its terminal boundary.
+            if action_result.stopped:
+                if action_result.status not in ROBOMME_EPISODE_STATUSES:
+                    raise RuntimeError(
+                        "Stopped RoboMME action returned a non-terminal status: "
+                        f"{action_result.status!r}"
+                    )
+                terminal_action_status = action_result.status
+                terminal_action_evaluation = {
+                    "source": "terminal_action_result",
+                    "status": action_result.status,
+                    "stopped": action_result.stopped,
+                    "info": _jsonable(action_result.info),
+                }
+                terminal_execution = {
+                    "executed": execution,
+                    "action_result": _jsonable(action_result),
+                    "mask_paths": grounding_artifacts["masks"],
+                    "overlay_paths": grounding_artifacts["overlays"],
+                }
+                record["decisions"][-1]["terminal_execution"] = (
+                    terminal_execution
+                )
+                vlm_trace["calls"][-1]["terminal_execution"] = (
+                    terminal_execution
+                )
+                _write_json(vlm_log_path, vlm_trace)
+                record["status"] = terminal_action_status
+                record["termination_reason"] = (
+                    f"environment_{terminal_action_status}"
+                )
+                current_pair = final_pair
+                break
 
             call_dir = episode_dir / f"call_{decision_index}"
             start_observation = _save_observation(
@@ -1247,6 +1344,12 @@ def run_episode(
                 include_wrist=include_wrist,
                 current_last=True,
             )
+            current_image_shape = final_pair[0].shape[:2]
+            if current_image_shape != VLM_GROUNDING_IMAGE_SHAPE:
+                raise RuntimeError(
+                    "VLM grounding prompt declares a 256x256 current overall "
+                    f"image, but the runtime produced {current_image_shape}"
+                )
             policy_index = _active_keyframe_policy(memory)
             follow_inputs = memory.build_followup_inputs(
                 verification_parameters=task_config["verification"],
@@ -1266,7 +1369,7 @@ def run_episode(
                     memory,
                     contracts,
                     output,
-                    final_pair[0].shape[:2],
+                    current_image_shape,
                 )
                 memory.commit_followup(output)
 
@@ -1290,6 +1393,12 @@ def run_episode(
             def record_followup_attempt(attempt: dict[str, Any]) -> None:
                 followup_attempts.append(attempt)
                 _write_json(vlm_log_path, vlm_trace)
+                _emit_vlm_call_output(
+                    readable_vlm_log_path,
+                    call_index=decision_index,
+                    call_type="followup_planning",
+                    attempt=attempt,
+                )
 
             output, raw, latency, request_latency = _infer_and_commit(
                 client=client,
@@ -1343,20 +1452,35 @@ def run_episode(
             if memory.current_execution() is None:
                 break
         else:
-            raise RuntimeError("maximum planner decisions reached before STOP")
+            decision_limit_reached = True
 
-        evaluation = runtime.env.unwrapped.evaluate(solve_complete_eval=True)
-        record["evaluation"] = _jsonable(evaluation)
-        if _flag(evaluation.get("success", False)):
-            record["status"] = "success"
-        elif _flag(evaluation.get("fail", False)):
-            record["status"] = "fail"
-        elif memory.current_execution() is None:
-            record["status"] = "completed_without_env_success"
+        if terminal_action_status is not None:
+            record["status"] = terminal_action_status
+            record["evaluation"] = terminal_action_evaluation
+            record["termination_reason"] = f"environment_{terminal_action_status}"
         else:
-            record["status"] = last_action_status
+            evaluation = runtime.env.unwrapped.evaluate(solve_complete_eval=True)
+            record["evaluation"] = _jsonable(evaluation)
+            if _flag(evaluation.get("success", False)):
+                record["status"] = "success"
+                record["termination_reason"] = "environment_success"
+            elif _flag(evaluation.get("fail", False)):
+                record["status"] = "fail"
+                record["termination_reason"] = "environment_fail"
+            elif decision_limit_reached:
+                record["status"] = "fail"
+                record["termination_reason"] = "planner_decision_limit"
+            elif memory.current_execution() is None:
+                record["status"] = "fail"
+                record["termination_reason"] = "vlm_stop_without_env_terminal"
+            else:
+                record["status"] = "fail"
+                record["termination_reason"] = (
+                    "planner_exit_without_env_terminal"
+                )
     except Exception as error:
         record["status"] = "error"
+        record["termination_reason"] = "execution_exception"
         record["error"] = f"{type(error).__name__}: {error}"
         record["traceback"] = traceback.format_exc()
     finally:
@@ -1397,8 +1521,18 @@ def run_episode(
                         f"{type(cleanup_error).__name__}: {cleanup_error}"
                     )
             gc.collect()
+    if record["status"] not in ROBOMME_EPISODE_STATUSES:
+        invalid_status = record["status"]
+        record["status"] = "error"
+        record["termination_reason"] = "invalid_episode_status"
+        record["error"] = (
+            "Agentic evaluator produced a status outside the RoboMME contract: "
+            f"{invalid_status!r}"
+        )
     _write_json(video_episode_dir / "episode.json", record)
     if vlm_trace["calls"]:
+        vlm_trace["status"] = record["status"]
+        vlm_trace["termination_reason"] = record["termination_reason"]
         _write_json(vlm_log_path, vlm_trace)
     return record
 

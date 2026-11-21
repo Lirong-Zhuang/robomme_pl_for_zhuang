@@ -1,7 +1,7 @@
 """Data contracts shared by grounding, actions, and the motion backend.
 
-The perception layer must convert OpenCV/F2G outputs into these types before an
-action is called.  Actions therefore never receive a SAPIEN actor as a target.
+The perception layer converts trusted backend outputs into these types before an
+action is called. Actions therefore never receive a SAPIEN actor as a target.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class ObjectEstimate:
 
     object_id: str
     pose: Pose3D
-    size: Size3D
+    size: Size3D | None = None
     label: str | None = None
     confidence: float = 1.0
     metadata: Mapping[str, Any] = field(default_factory=dict)

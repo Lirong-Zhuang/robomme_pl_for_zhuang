@@ -1,4 +1,4 @@
-"""End-to-end VLM hint -> OpenCV mask -> F2G -> ActionRequest pipeline."""
+"""Route trusted VLM point contracts to action-ready 3D estimates."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from harness.actions.types import Size3D
 from .contracts import GroundingContractRegistry
 from .f2g_client import F2GClient
 from .opencv_segmenter import OpenCVSegmenter
+from .transforms import image_point_to_world
 from .transforms import object_to_world
 from .transforms import rotation_matrix_to_quaternion_wxyz
 from .types import CameraFrame
@@ -90,6 +91,32 @@ class GroundingPipeline:
             },
         )
 
+    @staticmethod
+    def _location_estimate(
+        *,
+        frame: CameraFrame,
+        role: str,
+        point_xy: tuple[float, float],
+    ) -> ObjectEstimate:
+        position_xyz, diagnostics = image_point_to_world(frame, point_xy)
+        return ObjectEstimate(
+            object_id=f"{frame.image_ref}:{role}",
+            label=role,
+            pose=Pose3D(
+                position_xyz=position_xyz,
+                quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                frame="world",
+            ),
+            size=None,
+            confidence=1.0,
+            metadata={
+                "source": "vlm_point+depth_unprojection",
+                "image_ref": frame.image_ref,
+                "grounding_backend": "location_grounding",
+                "location": diagnostics,
+            },
+        )
+
     def build_action_request(
         self,
         *,
@@ -158,6 +185,18 @@ class GroundingPipeline:
         target_specs = {item["role"]: item for item in contract["targets"]}
         for role, hint in normalized["targets"].items():
             spec = target_specs[role]
+            backend = spec["grounding_backend"]
+            if backend == "location_grounding":
+                estimates[role] = self._location_estimate(
+                    frame=frame,
+                    role=role,
+                    point_xy=tuple(hint["point_xy"]),
+                )
+                continue
+            if backend not in {"grasp_grounding", "side_grasp_grounding"}:
+                raise ValueError(
+                    f"unsupported grounding_backend {backend!r} for {action_name}:{role}"
+                )
             segmentation_color = (
                 spec.get("fixed_color")
                 if spec.get("color_hint") == "fixed"

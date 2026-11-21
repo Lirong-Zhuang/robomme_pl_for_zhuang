@@ -46,6 +46,13 @@ ORACLE_ACTION_REFERENCES: dict[str, OracleReference] = {
         "solve_button",
         "Replace button actor pose reads with the grounded button estimate.",
     ),
+    "grasp_and_lift_peg": OracleReference(
+        "grasp_and_lift_peg",
+        _PLANNER_FUNCTIONS,
+        "grasp_and_lift_peg_side",
+        "Ground the whole peg for MoveCube and use a deterministic centered-grasp "
+        "hook orientation without endpoint selection.",
+    ),
     "grasp_and_lift_peg_side": OracleReference(
         "grasp_and_lift_peg_side",
         _PLANNER_FUNCTIONS,
@@ -57,7 +64,8 @@ ORACLE_ACTION_REFERENCES: dict[str, OracleReference] = {
         _PLANNER_FUNCTIONS,
         "solve_push_to_target_with_peg",
         "Replace cube/goal actor pose reads; derive direction from grounded positions "
-        "and map the saved black/white grasp endpoint to MoveCube's legacy obj_flag.",
+        "and map the task-specific centered peg grasp to a deterministic legacy "
+        "MoveCube obj_flag.",
     ),
     "solve_push_to_target": OracleReference(
         "solve_push_to_target",

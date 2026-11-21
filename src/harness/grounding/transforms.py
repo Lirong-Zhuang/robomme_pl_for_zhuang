@@ -2,7 +2,67 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
+
+from .types import CameraFrame
+
+
+def image_point_to_world(
+    frame: CameraFrame,
+    point_xy: tuple[float, float],
+    *,
+    search_radius_px: int = 3,
+) -> tuple[tuple[float, float, float], dict[str, Any]]:
+    """Back-project one VLM point using the nearest valid aligned depth pixel."""
+
+    if search_radius_px < 0:
+        raise ValueError("search_radius_px must be non-negative")
+    x, y = (float(point_xy[0]), float(point_xy[1]))
+    height, width = frame.depth.shape
+    if not (0 <= x < width and 0 <= y < height):
+        raise ValueError(f"point_xy={point_xy} is outside the image")
+    center_x = min(max(int(round(x)), 0), width - 1)
+    center_y = min(max(int(round(y)), 0), height - 1)
+    depth_m = frame.depth_m
+
+    candidates: list[tuple[float, int, int, float]] = []
+    for pixel_y in range(
+        max(0, center_y - search_radius_px),
+        min(height, center_y + search_radius_px + 1),
+    ):
+        for pixel_x in range(
+            max(0, center_x - search_radius_px),
+            min(width, center_x + search_radius_px + 1),
+        ):
+            value = float(depth_m[pixel_y, pixel_x])
+            if np.isfinite(value) and value > 0:
+                distance = (pixel_x - x) ** 2 + (pixel_y - y) ** 2
+                candidates.append((distance, pixel_x, pixel_y, value))
+    if not candidates:
+        raise ValueError(
+            f"no valid depth within {search_radius_px}px of point_xy={point_xy}"
+        )
+    _, depth_x, depth_y, depth_value = min(candidates)
+    camera_ray = np.linalg.inv(frame.intrinsic) @ np.asarray(
+        [float(depth_x), float(depth_y), 1.0], dtype=np.float64
+    )
+    camera_point = camera_ray * depth_value
+    world_point = np.linalg.inv(frame.world_to_camera) @ np.asarray(
+        [*camera_point, 1.0], dtype=np.float64
+    )
+    if not np.all(np.isfinite(world_point[:3])):
+        raise ValueError("point-depth back-projection produced non-finite world coordinates")
+    return (
+        tuple(float(item) for item in world_point[:3]),
+        {
+            "requested_point_xy": [x, y],
+            "depth_pixel_xy": [depth_x, depth_y],
+            "depth_m": depth_value,
+            "search_radius_px": search_radius_px,
+        },
+    )
 
 
 def object_to_world(

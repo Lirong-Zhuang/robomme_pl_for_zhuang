@@ -16,21 +16,23 @@ from robomme.logging_utils import logger
 from robomme.robomme_env.utils.subgoal_planner_func import _record_waypoint
 
 from .execution_state import insert_peg_obj_flag_from_grasped_endpoint
+from .execution_state import remember_move_cube_center_peg_grasp
 from .execution_state import remember_grasped_peg_endpoint_color
 from .types import Pose3D
 
 
-def grasp_and_lift_peg_side(
+def _grasp_and_lift_peg(
     env: Any,
     planner: Any,
     *,
     peg_pose: Pose3D,
-    peg_color: str,
+    peg_color: str | None,
+    action_name: str,
 ) -> Any:
-    """Port Oracle ``grasp_and_lift_peg_side``."""
+    """Shared Oracle peg pickup with whole-peg or endpoint state."""
 
     planner.open_gripper()
-    lift_height=0.2
+    lift_height = 0.2
 
     grasp_pose_p = np.asarray(peg_pose.position_xyz, dtype=np.float32).reshape(-1)
     grasp_pose_q = np.asarray(peg_pose.quaternion_wxyz, dtype=np.float32).reshape(-1)
@@ -55,7 +57,7 @@ def grasp_and_lift_peg_side(
 
     _record_waypoint(
         env,
-        "grasp_and_lift_peg_side",
+        action_name,
         "open",
         waypoint_p=lifted_pose_p,
         waypoint_q=grasp_pose_q,
@@ -64,7 +66,7 @@ def grasp_and_lift_peg_side(
 
     _record_waypoint(
         env,
-        "grasp_and_lift_peg_side",
+        action_name,
         "close",
         waypoint_p=grasp_pose_p,
         waypoint_q=grasp_pose_q,
@@ -76,7 +78,7 @@ def grasp_and_lift_peg_side(
     lifted_pose_p[2] = lift_height
     _record_waypoint(
         env,
-        "grasp_and_lift_peg_side",
+        action_name,
         "close",
         waypoint_p=lifted_pose_p,
         waypoint_q=grasp_pose_q,
@@ -85,10 +87,48 @@ def grasp_and_lift_peg_side(
 
     planner.close_gripper()
 
-    current_grasp_pose=sapien.Pose(p=grasp_pose_p, q=grasp_pose_q)
+    current_grasp_pose = sapien.Pose(p=grasp_pose_p, q=grasp_pose_q)
     env.current_grasp_pose = current_grasp_pose
-    # Preserve the actually grounded endpoint for the subsequent peg action.
-    remember_grasped_peg_endpoint_color(env, peg_color)
+    if peg_color is None:
+        remember_move_cube_center_peg_grasp(env)
+    else:
+        # Preserve the actually grounded endpoint for the subsequent peg action.
+        remember_grasped_peg_endpoint_color(env, peg_color)
+
+
+def grasp_and_lift_peg(
+    env: Any,
+    planner: Any,
+    *,
+    peg_pose: Pose3D,
+) -> Any:
+    """Grasp the whole peg near its grounded center for MoveCube."""
+
+    return _grasp_and_lift_peg(
+        env,
+        planner,
+        peg_pose=peg_pose,
+        peg_color=None,
+        action_name="grasp_and_lift_peg",
+    )
+
+
+def grasp_and_lift_peg_side(
+    env: Any,
+    planner: Any,
+    *,
+    peg_pose: Pose3D,
+    peg_color: str,
+) -> Any:
+    """Grasp one VLM-selected black/white peg half for InsertPeg."""
+
+    return _grasp_and_lift_peg(
+        env,
+        planner,
+        peg_pose=peg_pose,
+        peg_color=peg_color,
+        action_name="grasp_and_lift_peg_side",
+    )
 
 
 def insert_peg(env: Any, planner: Any, *, peg_pose: Pose3D, box_pose: Pose3D, direction: int, cut_retreat: bool = False) -> Any:

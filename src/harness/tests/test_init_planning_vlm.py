@@ -384,6 +384,29 @@ def _validate_task_config(
                 "for perception.mode=none, perception.mode=scene_target_set, "
                 "or stop, return exactly"
             ),
+            "the current overall image resolution is height=256, width=256 pixels.",
+            (
+                "every point_xy must be [x, y] in original 256x256 "
+                "current-overall-image pixel coordinates, with x increasing "
+                "rightward, y increasing downward, and the origin at the top-left."
+            ),
+            (
+                "do not use normalized 0-1000 coordinates, resized-model "
+                "coordinates, wrist-image coordinates, or coordinates from "
+                "subgoal-start, demonstration, saved-keyframe, or earlier "
+                "recent images."
+            ),
+            (
+                "the point must refer only to the exact current overall image "
+                "named by grounding.image_ref."
+            ),
+            (
+                "every required point_xy must mark the visible centroid or "
+                "geometric center of its declared target region: use the "
+                "whole-object center for complete objects, the selected-part "
+                "center for a requested object part, and the opening or cap "
+                "center for openings and buttons."
+            ),
         ):
             normalized_phrase = " ".join(
                 required_vlm_grounding_phrase.casefold().split()
@@ -392,6 +415,17 @@ def _validate_task_config(
                 raise ValueError(
                     f"{prompt_name} system prompt omits required VLM grounding "
                     f"routing text: {required_vlm_grounding_phrase!r}"
+                )
+        if prompt_name == "followup_planning":
+            required_state_phrase = (
+                "the task_state input contains only an ordered json list of "
+                "previously completed subgoal texts; it never contains grounding "
+                "coordinates or execution details."
+            )
+            if required_state_phrase not in system_prompt_casefold:
+                raise ValueError(
+                    "followup_planning system prompt omits the minimal "
+                    "completed-subgoal task_state contract"
                 )
         prompt_tokens = set(re.findall(r"\b[a-z][a-z0-9_]*\b", system_prompt))
         mentioned_subgoal_keys = subgoal_keys & prompt_tokens
@@ -452,13 +486,24 @@ def _validate_task_config(
             "grounding",
             "point_xy",
             "color_hint",
-            "opencv",
-            "f2g",
         ):
             if required_grounding_term not in prompt_text_casefold:
                 raise ValueError(
                     f"{prompt_name} prompt omits the 2D grounding contract term "
                     f"{required_grounding_term!r}"
+                )
+        for forbidden_perception_term in (
+            "grounding_backend",
+            "grasp_grounding",
+            "side_grasp_grounding",
+            "location_grounding",
+            "opencv",
+            "f2g",
+        ):
+            if forbidden_perception_term in prompt_text_casefold:
+                raise ValueError(
+                    f"{prompt_name} prompt exposes harness-owned perception "
+                    f"detail {forbidden_perception_term!r}"
                 )
         for forbidden_vlm_output in (
             "never return depth",

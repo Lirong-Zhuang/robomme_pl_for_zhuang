@@ -1,7 +1,8 @@
 """Validate VLM 2D hints against trusted action perception contracts.
 
 The VLM is allowed to identify a target only by one image-space point and an
-optional color hint.  OpenCV owns the mask, and F2G owns all metric geometry.
+optional color hint.  The trusted catalog, never the VLM, selects the geometry
+backend for each target role.
 """
 
 from __future__ import annotations
@@ -19,6 +20,11 @@ _ROLE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _GROUNDING_STATUSES = {"ok", "ambiguous", "not_required"}
 _GROUNDING_FIELDS = {"status", "image_ref", "targets"}
 _GROUNDING_TARGET_FIELDS = {"point_xy", "color_hint"}
+_VLM_POINT_BACKENDS = {
+    "grasp_grounding",
+    "side_grasp_grounding",
+    "location_grounding",
+}
 
 
 def _required_string(name: str, value: Any) -> str:
@@ -149,6 +155,63 @@ class GroundingContractRegistry:
             raise ValueError(f"invalid perception mode for {action_name!r}: {mode!r}")
         if not isinstance(targets, list):
             raise ValueError(f"perception targets for {action_name!r} must be a list")
+
+        for target in targets:
+            if not isinstance(target, Mapping):
+                raise ValueError(
+                    f"perception target for {action_name!r} must be an object"
+                )
+            role = _required_string("perception target role", target.get("role"))
+            point_semantics = _required_string(
+                f"perception target {role!r} point_semantics",
+                target.get("point_semantics"),
+            )
+            backend = target.get("grounding_backend")
+            if mode == "vlm_points":
+                normalized_semantics = point_semantics.casefold()
+                if not any(
+                    word in normalized_semantics for word in ("center", "centroid")
+                ):
+                    raise ValueError(
+                        f"grounding role {role!r} point_semantics must request "
+                        "a center or centroid"
+                    )
+                if backend not in _VLM_POINT_BACKENDS:
+                    raise ValueError(
+                        f"grounding role {role!r} has invalid grounding_backend: "
+                        f"{backend!r}"
+                    )
+                if backend == "location_grounding":
+                    if target.get("geometry_outputs") != ["position"]:
+                        raise ValueError(
+                            f"location grounding role {role!r} must output position"
+                        )
+                    if "segmentation_profile" in target or "f2g_outputs" in target:
+                        raise ValueError(
+                            f"location grounding role {role!r} must not configure "
+                            "OpenCV or F2G"
+                        )
+                else:
+                    _required_string(
+                        f"grounding role {role!r} segmentation_profile",
+                        target.get("segmentation_profile"),
+                    )
+                    f2g_outputs = target.get("f2g_outputs")
+                    if not isinstance(f2g_outputs, list) or "pose" not in f2g_outputs:
+                        raise ValueError(
+                            f"grounding role {role!r} must request an F2G pose"
+                        )
+                if (
+                    backend == "side_grasp_grounding"
+                    and target.get("color_hint") != "required"
+                ):
+                    raise ValueError(
+                        f"side grounding role {role!r} requires a color hint"
+                    )
+            elif mode == "scene_target_set" and backend != "scene_grounding":
+                raise ValueError(
+                    f"scene target role {role!r} requires scene_grounding"
+                )
 
         normalized = normalize_vlm_grounding(grounding)
         if mode != "vlm_points":

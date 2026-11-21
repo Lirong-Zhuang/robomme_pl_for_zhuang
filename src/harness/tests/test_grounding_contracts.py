@@ -102,6 +102,20 @@ def test_peg_endpoint_color_is_limited_to_black_or_white() -> None:
         )
 
 
+def test_whole_peg_grasp_uses_no_endpoint_color() -> None:
+    grounding = _registry().validate(
+        "grasp_and_lift_peg",
+        _point("peg"),
+    )
+    assert grounding["targets"]["peg"]["color_hint"] is None
+
+    with pytest.raises(ValueError, match="must not use color_hint"):
+        _registry().validate(
+            "grasp_and_lift_peg",
+            _point("peg", color_hint="black"),
+        )
+
+
 def test_peg_push_target_uses_trusted_fixed_color_not_vlm_color() -> None:
     grounding = {
         "status": "ok",

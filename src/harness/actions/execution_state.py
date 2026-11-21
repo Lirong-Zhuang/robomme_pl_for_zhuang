@@ -7,6 +7,7 @@ from typing import Any
 
 _PEG_COLOR_ATTRIBUTE = "_agentic_grasped_peg_endpoint_color"
 _VALID_PEG_COLORS = {"black", "white"}
+_MOVE_CUBE_CENTER_GRASP = "center"
 
 
 def _state_owner(env: Any) -> Any:
@@ -22,6 +23,12 @@ def remember_grasped_peg_endpoint_color(env: Any, color: str) -> None:
     setattr(_state_owner(env), _PEG_COLOR_ATTRIBUTE, normalized)
 
 
+def remember_move_cube_center_peg_grasp(env: Any) -> None:
+    """Record MoveCube's task-specific whole-peg center grasp."""
+
+    setattr(_state_owner(env), _PEG_COLOR_ATTRIBUTE, _MOVE_CUBE_CENTER_GRASP)
+
+
 def require_grasped_peg_endpoint_color(env: Any) -> str:
     """Return the black/white endpoint state produced by peg pickup."""
 
@@ -35,8 +42,13 @@ def require_grasped_peg_endpoint_color(env: Any) -> str:
 
 
 def move_cube_obj_flag_from_grasped_endpoint(env: Any) -> int:
-    """Map MoveCube's black-head/white-tail endpoint convention to Oracle flag."""
+    """Map endpoint or task-specific center grasp to MoveCube's Oracle flag."""
 
+    value = getattr(_state_owner(env), _PEG_COLOR_ATTRIBUTE, None)
+    if value == _MOVE_CUBE_CENTER_GRASP:
+        # A centered grasp makes the two peg ends interchangeable for MoveCube;
+        # retain one deterministic legacy hook orientation.
+        return 1
     return 1 if require_grasped_peg_endpoint_color(env) == "black" else -1
 
 

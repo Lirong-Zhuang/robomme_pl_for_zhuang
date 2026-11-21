@@ -25,6 +25,8 @@ RGB_PROTOTYPES = {
     "white": (235, 235, 235),
     "black": (25, 25, 25),
 }
+REFERENCE_IMAGE_RESOLUTION = 256
+_REFERENCE_SEED_SEPARATION_PX = 15
 _COLOR_ALIASES = {
     "红": "red",
     "红色": "red",
@@ -77,6 +79,13 @@ DEFAULT_PROFILES = {
         depth_tolerance_m=0.035,
         morphology_px=3,
     ),
+    "peg": SegmentationProfile(
+        min_area=50,
+        max_area_fraction=0.12,
+        depth_search_radius_px=100,
+        depth_tolerance_m=0.035,
+        morphology_px=3,
+    ),
     "container": SegmentationProfile(
         min_area=100,
         max_area_fraction=0.35,
@@ -116,6 +125,52 @@ DEFAULT_PROFILES = {
 # Every color-guided action uses the parameters validated by the manual
 # grounding test. Object-specific profiles still govern depth-only masks.
 DEFAULT_COLOR_PROFILE = DEFAULT_PROFILES["compact_colored"]
+
+
+def _image_pixel_scale(image_shape: tuple[int, int]) -> float:
+    """Return the linear pixel scale relative to the 256x256 tuning frame."""
+
+    height, width = image_shape
+    if height <= 0 or width <= 0:
+        raise ValueError("image dimensions must be positive")
+    # The grounding camera clones the policy camera and preserves its aspect
+    # ratio/FOV.  Geometric-mean scaling also behaves sensibly if a future
+    # camera is rectangular.  Never shrink the parameters used by small
+    # synthetic tests or legacy <=256 inputs.
+    return max(
+        1.0,
+        float(np.sqrt(height * width)) / REFERENCE_IMAGE_RESOLUTION,
+    )
+
+
+def _scaled_odd_pixels(value: int, scale: float) -> int:
+    scaled = max(1, int(round(value * scale)))
+    return scaled if scaled % 2 else scaled + 1
+
+
+def _scale_profile(
+    profile: SegmentationProfile,
+    *,
+    pixel_scale: float,
+) -> SegmentationProfile:
+    """Scale spatial OpenCV thresholds while preserving metric/color rules."""
+
+    return SegmentationProfile(
+        min_area=max(1, int(round(profile.min_area * pixel_scale**2))),
+        max_area_fraction=profile.max_area_fraction,
+        depth_search_radius_px=max(
+            0,
+            int(round(profile.depth_search_radius_px * pixel_scale)),
+        ),
+        depth_tolerance_m=profile.depth_tolerance_m,
+        morphology_px=_scaled_odd_pixels(profile.morphology_px, pixel_scale),
+        hsv_hue_tolerance=profile.hsv_hue_tolerance,
+        hsv_min_saturation=profile.hsv_min_saturation,
+        hsv_min_value=profile.hsv_min_value,
+        white_max_saturation=profile.white_max_saturation,
+        white_min_value=profile.white_min_value,
+        black_max_value=profile.black_max_value,
+    )
 
 
 def _morphology(mask: np.ndarray, size: int) -> np.ndarray:
@@ -186,7 +241,11 @@ class OpenCVSegmenter:
         color_hint: str | None,
         profile_name: str,
     ) -> SegmentationResult:
-        profile = self._profile(profile_name)
+        pixel_scale = _image_pixel_scale(frame.rgb.shape[:2])
+        profile = _scale_profile(
+            self._profile(profile_name),
+            pixel_scale=pixel_scale,
+        )
         x, y = point_xy
         height, width = frame.rgb.shape[:2]
         if not (0 <= x < width and 0 <= y < height):
@@ -197,11 +256,20 @@ class OpenCVSegmenter:
                 point_xy,
                 color_hint,
                 profile_name,
-                self.color_profile,
+                _scale_profile(
+                    self.color_profile,
+                    pixel_scale=pixel_scale,
+                ),
             )
         if profile_name in {"compact_colored", "peg_colored"}:
             raise ValueError(f"profile {profile_name!r} requires color_hint")
-        return self._segment_depth(frame, point_xy, profile_name, profile)
+        return self._segment_depth(
+            frame,
+            point_xy,
+            profile_name,
+            profile,
+            pixel_scale,
+        )
 
     def _segment_colored(
         self,
@@ -296,6 +364,7 @@ class OpenCVSegmenter:
         depth_m: np.ndarray,
         point_xy: tuple[float, float],
         radius: int,
+        pixel_scale: float,
     ) -> list[tuple[int, int]]:
         height, width = depth_m.shape
         px, py = int(round(point_xy[0])), int(round(point_xy[1]))
@@ -314,12 +383,17 @@ class OpenCVSegmenter:
         # can still recover a nearby object instead of only the table plane.
         seeds: list[tuple[int, int]] = []
         seed_depths: list[float] = []
+        seed_separation_px = max(
+            1,
+            int(round(_REFERENCE_SEED_SEPARATION_PX * pixel_scale)),
+        )
         for index in order:
             seed = (int(xs[index]), int(ys[index]))
             value = float(depth_m[seed[1], seed[0]])
             if any(
                 abs(value - previous) < 0.008
-                and (seed[0] - old[0]) ** 2 + (seed[1] - old[1]) ** 2 < 15**2
+                and (seed[0] - old[0]) ** 2 + (seed[1] - old[1]) ** 2
+                < seed_separation_px**2
                 for old, previous in zip(seeds, seed_depths, strict=True)
             ):
                 continue
@@ -361,10 +435,14 @@ class OpenCVSegmenter:
         point_xy: tuple[float, float],
         profile_name: str,
         profile: SegmentationProfile,
+        pixel_scale: float,
     ) -> SegmentationResult:
         depth_m = frame.depth_m
         seeds = self._seed_pixels(
-            depth_m, point_xy, profile.depth_search_radius_px
+            depth_m,
+            point_xy,
+            profile.depth_search_radius_px,
+            pixel_scale,
         )
         candidates: list[dict[str, Any]] = []
         for seed in seeds:
@@ -399,6 +477,21 @@ class OpenCVSegmenter:
                 "point_distance_px": best["distance_px"],
                 "seed_xy": best["seed_xy"],
                 "candidate_count": len(candidates),
+                "pixel_scale": pixel_scale,
+                "reference_resolution": REFERENCE_IMAGE_RESOLUTION,
+                "scaled_thresholds": {
+                    "min_area": profile.min_area,
+                    "depth_search_radius_px": profile.depth_search_radius_px,
+                    "morphology_px": profile.morphology_px,
+                    "seed_separation_px": max(
+                        1,
+                        int(
+                            round(
+                                _REFERENCE_SEED_SEPARATION_PX * pixel_scale
+                            )
+                        ),
+                    ),
+                },
             },
         )
 
@@ -406,7 +499,11 @@ class OpenCVSegmenter:
         """Find all compact, saturated grid targets for the no-point actions."""
 
         profile_name = "grid_targets"
-        profile = self._profile(profile_name)
+        pixel_scale = _image_pixel_scale(frame.rgb.shape[:2])
+        profile = _scale_profile(
+            self._profile(profile_name),
+            pixel_scale=pixel_scale,
+        )
         hsv = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2HSV)
         valid_depth = np.isfinite(frame.depth_m) & (frame.depth_m > 0)
         foreground = (hsv[..., 1] >= 45) & (hsv[..., 2] >= 45) & valid_depth

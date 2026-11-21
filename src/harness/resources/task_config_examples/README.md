@@ -38,9 +38,17 @@ Every example uses the same two-prompt runtime interface:
   completed subgoal advances.
 
 The `VLM grounding` output contract uses a `grounding` object that may contain
-only one 2D `point_xy` per required
-semantic role plus its declared `color_hint`. OpenCV owns mask generation and F2G
-owns every metric pose, location, orientation, and size value.
+only one 2D `point_xy` per required semantic role plus its declared `color_hint`.
+Every point marks the visible centroid or geometric center of its declared target
+region: the whole-object center for a complete object, the selected-part center
+for an object part, or the opening/cap center for openings and buttons. Perception
+backend and geometry implementation details are intentionally absent from runtime
+VLM prompts and remain owned by the trusted harness.
+
+Both runtime system prompts fix VLM `point_xy` to the original 256x256 current
+overall image: `[x, y]`, top-left origin, x rightward, y downward. Normalized
+0-1000, resized-model, wrist-view, and earlier-observation coordinates are
+forbidden. Runtime prompts expose no other camera coordinate system.
 
 Each top-level subgoal has a unique stable `subgoal_key`. The VLM never outputs an
 action name. The harness resolves `subgoal_key` to the task config's trusted action
@@ -62,8 +70,11 @@ Object identity and operational notes are intentionally separate:
 
 Runtime memory is split into two files inside each episode directory:
 
-- `task_state.json` is a compact, atomically replaced working state passed to normal
-  follow-up planning calls.
+- `task_state.json` is the complete, atomically replaced internal working state used
+  for execution and recovery. It is not copied into a follow-up prompt. The runtime
+  derives `{task_state}` as only an ordered JSON list of previously completed
+  subgoal text strings; current/incomplete/failed subgoals, coordinates, grounding,
+  action details, paths, and event metadata are excluded.
 - `task_events.jsonl` is an append-only detailed event log read only for audit,
   recovery, or explicit history lookup.
 

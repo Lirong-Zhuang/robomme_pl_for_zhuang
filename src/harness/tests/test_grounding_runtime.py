@@ -7,11 +7,13 @@ import numpy as np
 import pytest
 
 from harness.grounding.f2g_client import F2GClient
+from harness.grounding.grounder import GroundingPipeline
 from harness.grounding.observation import camera_frame_from_maniskill
 from harness.grounding.observation import camera_frame_from_robomme
 from harness.grounding.observation import depth_statistics
 from harness.grounding.observation import remap_grounding_points
 from harness.grounding.transforms import object_to_world
+from harness.grounding.transforms import image_point_to_world
 from harness.grounding.transforms import rotation_matrix_to_quaternion_wxyz
 from harness.grounding.types import CameraFrame
 from harness.grounding.types import SegmentationResult
@@ -107,6 +109,47 @@ def test_grounding_points_are_remapped_to_high_resolution_camera() -> None:
     assert grounding["targets"]["object"]["point_xy"] == [128.0, 64.0]
 
 
+def test_opencv_spatial_thresholds_scale_for_grounding_camera() -> None:
+    from harness.grounding.opencv_segmenter import DEFAULT_PROFILES
+    from harness.grounding.opencv_segmenter import _image_pixel_scale
+    from harness.grounding.opencv_segmenter import _scale_profile
+
+    pixel_scale = _image_pixel_scale((768, 768))
+    button = _scale_profile(
+        DEFAULT_PROFILES["button"],
+        pixel_scale=pixel_scale,
+    )
+    container = _scale_profile(
+        DEFAULT_PROFILES["container"],
+        pixel_scale=pixel_scale,
+    )
+
+    assert pixel_scale == pytest.approx(3.0)
+    assert button.min_area == 450
+    assert button.depth_search_radius_px == 195
+    assert button.morphology_px == 9
+    assert container.min_area == 900
+    assert container.depth_search_radius_px == 330
+    assert container.morphology_px == 21
+    assert button.depth_tolerance_m == DEFAULT_PROFILES["button"].depth_tolerance_m
+    assert button.max_area_fraction == DEFAULT_PROFILES["button"].max_area_fraction
+
+
+def test_opencv_spatial_thresholds_do_not_shrink_below_reference_resolution() -> None:
+    from harness.grounding.opencv_segmenter import DEFAULT_PROFILES
+    from harness.grounding.opencv_segmenter import _image_pixel_scale
+    from harness.grounding.opencv_segmenter import _scale_profile
+
+    pixel_scale = _image_pixel_scale((40, 40))
+    actual = _scale_profile(
+        DEFAULT_PROFILES["compact_colored"],
+        pixel_scale=pixel_scale,
+    )
+
+    assert pixel_scale == pytest.approx(1.0)
+    assert actual == DEFAULT_PROFILES["compact_colored"]
+
+
 @pytest.mark.parametrize("input_size", [(256, 256), (512, 512), (768, 768)])
 def test_f2g_client_resizes_only_serialized_inputs(
     monkeypatch: pytest.MonkeyPatch,
@@ -164,6 +207,48 @@ def test_object_to_world_uses_world_to_camera_extrinsic() -> None:
     assert rotation_matrix_to_quaternion_wxyz(world_object[:3, :3]) == pytest.approx(
         [1, 0, 0, 0]
     )
+
+
+def test_location_grounding_backprojects_depth_without_opencv_or_f2g() -> None:
+    class ForbiddenSegmenter:
+        def segment(self, *args, **kwargs):
+            raise AssertionError("location_grounding must not call OpenCV")
+
+    class ForbiddenF2G:
+        def predict(self, *args, **kwargs):
+            raise AssertionError("location_grounding must not call F2G")
+
+    frame = CameraFrame(
+        rgb=np.zeros((5, 5, 3), dtype=np.uint8),
+        depth=np.full((5, 5), 1000, dtype=np.uint16),
+        intrinsic=np.asarray([[100, 0, 2], [0, 100, 2], [0, 0, 1]]),
+        world_to_camera=np.eye(4),
+        depth_scale=0.001,
+    )
+    expected_position, diagnostics = image_point_to_world(frame, (2.0, 2.0))
+    assert expected_position == pytest.approx((0.0, 0.0, 1.0))
+    assert diagnostics["depth_pixel_xy"] == [2, 2]
+
+    grounded = GroundingPipeline(
+        segmenter=ForbiddenSegmenter(),
+        f2g_client=ForbiddenF2G(),
+    ).build_action_request(
+        action_name="solve_button",
+        grounding={
+            "status": "ok",
+            "image_ref": "current_front",
+            "targets": {
+                "button": {"point_xy": [2, 2], "color_hint": None},
+            },
+        },
+        frame=frame,
+    )
+
+    assert grounded.masks == {}
+    estimate = grounded.request.targets["button"]
+    assert estimate.pose.position_xyz == pytest.approx(expected_position)
+    assert estimate.size is None
+    assert estimate.metadata["grounding_backend"] == "location_grounding"
 
 
 def _synthetic_frame(rgb: np.ndarray, depth_mm: np.ndarray) -> CameraFrame:

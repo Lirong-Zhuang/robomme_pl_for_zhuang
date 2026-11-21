@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v19_vlm_grounding_routing"
+INIT_PROMPT_VERSION = "minimal_task_config_v23_center_points"
 
 
 @dataclass(frozen=True)
@@ -310,14 +310,33 @@ Runtime VLM grounding boundary:
   ``Apply pixel-grounding rules only when perception.mode=vlm_points.``
   ``For perception.mode=none, perception.mode=scene_target_set, or STOP, return
   exactly {{"status":"not_required","image_ref":null,"targets":{{}}}}.``
+- Both generated runtime system prompts must also include these exact pixel-coordinate
+  sentences:
+  ``The current overall image resolution is height=256, width=256 pixels.``
+  ``Every point_xy must be [x, y] in original 256x256 current-overall-image pixel
+  coordinates, with x increasing rightward, y increasing downward, and the origin
+  at the top-left.``
+  ``Do not use normalized 0-1000 coordinates, resized-model coordinates,
+  wrist-image coordinates, or coordinates from subgoal-start, demonstration,
+  saved-keyframe, or earlier recent images.``
+  ``The point must refer only to the exact current overall image named by
+  grounding.image_ref.``
 - Treat each selected action's perception contract from the trusted action resource
-  as authoritative and inline that contract into both generated runtime system
-  prompts. The init planner must not alter target roles, point requirements, color
-  policy, segmentation profile, or F2G outputs.
+  as authoritative. Inline only the VLM-facing target roles, point requirements,
+  color policy, allowed colors, and point_semantics into both generated runtime
+  system prompts. Do not expose grounding_backend, segmentation profiles, geometry
+  outputs, F2G outputs, or other perception implementation details in either
+  runtime prompt; the trusted harness owns them.
+- Both generated runtime system prompts must include this exact center-point rule:
+  ``Every required point_xy must mark the visible centroid or geometric center of
+  its declared target region: use the whole-object center for complete objects, the
+  selected-part center for a requested object part, and the opening or cap center
+  for openings and buttons.``
 - Preserve every allowed_colors restriction. For a peg endpoint restricted to
   black and white, require the in-task VLM to place point_xy inside the intended
-  half and return exactly black or white as color_hint; do not describe the peg as
-  one undifferentiated target.
+  half and return exactly black or white as color_hint. A whole-peg grasp instead
+  requires a point at the complete peg's visible center with color_hint=null; do
+  not transfer the endpoint contract between these two actions.
 - Treat semantic_arguments with source=subgoal_text_tokens as token contracts.
   Generated subgoal text must visibly contain the intended semantic words. Runtime
   extracts independent words such as left/right rather than enumerating or matching
@@ -325,9 +344,8 @@ Runtime VLM grounding boundary:
 - Only when perception.mode=vlm_points, the in-task VLM supplies current-image 2D
   point hints and, when requested, one color hint. It must never predict or return
   depth, camera/world/base position, pose, orientation, Euler angles, quaternion,
-  transform matrix, metric size, point cloud, mask, contour, or bounding box.
-  OpenCV converts the 2D hint into a mask; F2G alone produces every pose, metric
-  location, orientation, and size used by an action.
+  transform matrix, metric size, point cloud, mask, contour, bounding box, backend,
+  or perception-tool choice. The harness computes all downstream geometry.
 - Every first-planning and follow-up response has a top-level grounding object with
   exactly status, image_ref, and targets. status is ok, ambiguous, or not_required.
   For ok, image_ref copies the exact supplied current overall-view image ID and
@@ -336,8 +354,8 @@ Runtime VLM grounding boundary:
   origin at the image's top-left and must visibly lie inside the intended object.
   color_hint is a concise visible color when the action contract requires it and is
   null when the contract says not_used or fixed. For a fixed policy, the trusted
-  action catalog supplies fixed_color to OpenCV; the VLM predicts only the 2D point
-  and must not repeat or override that color.
+  action catalog supplies fixed_color to the perception runtime; the VLM predicts
+  only the 2D point and must not repeat or override that color.
 - If a required target cannot be identified reliably in the current overall view,
   return status=ambiguous with that image_ref and targets={{}}; never invent a point.
   If perception.mode is none or scene_target_set, or when returning STOP, return
@@ -345,7 +363,7 @@ Runtime VLM grounding boundary:
   delegates whole-scene candidate extraction to the perception backend and
   therefore must not contain VLM-predicted per-target coordinates.
 - The semantic arguments object remains reserved for reusable subgoal-template and
-  action parameters. Never place image coordinates or F2G geometry in arguments or
+  action parameters. Never place image coordinates or 3D geometry in arguments or
   in subgoal text. subgoal_sequence entries remain semantic and contain exactly
   subgoal_key, subgoal, and arguments; only the selected next subgoal has the
   separate top-level grounding object.
@@ -426,11 +444,20 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   true, description must also include the visible facts requested by the matching
   description_instruction. If status is incomplete, the next key, text, and
   arguments must retain the current subgoal. If completed, advance according to the
-  embedded planning policy and compact Task State. If failed, select an embedded,
+  embedded planning policy and completed-subgoal history. If failed, select an embedded,
   trusted retry or recovery when the task remains recoverable; otherwise return STOP
   as both next_subgoal_key and next_subgoal with empty arguments. The VLM must never
   output action_name; the harness resolves both action and acceptance criteria from
   the selected key.
+- In followup_planning, {{task_state}} is deliberately not the internal persisted
+  task-state object. It is only the ordered JSON list of previously completed
+  subgoal text strings, oldest to newest. The current subgoal is supplied separately
+  through {{current_subgoal}} and must not be duplicated in that list. Incomplete
+  and failed attempts are not entries. Both the follow-up system prompt and user
+  template must make this minimal meaning explicit. The follow-up system prompt
+  must include this exact sentence: ``The task_state input contains only an ordered
+  JSON list of previously completed subgoal texts; it never contains grounding
+  coordinates or execution details.``
 - In every generated system prompt, explicitly identify every non-goal information
   source selected in planning.information_sources as a necessary reference for
   subgoal planning together with task_goal. A keyframe task must plan from task_goal
@@ -442,10 +469,10 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
 Information-source transport is covered by the required conditional placeholders:
 - Initial demonstration-video observations arrive inside first_planning's
   {{current_observations}}.
-- A video-derived subgoal list or strategy saved for later calls arrives inside
-  {{task_state}} and explicitly inside {{video_subgoal_list}}.
-- Saved keyframes and their descriptions arrive inside {{task_state}} and explicitly
-  inside {{saved_keyframe}}. For single capture it contains one image placeholder;
+- A video-derived subgoal list or strategy saved for later calls arrives explicitly
+  inside {{video_subgoal_list}}, never inside {{task_state}}.
+- Saved keyframes and their descriptions arrive explicitly inside
+  {{saved_keyframe}}, never inside {{task_state}}. For single capture it contains one image placeholder;
   for sequence capture it contains the ordered saved observations, their image
   placeholders and descriptions, saved_count, the frame-count upper bound, and the
   observable stop condition.

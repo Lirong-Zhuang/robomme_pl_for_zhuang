@@ -2,8 +2,9 @@
 
 The VLM plans with stable ``subgoal_key`` values and ordinary-language subgoals.
 This module resolves trusted actions and acceptance criteria from the task config,
-keeps a compact ``task_state.json`` for every follow-up call, and appends detailed
-events to ``task_events.jsonl`` for audit or recovery.
+keeps the complete internal ``task_state.json`` for execution and recovery, derives
+only completed subgoal texts for normal follow-up calls, and appends detailed events
+to ``task_events.jsonl`` for audit or recovery.
 
 The implementation assumes one writer per episode directory. It never executes an
 action by name; callers must resolve the returned action name through their own
@@ -714,7 +715,7 @@ class TaskMemory:
             raise RuntimeError("cannot build follow-up inputs after STOP")
         inputs = {
             "task_goal": state["task_goal"],
-            "task_state": _json_copy(state),
+            "task_state": self._completed_subgoal_history(state),
             "current_subgoal_key": execution["subgoal_key"],
             "current_subgoal": execution["subgoal"],
             "acceptance_criteria": dict(execution["acceptance"]),
@@ -746,6 +747,28 @@ class TaskMemory:
                 for item in state["plan"]["sequence"]
             ]
         return inputs
+
+    @staticmethod
+    def _completed_subgoal_history(state: Mapping[str, Any]) -> list[str]:
+        """Return the minimal planner view of prior completed subgoals."""
+
+        plan = state.get("plan")
+        progress = state.get("progress")
+        if not isinstance(plan, Mapping) or not isinstance(progress, Mapping):
+            raise ValueError("task state is missing plan/progress")
+        sequence = plan.get("sequence")
+        completed = progress.get("completed_subgoal_ids")
+        if not isinstance(sequence, list) or not isinstance(completed, list):
+            raise ValueError("task state has invalid sequence/completed subgoals")
+        completed_ids = set(completed)
+        history: list[str] = []
+        for item in sequence:
+            if not isinstance(item, Mapping):
+                raise ValueError("task state sequence item must be an object")
+            if item.get("instance_id") not in completed_ids:
+                continue
+            history.append(_required_string("completed subgoal", item.get("subgoal")))
+        return history
 
     def save_keyframe_selection(
         self,

@@ -11,6 +11,37 @@ class _DenseCollectionStopped(Exception):
     """Internal signal used to stop a planner after the env has stopped."""
 
 
+ROBOMME_TERMINAL_STATUSES = frozenset({"success", "fail", "timeout", "error"})
+
+
+def resolve_robomme_status(
+    *,
+    reported_status: Any,
+    evaluation: dict[str, Any],
+    terminated: bool,
+    truncated: bool,
+) -> str:
+    """Resolve status using RoboMME's wrapper contract.
+
+    A terminal ``info["status"]`` was already classified by RoboMME and is
+    therefore authoritative.  The explicit evaluation and Gym flags are only
+    fallbacks for direct planner execution paths whose last native step still
+    reports ``ongoing`` or omits the field.
+    """
+
+    if reported_status in ROBOMME_TERMINAL_STATUSES:
+        return reported_status
+    if OraclePlusPlannerRuntime._flag(evaluation.get("success", False)):
+        return "success"
+    if terminated:
+        return "fail"
+    if truncated:
+        return "timeout"
+    if OraclePlusPlannerRuntime._flag(evaluation.get("fail", False)):
+        return "fail"
+    return "ongoing"
+
+
 def _flag_any(value: Any) -> bool:
     """Return whether a scalar/array/tensor termination flag contains true."""
     try:
@@ -65,7 +96,7 @@ def _run_with_bounded_dense_collection(
             if (
                 _flag_any(terminated)
                 or _flag_any(truncated)
-                or status in {"success", "fail", "timeout", "error"}
+                or status in ROBOMME_TERMINAL_STATUSES
             ):
                 raise _DenseCollectionStopped
         return out
@@ -387,16 +418,12 @@ class OraclePlusPlannerRuntime:
         terminated = bool(self._last(terminated_batch))
         truncated = bool(self._last(truncated_batch))
         reported_status = self._last(info_batch.get("status"))
-        if self._flag(evaluation.get("success", False)):
-            status = "success"
-        elif self._flag(evaluation.get("fail", False)):
-            status = "fail"
-        elif truncated:
-            status = "timeout"
-        elif reported_status in {"success", "fail", "timeout", "error"}:
-            status = reported_status
-        else:
-            status = "ongoing"
+        status = resolve_robomme_status(
+            reported_status=reported_status,
+            evaluation=evaluation,
+            terminated=terminated,
+            truncated=truncated,
+        )
         info = {
             key: self._last(value) if isinstance(value, list) else value
             for key, value in info_batch.items()
@@ -405,7 +432,7 @@ class OraclePlusPlannerRuntime:
         stopped = (
             terminated
             or truncated
-            or status in {"success", "fail", "timeout", "error"}
+            or status in ROBOMME_TERMINAL_STATUSES
         )
         return ActionExecution(
             obs_batch=obs_batch,

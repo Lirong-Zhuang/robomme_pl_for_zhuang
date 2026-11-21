@@ -42,7 +42,7 @@ DEPTH_SCALE=0.001
 GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
-RUN_NAME="test_v1.4"
+RUN_NAME="test_v1.5"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false

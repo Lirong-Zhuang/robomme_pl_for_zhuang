@@ -9,6 +9,7 @@ import pytest
 from harness.actions.executor import ActionExecutor
 from harness.actions.execution_state import insert_peg_obj_flag_from_grasped_endpoint
 from harness.actions.execution_state import move_cube_obj_flag_from_grasped_endpoint
+from harness.actions.execution_state import remember_move_cube_center_peg_grasp
 from harness.actions.execution_state import remember_grasped_peg_endpoint_color
 from harness.actions.execution_state import require_grasped_peg_endpoint_color
 from harness.actions.oracle_reference import ORACLE_ACTION_REFERENCES
@@ -108,6 +109,9 @@ def test_every_catalog_action_binds_its_explicit_parameters() -> None:
         "solve_pickup": ActionRequest("solve_pickup", targets={"object": estimate}),
         "solve_put_into_bin": ActionRequest("solve_put_into_bin", targets={"container": estimate}),
         "solve_button": ActionRequest("solve_button", targets={"button": estimate}),
+        "grasp_and_lift_peg": ActionRequest(
+            "grasp_and_lift_peg", targets={"peg": estimate}
+        ),
         "grasp_and_lift_peg_side": ActionRequest("grasp_and_lift_peg_side", targets={"peg": black_peg}),
         "solve_push_to_target_with_peg": ActionRequest(
             "solve_push_to_target_with_peg",
@@ -170,6 +174,11 @@ def test_peg_endpoint_color_maps_to_task_specific_oracle_flags() -> None:
     assert require_grasped_peg_endpoint_color(env) == "white"
     assert move_cube_obj_flag_from_grasped_endpoint(env) == -1
     assert insert_peg_obj_flag_from_grasped_endpoint(env) == 1
+
+    remember_move_cube_center_peg_grasp(env)
+    assert move_cube_obj_flag_from_grasped_endpoint(env) == 1
+    with pytest.raises(RuntimeError, match="black or white endpoint"):
+        insert_peg_obj_flag_from_grasped_endpoint(env)
 
 
 def test_executor_calls_function_inside_oracle_runtime() -> None:
