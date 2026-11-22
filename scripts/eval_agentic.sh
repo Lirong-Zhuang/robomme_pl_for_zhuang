@@ -42,7 +42,10 @@ DEPTH_SCALE=0.001
 GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
-RUN_NAME="test_v1.7"
+# The selected model is appended automatically, producing separate resumable runs
+# such as test_v1.7_30b and test_v1.7_27b. Set RUN_NAME in the environment only
+# when an explicit run identity is required.
+RUN_NAME_BASE="${RUN_NAME_BASE:-test_v1.7}"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
@@ -52,9 +55,11 @@ USE_TASK_CONFIG_EXAMPLES=true
 # Three-environment/model configuration
 # =============================================================================
 
-# Choose exactly one Agentic VLM: "30b" or "27b".
+# Choose exactly one Agentic VLM: "30b" or "27b". This can also be overridden
+# without editing the file, for example: VLM_MODEL=27b bash scripts/eval_agentic.sh
 # Both models are served from the shared micromamba environment named "vllm".
-VLM_MODEL="30b"
+VLM_MODEL="${VLM_MODEL:-30b}"
+VLM_MODEL="${VLM_MODEL,,}"
 
 VLM_MAMBA_ENV="vllm"
 F2G_MAMBA_ENV="f2g"
@@ -63,7 +68,7 @@ EVAL_MAMBA_ENV="robomme"
 MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-/data/zhuanglr/micromamba}"
 MAMBA_EXE="${MAMBA_EXE:-$MAMBA_ROOT_PREFIX/bin/micromamba}"
 
-case "${VLM_MODEL,,}" in
+case "$VLM_MODEL" in
     30b)
         MODEL_PATH="/data/public/qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
         VLM_SERVED_MODEL_NAME="qwen3vl-30b"
@@ -82,6 +87,7 @@ case "${VLM_MODEL,,}" in
         exit 1
         ;;
 esac
+RUN_NAME="${RUN_NAME:-${RUN_NAME_BASE}_${VLM_MODEL}}"
 
 VLM_MAX_TOKENS=8192
 VLM_MAX_MODEL_LEN=32768
@@ -148,6 +154,12 @@ if [[ -z "$TASKS" || -z "$RUN_NAME" ]]; then
     echo "ERROR: TASKS and RUN_NAME must not be empty." >&2
     exit 1
 fi
+# Resolve through a possible runs/ symlink so vLLM authorizes the same canonical
+# /data path that pathlib uses for saved observation images.
+RUN_MEDIA_ROOT=$(python3 -c \
+    'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' \
+    "$SAVE_DIR/$RUN_NAME")
+mkdir -p "$RUN_MEDIA_ROOT"
 if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_DECISIONS < 1 || GROUNDING_CAMERA_RESOLUTION < 1)); then
     echo "ERROR: episode/repeat/decision counts and grounding resolution must be positive." >&2
     exit 1
@@ -274,6 +286,7 @@ echo "Agentic tasks: $TASKS"
 echo "Episodes: ${EPISODE_IDS:-0..$((NUM_EPISODES - 1))}"
 echo "Repeats: $NUM_REPEATS"
 echo "Result directory: $SAVE_DIR/$RUN_NAME"
+echo "vLLM local-media root: $RUN_MEDIA_ROOT"
 echo "Environments: VLM=$VLM_MAMBA_ENV, F2G=$F2G_MAMBA_ENV, eval=$EVAL_MAMBA_ENV"
 echo "Agentic VLM: $VLM_MODEL ($MODEL_PATH)"
 
@@ -317,7 +330,7 @@ CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
     --max-model-len "$VLM_MAX_MODEL_LEN" \
     --max-num-seqs 1 \
     --gpu-memory-utilization "$VLM_GPU_MEMORY_UTILIZATION" \
-    --allowed-local-media-path "$REPO_ROOT" \
+    --allowed-local-media-path "$RUN_MEDIA_ROOT" \
     "${VLM_EXTRA_ARGS[@]}" \
     >"$VLM_LOG" 2>&1 &
 VLM_PID=$!
@@ -338,6 +351,12 @@ until curl --fail --silent --max-time 2 \
     fi
     sleep 1
 done
+
+served_models_json=$(curl --fail --silent --max-time 10 \
+    "http://$VLM_HOST:$VLM_PORT/v1/models")
+python3 -c \
+    'import json, sys; expected=sys.argv[1]; payload=json.loads(sys.argv[2]); ids={item.get("id") for item in payload.get("data", []) if isinstance(item, dict)}; assert expected in ids, f"expected served model {expected!r}, available={sorted(ids)}"' \
+    "$VLM_SERVED_MODEL_NAME" "$served_models_json"
 
 echo "Both services are ready. Starting RoboMME Agentic evaluation..."
 if ! CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
