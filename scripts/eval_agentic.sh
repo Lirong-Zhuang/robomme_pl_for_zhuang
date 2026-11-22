@@ -43,7 +43,7 @@ GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
 # Used exactly as written; no model-name suffix is added automatically.
-RUN_NAME="${RUN_NAME:-test_v1.9}"
+RUN_NAME="${RUN_NAME:-test_v1.6}"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false

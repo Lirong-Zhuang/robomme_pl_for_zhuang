@@ -657,47 +657,17 @@ def _validate_next_grounding(
 def _canonicalize_planner_subgoals(
     memory: TaskMemory,
     output: dict[str, Any],
+    *,
+    first_plan: bool,
 ) -> None:
-    """Replace VLM display text with trusted task-config template text."""
+    """Canonicalize in TaskMemory, then retain the same logged output object."""
 
-    status = output.get("status")
-    if isinstance(status, str):
-        output["status"] = status.strip().lower()
-    if output.get("keyframe_save") == "":
-        output["keyframe_save"] = None
-
-    if "subgoal_sequence" in output:
-        sequence = output["subgoal_sequence"]
-        if not isinstance(sequence, list):
-            raise ValueError("subgoal_sequence must be a list")
-        canonical_sequence = []
-        for item in sequence:
-            if isinstance(item, Mapping) and item.get("arguments") is None:
-                item = {**item, "arguments": {}}
-            canonical_sequence.append(
-                memory.resolver.canonicalize_planner_payload(item).planner_payload()
-            )
-        output["subgoal_sequence"] = canonical_sequence
-
-    next_key = output.get("next_subgoal_key")
-    if isinstance(next_key, str) and next_key.strip().casefold() == "stop":
-        output["next_subgoal_key"] = "STOP"
-        output["next_subgoal"] = "STOP"
-        output["arguments"] = {}
-        return
-    arguments = output.get("arguments")
-    if arguments is None:
-        arguments = {}
-    resolved = memory.resolver.canonicalize_planner_payload(
-        {
-            "subgoal_key": output.get("next_subgoal_key"),
-            "subgoal": output.get("next_subgoal"),
-            "arguments": arguments,
-        }
+    normalized = memory.canonicalize_planner_output(
+        output,
+        first_plan=first_plan,
     )
-    output["next_subgoal_key"] = resolved.subgoal_key
-    output["next_subgoal"] = resolved.subgoal
-    output["arguments"] = resolved.arguments
+    output.clear()
+    output.update(normalized)
 
 
 def _infer_and_commit(
@@ -856,9 +826,14 @@ def _describe_keyframe(
 
     def validate(output: dict[str, Any]) -> None:
         nonlocal description
-        if set(output) != {"description"}:
-            raise ValueError("keyframe description output has extra fields")
-        value = output["description"]
+        value = next(
+            (
+                output.get(key)
+                for key in ("description", "caption", "summary")
+                if output.get(key) is not None
+            ),
+            None,
+        )
         if not isinstance(value, str) or not value.strip():
             raise ValueError("keyframe description must be non-empty")
         description = value.strip()
@@ -1241,7 +1216,7 @@ def run_episode(
             )
 
         def commit_first(output: dict[str, Any]) -> None:
-            _canonicalize_planner_subgoals(memory, output)
+            _canonicalize_planner_subgoals(memory, output, first_plan=True)
             _validate_next_grounding(
                 memory,
                 contracts,
@@ -1529,7 +1504,7 @@ def run_episode(
             )
 
             def commit_followup(output: dict[str, Any]) -> None:
-                _canonicalize_planner_subgoals(memory, output)
+                _canonicalize_planner_subgoals(memory, output, first_plan=False)
                 _validate_next_grounding(
                     memory,
                     contracts,
@@ -1872,8 +1847,16 @@ def main() -> None:
                 )
             )
             _write_jsonl(records_path, records)
-            progress.update(1)
             progress.set_postfix(status=record["status"])
+            progress.update(1)
+            if record["status"] == "error":
+                error_text = " ".join(
+                    str(record.get("error", "unknown episode error")).split()
+                )
+                _status(
+                    f"[agentic] {task_name}: repeat {repeat_id}, episode "
+                    f"{episode_id} error: {error_text[:400]}"
+                )
         progress.close()
 
     metrics = client.metrics()
@@ -1912,10 +1895,11 @@ def main() -> None:
         f"{error_count} errors"
     )
     if error_count:
-        raise RuntimeError(
-            f"evaluation completed with {error_count} error episode(s); "
-            "see episodes.jsonl and the per-episode logs"
+        _status(
+            f"[agentic] evaluation failed: {error_count} episode error(s); "
+            f"details: {records_path}"
         )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

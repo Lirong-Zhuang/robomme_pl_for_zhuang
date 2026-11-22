@@ -26,6 +26,26 @@ _VLM_POINT_BACKENDS = {
     "location_grounding",
 }
 VLM_POINT_COORDINATE_SPACES = {"pixel", "normalized_1000"}
+_GROUNDING_STATUS_ALIASES = {
+    "visible": "ok",
+    "found": "ok",
+    "unclear": "ambiguous",
+    "not_visible": "ambiguous",
+    "none": "not_required",
+    "not_needed": "not_required",
+}
+_CURRENT_IMAGE_REF_ALIASES = {
+    "current_overall": "current_front",
+    "current_front_overall": "current_front",
+}
+_ROLE_ALIASES = {
+    "object": {"cube", "obj"},
+    "container": {"bin"},
+    "button": {"button_cap"},
+    "target": {"goal", "destination"},
+    "peg": {"rod"},
+    "box": {"insertion_box"},
+}
 
 
 def _required_string(name: str, value: Any) -> str:
@@ -348,13 +368,42 @@ class GroundingContractRegistry:
             }
 
         prepared = copy.deepcopy(grounding)
+        if isinstance(prepared, dict):
+            raw_status = prepared.get("status")
+            if isinstance(raw_status, str):
+                status = raw_status.strip().lower().replace("-", "_").replace(
+                    " ", "_"
+                )
+                prepared["status"] = _GROUNDING_STATUS_ALIASES.get(
+                    status,
+                    status,
+                )
+            raw_image_ref = prepared.get("image_ref")
+            if isinstance(raw_image_ref, str):
+                prepared["image_ref"] = _CURRENT_IMAGE_REF_ALIASES.get(
+                    raw_image_ref.strip().lower(),
+                    raw_image_ref.strip(),
+                )
+
         if isinstance(prepared, Mapping) and prepared.get("status") == "ok":
             raw_targets = prepared.get("targets")
             if isinstance(raw_targets, Mapping):
                 for raw_target in raw_targets.values():
-                    if isinstance(raw_target, dict) and set(raw_target) == {
-                        "point_xy"
-                    }:
+                    if not isinstance(raw_target, dict):
+                        continue
+                    if (
+                        "point_xy" not in raw_target
+                        and {"x", "y"} <= set(raw_target)
+                        and set(raw_target)
+                        <= {"x", "y", "color", "color_hint"}
+                    ):
+                        raw_target["point_xy"] = [
+                            raw_target.pop("x"),
+                            raw_target.pop("y"),
+                        ]
+                    if "color" in raw_target and "color_hint" not in raw_target:
+                        raw_target["color_hint"] = raw_target.pop("color")
+                    if set(raw_target) == {"point_xy"}:
                         # An omitted color_hint is equivalent to JSON null;
                         # policy validation below still rejects null when a
                         # genuinely model-selected color is required.
@@ -366,10 +415,23 @@ class GroundingContractRegistry:
 
         target_specs = contract["targets"]
         targets = normalized["targets"]
-        if len(target_specs) == 1 and len(targets) == 1:
+        expected_roles = {item["role"] for item in target_specs}
+        actual_roles = set(targets)
+        if expected_roles <= actual_roles:
+            # Some VLMs carry the previous action's target into the next
+            # response (for example object + container for put_into_bin).
+            # The trusted action contract owns the required role set, so these
+            # extra role entries are irrelevant and safe to discard.
+            targets = {
+                role: target
+                for role, target in targets.items()
+                if role in expected_roles
+            }
+            normalized["targets"] = targets
+        elif len(target_specs) == 1 and len(targets) == 1:
             expected_role = target_specs[0]["role"]
             actual_role = next(iter(targets))
-            if actual_role != expected_role:
+            if actual_role in _ROLE_ALIASES.get(expected_role, set()):
                 targets = {expected_role: targets[actual_role]}
                 normalized["targets"] = targets
 

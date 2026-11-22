@@ -223,6 +223,104 @@ def test_resolver_rejects_duplicate_key_and_untrusted_action() -> None:
         SubgoalResolver(untrusted, ALLOWED_ACTIONS)
 
 
+def test_first_output_canonicalization_projects_schema_and_trusts_sequence(
+    tmp_path: Path,
+) -> None:
+    memory = _memory(tmp_path)
+    output = memory.canonicalize_planner_output(
+        {
+            "subgoal_sequence": [
+                {
+                    "subgoal_key": "Pickup-Cube",
+                    "subgoal": "pickup_cube(first, red)",
+                    "arguments": {"ordinal": "first", "color": "red"},
+                    "action_name": "untrusted_action",
+                },
+                {
+                    "subgoal_key": "put into bin",
+                    "subgoal": "put_into_bin",
+                    "arguments": None,
+                },
+            ],
+            "next_subgoal_key": "press_button",
+            "next_subgoal": "wrong duplicate field",
+            "arguments": {},
+            "grounding": _point_grounding("object", color_hint="red"),
+            "action_name": "untrusted_action",
+            "reasoning": "not part of the execution contract",
+        },
+        first_plan=True,
+    )
+
+    assert set(output) == {
+        "subgoal_sequence",
+        "next_subgoal_key",
+        "next_subgoal",
+        "arguments",
+        "grounding",
+    }
+    assert output["subgoal_sequence"] == [_pickup_payload(), _put_payload()]
+    assert output["next_subgoal_key"] == "pickup_cube"
+    assert output["next_subgoal"] == "pick up the first red cube"
+    assert output["arguments"] == {"ordinal": "first", "color": "red"}
+
+
+def test_incomplete_output_canonicalization_retains_current_subgoal(
+    tmp_path: Path,
+) -> None:
+    memory = _memory(tmp_path)
+    memory.commit_first_plan(
+        task_goal="Put one red cube into the bin.",
+        planner_output=_first_plan_output(),
+    )
+
+    output = memory.canonicalize_planner_output(
+        {
+            "status": "ONGOING",
+            "description": "The cube remains on the table.",
+            "next_subgoal_key": "STOP",
+            "next_subgoal": "STOP",
+            "arguments": None,
+            "grounding": _point_grounding("object", color_hint="red"),
+            "subgoal_sequence": [],
+        },
+        first_plan=False,
+    )
+
+    assert output["status"] == "incomplete"
+    assert output["next_subgoal_key"] == "pickup_cube"
+    assert output["next_subgoal"] == "pick up the first red cube"
+    assert output["arguments"] == {"ordinal": "first", "color": "red"}
+    assert "subgoal_sequence" not in output
+
+
+def test_stop_output_canonicalization_fixes_text_arguments_and_grounding_key(
+    tmp_path: Path,
+) -> None:
+    memory = _memory(tmp_path)
+    memory.commit_first_plan(
+        task_goal="Put one red cube into the bin.",
+        planner_output=_first_plan_output(),
+    )
+
+    output = memory.canonicalize_planner_output(
+        {
+            "status": "done",
+            "description": "The task is visibly complete.",
+            "next_subgoal_key": "stop",
+            "next_subgoal": "finished",
+            "arguments": {"unexpected": True},
+            "grounding": _no_grounding(),
+        },
+        first_plan=False,
+    )
+
+    assert output["status"] == "completed"
+    assert output["next_subgoal_key"] == "STOP"
+    assert output["next_subgoal"] == "STOP"
+    assert output["arguments"] == {}
+
+
 def test_first_plan_creates_state_and_append_only_event(tmp_path: Path) -> None:
     memory = _memory(tmp_path)
 
@@ -411,6 +509,21 @@ def test_keyframe_task_selects_trusted_observation_id_and_saves_path(
         "image_path": "/episode/frames/0002.png",
         "description": "The highlight is visible on the red cube at left.",
     }
+
+
+def test_keyframe_output_canonicalization_strips_selected_id(
+    tmp_path: Path,
+) -> None:
+    memory = _keyframe_memory(tmp_path)
+    output = memory.canonicalize_planner_output(
+        {
+            **_first_plan_output(),
+            "keyframe_save": "  current_front  ",
+        },
+        first_plan=True,
+    )
+
+    assert output["keyframe_save"] == "current_front"
 
 
 def test_video_subgoal_list_is_an_explicit_followup_input(tmp_path: Path) -> None:

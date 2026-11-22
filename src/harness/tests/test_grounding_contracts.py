@@ -162,6 +162,61 @@ def test_adapter_uses_trusted_single_role_and_ignores_forbidden_color() -> None:
     )
 
 
+def test_adapter_discards_stale_target_when_required_role_is_present() -> None:
+    adapted = _registry().adapt_vlm_output(
+        "solve_put_into_bin",
+        {
+            "status": "ok",
+            "image_ref": "current_front",
+            "targets": {
+                "object": {
+                    "point_xy": [340, 280],
+                    "color_hint": "red",
+                },
+                "container": {
+                    "point_xy": [510, 420],
+                    "color_hint": None,
+                },
+            },
+        },
+    )
+
+    assert adapted == _point(
+        "container",
+        point_xy=[510.0, 420.0],
+        color_hint=None,
+    )
+
+
+def test_adapter_does_not_relabel_a_sole_stale_role() -> None:
+    adapted = _registry().adapt_vlm_output(
+        "solve_put_into_bin",
+        _point("object", point_xy=[340, 280], color_hint="red"),
+    )
+
+    with pytest.raises(ValueError, match="roles mismatch"):
+        _registry().validate("solve_put_into_bin", adapted)
+
+
+def test_adapter_accepts_safe_grounding_shape_aliases() -> None:
+    adapted = _registry().adapt_vlm_output(
+        "solve_put_into_bin",
+        {
+            "status": "visible",
+            "image_ref": "current_overall",
+            "targets": {
+                "bin": {"x": 500, "y": 400, "color": "gray"},
+            },
+        },
+    )
+
+    assert adapted == _point(
+        "container",
+        point_xy=[500.0, 400.0],
+        color_hint=None,
+    )
+
+
 def test_adapter_discards_points_for_action_with_no_vlm_perception() -> None:
     adapted = _registry().adapt_vlm_output(
         "solve_putdown",

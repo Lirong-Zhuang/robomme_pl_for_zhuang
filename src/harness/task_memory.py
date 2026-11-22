@@ -52,6 +52,15 @@ _FOLLOWUP_FIELDS = {
     "grounding",
 }
 _KEYFRAME_SAVE_FIELD = "keyframe_save"
+_FOLLOWUP_STATUS_ALIASES = {
+    "complete": "completed",
+    "done": "completed",
+    "success": "completed",
+    "ongoing": "incomplete",
+    "pending": "incomplete",
+    "not_completed": "incomplete",
+    "failure": "failed",
+}
 
 
 def _normalized_text(value: str) -> str:
@@ -504,6 +513,90 @@ class TaskMemory:
             )
             inputs["saved_keyframe"] = None
         return inputs
+
+    def canonicalize_planner_output(
+        self,
+        planner_output: Mapping[str, Any],
+        *,
+        first_plan: bool,
+    ) -> dict[str, Any]:
+        """Project model JSON onto the trusted phase schema and values."""
+
+        if not isinstance(planner_output, Mapping):
+            raise ValueError("planner output must be an object")
+        output = _json_copy(dict(planner_output))
+        expected_fields = set(
+            _FIRST_PLAN_FIELDS if first_plan else _FOLLOWUP_FIELDS
+        )
+        if self.uses_keyframes:
+            expected_fields.add(_KEYFRAME_SAVE_FIELD)
+        output = {key: output.get(key) for key in expected_fields}
+        if self.uses_keyframes:
+            selected_keyframe = output.get(_KEYFRAME_SAVE_FIELD)
+            if isinstance(selected_keyframe, str):
+                selected_keyframe = selected_keyframe.strip()
+                output[_KEYFRAME_SAVE_FIELD] = selected_keyframe or None
+
+        status = output.get("status")
+        if isinstance(status, str):
+            normalized_status = self._normalized_token(status)
+            output["status"] = _FOLLOWUP_STATUS_ALIASES.get(
+                normalized_status,
+                normalized_status,
+            )
+
+        if first_plan:
+            sequence = output.get("subgoal_sequence")
+            if not isinstance(sequence, list):
+                raise ValueError("subgoal_sequence must be a list")
+            canonical_sequence = []
+            for item in sequence:
+                if not isinstance(item, Mapping):
+                    raise ValueError("subgoal_sequence entries must be objects")
+                canonical_sequence.append(
+                    self.resolver.canonicalize_planner_payload(
+                        {
+                            "subgoal_key": self._canonical_subgoal_key(
+                                item.get("subgoal_key")
+                            ),
+                            "subgoal": item.get("subgoal"),
+                            "arguments": item.get("arguments") or {},
+                        }
+                    ).planner_payload()
+                )
+            output["subgoal_sequence"] = canonical_sequence
+            if canonical_sequence:
+                first = canonical_sequence[0]
+                output["next_subgoal_key"] = first["subgoal_key"]
+                output["next_subgoal"] = first["subgoal"]
+                output["arguments"] = first["arguments"]
+
+        if not first_plan and output.get("status") == "incomplete":
+            current = self.current_execution()
+            if current is None:
+                raise RuntimeError("incomplete follow-up has no current subgoal")
+            output["next_subgoal_key"] = current["subgoal_key"]
+            output["next_subgoal"] = current["subgoal"]
+            output["arguments"] = current["arguments"]
+
+        next_key = self._canonical_subgoal_key(output.get("next_subgoal_key"))
+        output["next_subgoal_key"] = next_key
+        if next_key == _STOP_KEY:
+            output["next_subgoal"] = _STOP_TEXT
+            output["arguments"] = {}
+            return output
+
+        resolved = self.resolver.canonicalize_planner_payload(
+            {
+                "subgoal_key": next_key,
+                "subgoal": output.get("next_subgoal"),
+                "arguments": output.get("arguments") or {},
+            }
+        )
+        output["next_subgoal_key"] = resolved.subgoal_key
+        output["next_subgoal"] = resolved.subgoal
+        output["arguments"] = resolved.arguments
+        return output
 
     def commit_first_plan(
         self,
@@ -1107,6 +1200,23 @@ class TaskMemory:
             subgoal=text,
             arguments=arguments,
         )
+
+    @staticmethod
+    def _normalized_token(value: str) -> str:
+        return "_".join(value.strip().lower().replace("-", " ").split())
+
+    def _canonical_subgoal_key(self, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        normalized = self._normalized_token(value)
+        if normalized == "stop":
+            return _STOP_KEY
+        matches = [
+            key
+            for key in self.resolver.keys
+            if self._normalized_token(key) == normalized
+        ]
+        return matches[0] if len(matches) == 1 else value.strip()
 
     def _transition_state(
         self,
