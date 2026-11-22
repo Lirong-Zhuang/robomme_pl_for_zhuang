@@ -42,7 +42,7 @@ DEPTH_SCALE=0.001
 GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
-RUN_NAME="test_v1.6"
+RUN_NAME="test_v1.7"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
@@ -112,6 +112,8 @@ export HF_HOME="${HF_HOME:-$CACHE_ROOT/huggingface}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$CACHE_ROOT/uv}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$CACHE_ROOT/pip}"
 export TORCH_HOME="${TORCH_HOME:-$CACHE_ROOT/torch}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$CACHE_ROOT}"
+export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-$CACHE_ROOT/vllm}"
 export FLASHINFER_CACHE_DIR="${FLASHINFER_CACHE_DIR:-$CACHE_ROOT/flashinfer}"
 export FLASHINFER_AUTOTUNE_CACHE_DIR="${FLASHINFER_AUTOTUNE_CACHE_DIR:-$FLASHINFER_CACHE_DIR/autotune}"
 mkdir -p \
@@ -119,6 +121,7 @@ mkdir -p \
     "$UV_CACHE_DIR" \
     "$PIP_CACHE_DIR" \
     "$TORCH_HOME" \
+    "$VLLM_CACHE_ROOT" \
     "$FLASHINFER_AUTOTUNE_CACHE_DIR"
 
 # =============================================================================

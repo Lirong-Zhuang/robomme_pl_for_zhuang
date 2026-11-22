@@ -3,6 +3,9 @@
 from .general_notes import DEFAULT_GENERAL_NOTES
 from .general_notes import GRASP_CLEARANCE_NOTE
 from .init_prompt import DEFAULT_INIT_PROMPT
+from .init_prompt import DIRECT_INIT_PROMPT_VERSION
+from .init_prompt import DIRECT_INIT_PROMPT_WITHOUT_TASK_CONFIG_EXAMPLE
+from .init_prompt import DIRECT_INIT_PROMPT_WITH_TASK_CONFIG_EXAMPLE
 from .init_prompt import INIT_PROMPT_WITHOUT_TASK_CONFIG_EXAMPLE
 from .init_prompt import INIT_PROMPT_WITH_TASK_CONFIG_EXAMPLE
 from .init_prompt import InitPlanningPromptSpec
@@ -17,6 +20,9 @@ from .task_description import get_task_description
 __all__ = [
     "DEFAULT_INIT_PROMPT",
     "DEFAULT_GENERAL_NOTES",
+    "DIRECT_INIT_PROMPT_VERSION",
+    "DIRECT_INIT_PROMPT_WITHOUT_TASK_CONFIG_EXAMPLE",
+    "DIRECT_INIT_PROMPT_WITH_TASK_CONFIG_EXAMPLE",
     "GRASP_CLEARANCE_NOTE",
     "INIT_PROMPT_WITHOUT_TASK_CONFIG_EXAMPLE",
     "INIT_PROMPT_WITH_TASK_CONFIG_EXAMPLE",

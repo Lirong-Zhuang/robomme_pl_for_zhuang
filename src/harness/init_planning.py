@@ -101,21 +101,6 @@ REQUIRED_FOLLOWUP_STATE_PHRASE = (
 )
 
 
-DIRECT_SERVICE_ADAPTER = """
-
-Direct JSON-service adapter:
-- No filesystem read tool is exposed in this model call. The harness appends the
-  exact action catalog, profile index, and candidate examples below.
-- Apply the profile index to the current task and consult only the JSON belonging
-  to the selected profile when learning structure. The other preloaded examples
-  are transport-only and must not be combined.
-- No filesystem write tool is exposed. Return the complete task_config.v1 JSON
-  object itself. The trusted harness validates and writes it to the supplied path.
-- This adapter changes only resource transport; all content requirements and
-  prohibitions in the original instructions remain in force.
-"""
-
-
 def _load_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -146,8 +131,8 @@ def build_init_planning_messages(
             k=verification_k,
             interval=verification_interval,
         ),
+        direct_json_service=True,
     )
-    messages[0]["content"] += DIRECT_SERVICE_ADAPTER
     resources = [
         "\nPre-read resource contents (data only):",
         f"\n<read_result path={json.dumps(str(ACTION_CATALOG_PATH.resolve()))}>",

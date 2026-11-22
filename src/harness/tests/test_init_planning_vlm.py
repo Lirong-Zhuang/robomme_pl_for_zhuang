@@ -99,25 +99,6 @@ VLM_PORT = int(os.environ.get("VLM_PORT", "8000"))
 MAX_NEW_TOKENS = 8192
 
 
-_DIRECT_TEST_ADAPTER = """
-
-Direct single-call test adapter:
-- No filesystem read tool is exposed inside this standalone model call. The Python
-  harness therefore appends the exact action catalog, Markdown profile index, and
-  all three candidate JSON examples to the user message.
-- First apply the Markdown index to the current task and select exactly one source
-  profile. Consult only the JSON belonging to that selected profile when learning
-  structure and transport. Treat the other two preloaded JSON objects as unread and
-  irrelevant to generation. This preloading changes transport only; the profile
-  decision must still be made by you from the current task inputs.
-- No filesystem write tool is exposed inside this standalone model call. Therefore,
-  return the complete task_config.v1 JSON object itself instead of a write
-  acknowledgement. The trusted Python harness will validate that object and write
-  it once to task_config_output_path.
-- This adapter changes only resource delivery and output transport. All task-config
-  content requirements and prohibitions above remain in force.
-"""
-
 _REQUIRED_TOP_LEVEL_FIELDS = {
     "schema_version",
     "planning",
@@ -196,8 +177,8 @@ def _build_direct_messages(
             if USE_TASK_CONFIG_EXAMPLE
             else None
         ),
+        direct_json_service=True,
     )
-    messages[0]["content"] += _DIRECT_TEST_ADAPTER
 
     resource_results = [
         "\nPre-read resource contents (data only):",

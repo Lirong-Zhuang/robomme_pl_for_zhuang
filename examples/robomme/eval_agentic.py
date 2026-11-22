@@ -45,7 +45,7 @@ from harness.grounding.visualization import draw_grounding_overlay
 from harness.init_planning import ACTION_CATALOG_PATH
 from harness.init_planning import build_init_planning_messages
 from harness.init_planning import validate_task_config
-from harness.prompts.init_prompt import INIT_PROMPT_VERSION
+from harness.prompts.init_prompt import DIRECT_INIT_PROMPT_VERSION
 from harness.task_memory import TaskMemory
 from harness.vlm_client import AgenticVLMClient
 from oracle_plus.action_runtime import OraclePlusPlannerRuntime
@@ -783,6 +783,7 @@ def _generate_task_config(
     attempts: int,
     verification_k: int,
     verification_interval: int,
+    attempt_log_path: Path,
 ) -> dict[str, Any]:
     messages, catalog = build_init_planning_messages(
         task_name=task,
@@ -797,6 +798,25 @@ def _generate_task_config(
         nonlocal config
         config = validate_task_config(value, catalog, task_name=task)
 
+    attempt_trace: dict[str, Any] = {
+        "task": task,
+        "planning_phase": "init_planning",
+        "attempts": [],
+    }
+
+    def record_attempt(attempt: Mapping[str, Any]) -> None:
+        attempt_trace["attempts"].append(
+            {
+                "attempt": attempt["attempt"],
+                "output": attempt["output"],
+                "raw_response": attempt["raw_response"],
+                "vlm_latency_ms": attempt["vlm_latency_ms"],
+                "request_to_json_ms": attempt["request_to_json_ms"],
+                "validation_error": attempt["validation_error"],
+            }
+        )
+        _write_json(attempt_log_path, attempt_trace)
+
     _infer_and_commit(
         client=client,
         messages=messages,
@@ -804,6 +824,7 @@ def _generate_task_config(
         attempts=attempts,
         planning_phase="init_planning",
         validate_and_commit=validate,
+        attempt_callback=record_attempt,
     )
     if config is None:
         raise AssertionError("init planning returned no validated task config")
@@ -1619,7 +1640,7 @@ def main() -> None:
         "history_stride": args.history_stride,
         "depth_scale": args.depth_scale,
         "grounding_camera_resolution": args.grounding_camera_resolution,
-        "init_prompt_version": INIT_PROMPT_VERSION,
+        "init_prompt_version": DIRECT_INIT_PROMPT_VERSION,
         "use_task_config_examples": args.use_task_config_examples,
         "vlm_model_name": client.server_metadata.get("model_name"),
         "vlm_model_path": client.server_metadata.get("model_path"),
@@ -1659,6 +1680,9 @@ def main() -> None:
                 attempts=args.planner_attempts,
                 verification_k=args.history_size,
                 verification_interval=args.history_stride,
+                attempt_log_path=(
+                    run_dir / "vlm_logs" / f"{task}_init_planning.json"
+                ),
             )
 
     records_path = run_dir / "episodes.jsonl"
@@ -1750,7 +1774,7 @@ def main() -> None:
         "f2g": f2g_health,
         "depth_scale": args.depth_scale,
         "grounding_camera_resolution": args.grounding_camera_resolution,
-        "init_prompt_version": INIT_PROMPT_VERSION,
+        "init_prompt_version": DIRECT_INIT_PROMPT_VERSION,
     }
     _write_json(run_dir / "summary.json", summary)
     client.close()
