@@ -186,8 +186,28 @@ class SubgoalResolver:
         subgoal: str,
         arguments: Mapping[str, Any] | None = None,
     ) -> ResolvedSubgoal:
-        key = _required_string("subgoal_key", subgoal_key)
         text = _required_string("subgoal", subgoal)
+        resolved = self.resolve_from_key(
+            subgoal_key=subgoal_key,
+            arguments=arguments,
+        )
+
+        if _normalized_text(text) != _normalized_text(resolved.subgoal):
+            raise ValueError(
+                f"subgoal text does not match key {resolved.subgoal_key!r}: "
+                f"expected {resolved.subgoal!r}, got {text!r}"
+            )
+        return resolved
+
+    def resolve_from_key(
+        self,
+        *,
+        subgoal_key: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> ResolvedSubgoal:
+        """Build trusted canonical text from a key and semantic arguments."""
+
+        key = _required_string("subgoal_key", subgoal_key)
         if key == _STOP_KEY:
             raise ValueError("STOP is not an executable subgoal_key")
 
@@ -196,6 +216,8 @@ class SubgoalResolver:
         except KeyError as error:
             raise ValueError(f"unknown subgoal_key: {key!r}") from error
 
+        if arguments is not None and not isinstance(arguments, Mapping):
+            raise ValueError("subgoal arguments must be an object")
         normalized_arguments = dict(arguments or {})
         expected_arguments = spec["argument_names"]
         actual_arguments = set(normalized_arguments)
@@ -217,12 +239,6 @@ class SubgoalResolver:
             raise ValueError(
                 f"missing argument {missing!r} for subgoal_key {key!r}"
             ) from error
-
-        if _normalized_text(text) != _normalized_text(expected_text):
-            raise ValueError(
-                f"subgoal text does not match key {key!r}: "
-                f"expected {expected_text!r}, got {text!r}"
-            )
 
         return ResolvedSubgoal(
             subgoal_key=key,
@@ -246,6 +262,27 @@ class SubgoalResolver:
         return self.resolve(
             subgoal_key=payload.get("subgoal_key"),
             subgoal=payload.get("subgoal"),
+            arguments=arguments,
+        )
+
+    def canonicalize_planner_payload(
+        self,
+        payload: Mapping[str, Any],
+    ) -> ResolvedSubgoal:
+        """Ignore untrusted display text and derive it from key plus arguments."""
+
+        if not isinstance(payload, Mapping):
+            raise ValueError("planner subgoal must be an object")
+        if set(payload) != _PLANNER_SUBGOAL_FIELDS:
+            raise ValueError(
+                "planner subgoal must contain exactly "
+                "subgoal_key, subgoal, and arguments"
+            )
+        arguments = payload.get("arguments", {})
+        if not isinstance(arguments, Mapping):
+            raise ValueError("planner subgoal arguments must be an object")
+        return self.resolve_from_key(
+            subgoal_key=payload.get("subgoal_key"),
             arguments=arguments,
         )
 

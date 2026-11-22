@@ -598,6 +598,35 @@ def _validate_next_grounding(
         raise ValueError("grounding.image_ref must be current_front")
 
 
+def _canonicalize_planner_subgoals(
+    memory: TaskMemory,
+    output: dict[str, Any],
+) -> None:
+    """Replace VLM display text with trusted task-config template text."""
+
+    if "subgoal_sequence" in output:
+        sequence = output["subgoal_sequence"]
+        if not isinstance(sequence, list):
+            raise ValueError("subgoal_sequence must be a list")
+        output["subgoal_sequence"] = [
+            memory.resolver.canonicalize_planner_payload(item).planner_payload()
+            for item in sequence
+        ]
+
+    if output.get("next_subgoal_key") == "STOP":
+        return
+    resolved = memory.resolver.canonicalize_planner_payload(
+        {
+            "subgoal_key": output.get("next_subgoal_key"),
+            "subgoal": output.get("next_subgoal"),
+            "arguments": output.get("arguments"),
+        }
+    )
+    output["next_subgoal_key"] = resolved.subgoal_key
+    output["next_subgoal"] = resolved.subgoal
+    output["arguments"] = resolved.arguments
+
+
 def _infer_and_commit(
     *,
     client: AgenticVLMClient,
@@ -1137,6 +1166,7 @@ def run_episode(
             )
 
         def commit_first(output: dict[str, Any]) -> None:
+            _canonicalize_planner_subgoals(memory, output)
             _validate_next_grounding(memory, contracts, output, image_shape)
             memory.commit_first_plan(task_goal=task_goal, planner_output=output)
 
@@ -1417,6 +1447,7 @@ def run_episode(
             )
 
             def commit_followup(output: dict[str, Any]) -> None:
+                _canonicalize_planner_subgoals(memory, output)
                 _validate_next_grounding(
                     memory,
                     contracts,

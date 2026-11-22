@@ -151,6 +151,19 @@ def test_resolver_maps_key_to_action_and_instantiated_acceptance() -> None:
     assert resolved.planner_payload() == _pickup_payload()
 
 
+def test_resolver_canonicalizes_vlm_display_text_from_key_and_arguments() -> None:
+    resolver = SubgoalResolver(_task_config(), ALLOWED_ACTIONS)
+    payload = {
+        "subgoal_key": "pickup_cube",
+        "subgoal": "pickup_cube(first, red)",
+        "arguments": {"ordinal": "first", "color": "red"},
+    }
+
+    resolved = resolver.canonicalize_planner_payload(payload)
+
+    assert resolved.planner_payload() == _pickup_payload()
+
+
 @pytest.mark.parametrize(
     ("payload", "message"),
     [

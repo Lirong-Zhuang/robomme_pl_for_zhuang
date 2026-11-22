@@ -42,10 +42,8 @@ DEPTH_SCALE=0.001
 GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
-# The selected model is appended automatically, producing separate resumable runs
-# such as test_v1.7_30b and test_v1.7_27b. Set RUN_NAME in the environment only
-# when an explicit run identity is required.
-RUN_NAME_BASE="${RUN_NAME_BASE:-test_v1.7}"
+# Used exactly as written; no model-name suffix is added automatically.
+RUN_NAME="${RUN_NAME:-test_v1.9}"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
@@ -87,7 +85,6 @@ case "$VLM_MODEL" in
         exit 1
         ;;
 esac
-RUN_NAME="${RUN_NAME:-${RUN_NAME_BASE}_${VLM_MODEL}}"
 
 VLM_MAX_TOKENS=8192
 VLM_MAX_MODEL_LEN=32768
