@@ -276,7 +276,7 @@ def test_incomplete_output_canonicalization_retains_current_subgoal(
 
     output = memory.canonicalize_planner_output(
         {
-            "status": "ONGOING",
+            "status": "ambiguous",
             "description": "The cube remains on the table.",
             "next_subgoal_key": "STOP",
             "next_subgoal": "STOP",

@@ -59,6 +59,9 @@ _FOLLOWUP_STATUS_ALIASES = {
     "ongoing": "incomplete",
     "pending": "incomplete",
     "not_completed": "incomplete",
+    "ambiguous": "incomplete",
+    "uncertain": "incomplete",
+    "unknown": "incomplete",
     "failure": "failed",
 }
 

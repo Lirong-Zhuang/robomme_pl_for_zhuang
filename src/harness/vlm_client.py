@@ -118,6 +118,8 @@ class AgenticVLMClient:
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
+        *,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         body = None
         headers = {"Accept": "application/json"}
@@ -130,10 +132,15 @@ class AgenticVLMClient:
             headers=headers,
             method=method,
         )
+        effective_timeout = self.timeout_seconds
+        if timeout_seconds is not None:
+            if timeout_seconds <= 0:
+                raise TimeoutError("vLLM request deadline has expired")
+            effective_timeout = min(effective_timeout, timeout_seconds)
         try:
             with urllib.request.urlopen(
                 request,
-                timeout=self.timeout_seconds,
+                timeout=effective_timeout,
             ) as response:
                 value = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
@@ -155,6 +162,7 @@ class AgenticVLMClient:
         messages: list[dict[str, str]],
         images: list[str] | None = None,
         planning_phase: str,
+        timeout_seconds: float | None = None,
     ) -> tuple[dict[str, Any], str, float, float]:
         if planning_phase not in PLANNING_PHASES:
             raise ValueError(
@@ -174,6 +182,7 @@ class AgenticVLMClient:
                 "seed": 42,
                 "response_format": {"type": "json_object"},
             },
+            timeout_seconds=timeout_seconds,
         )
         response_received = time.perf_counter()
         try:

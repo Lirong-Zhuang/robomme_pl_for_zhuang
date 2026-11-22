@@ -9,6 +9,7 @@ import os
 import shutil
 import string
 import sys
+import time
 import traceback
 from collections import deque
 from collections.abc import Mapping
@@ -68,7 +69,37 @@ VLM coordinate transport override for this served model:
 - The trusted harness converts these normalized points to the original 256x256
   image before validation and execution. Do not perform that conversion yourself.
 """
+FOLLOWUP_VERIFICATION_ADAPTER = """
+
+Follow-up verification transport rules:
+- The action named by current_subgoal has completed one full atomic execution
+  before this verification call. Return status as exactly completed, incomplete,
+  or failed; never use ambiguous, uncertain, unknown, success, or done.
+- Judge completion from the change between subgoal-start and recent observations.
+  For a release or placement action, an object that followed the gripper over the
+  intended destination and is no longer held after the gripper opened is positive
+  completion evidence even when the placed object is now occluded by a bin or
+  container. Do not return incomplete solely because a correctly placed object is
+  no longer visible inside an opaque container.
+- Use incomplete only when another execution of the same atomic action is both
+  necessary and physically meaningful. Do not keep repeating a release action
+  after the gripper is already empty.
+"""
 ROBOMME_EPISODE_STATUSES = frozenset({"success", "fail", "timeout", "error"})
+NON_REPEATABLE_RELEASE_ACTIONS = frozenset(
+    {"solve_put_into_bin", "solve_putonto_target", "solve_putdown"}
+)
+
+
+class EpisodeTimeLimitReached(TimeoutError):
+    """The configured wall-clock limit for one episode was reached."""
+
+
+def _remaining_episode_seconds(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise EpisodeTimeLimitReached("episode wall-clock limit reached")
+    return remaining
 
 
 def _status_stream() -> Any:
@@ -145,6 +176,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-repeats", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=3000)
     parser.add_argument("--max-decisions", type=int, default=50)
+    parser.add_argument("--max-episode-seconds", type=float, default=600.0)
     parser.add_argument("--history-size", type=int, default=3)
     parser.add_argument("--history-stride", type=int, default=16)
     parser.add_argument("--max-initial-observations", type=int, default=16)
@@ -274,28 +306,86 @@ def _write_jsonl(path: Path, values: list[Mapping[str, Any]]) -> None:
             temporary.unlink()
 
 
-def _emit_vlm_call_output(
-    readable_log_path: Path,
+def _observation_ids(value: Any) -> list[str]:
+    """Collect ordered observation/frame identifiers from planner inputs."""
+
+    identifiers: list[str] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, Mapping):
+            observation_id = item.get("observation_id")
+            if (
+                isinstance(observation_id, str)
+                and observation_id not in identifiers
+            ):
+                identifiers.append(observation_id)
+            for nested in item.values():
+                visit(nested)
+        elif isinstance(item, (list, tuple)):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return identifiers
+
+
+def _prediction_log(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain only the predicted next subgoal and necessary image points."""
+
+    prediction: dict[str, Any] = {
+        "next_subgoal": output.get("next_subgoal"),
+    }
+    grounding = output.get("grounding")
+    targets = grounding.get("targets") if isinstance(grounding, Mapping) else None
+    if isinstance(targets, Mapping):
+        coordinates = {
+            str(role): target.get("point_xy")
+            for role, target in targets.items()
+            if isinstance(target, Mapping) and target.get("point_xy") is not None
+        }
+        if coordinates:
+            prediction["object_coordinates"] = coordinates
+    return prediction
+
+
+def _append_vlm_developer_call(
+    path: Path,
+    calls: list[dict[str, Any]],
     *,
-    call_index: int,
-    call_type: str,
+    simulator_frame: int,
+    planner_inputs: Mapping[str, Any],
     attempt: Mapping[str, Any],
 ) -> None:
-    """Persist one visually separated VLM response outside the terminal."""
+    """Write the intentionally minimal, human-readable per-request VLM log."""
 
-    attempt_index = int(attempt["attempt"])
-    raw_response = str(attempt.get("raw_response", "")).rstrip()
-    validation_error = attempt.get("validation_error")
-    title = f"VLM CALL {call_index} | {call_type} | ATTEMPT {attempt_index}"
-    separator = "=" * 96
-    block_lines = ["", separator, title, "-" * 96, raw_response]
-    if validation_error:
-        block_lines.extend(["-" * 96, f"REJECTED: {validation_error}"])
-    block_lines.extend([separator, ""])
-    block = "\n".join(block_lines)
-    readable_log_path.parent.mkdir(parents=True, exist_ok=True)
-    with readable_log_path.open("a", encoding="utf-8") as stream:
-        stream.write(block)
+    calls.append(
+        {
+            "frames": {
+                "current_simulator_frame": simulator_frame,
+                "observation_ids": _observation_ids(planner_inputs),
+            },
+            "prompt": _jsonable(attempt.get("messages", [])),
+            "images": _jsonable(attempt.get("images", [])),
+            "completed_subgoals": _jsonable(
+                planner_inputs.get("task_state", [])
+            ),
+            "prediction": _prediction_log(
+                attempt.get("output", {})
+                if isinstance(attempt.get("output"), Mapping)
+                else {}
+            ),
+            "description": (
+                attempt.get("output", {}).get("description")
+                if isinstance(attempt.get("output"), Mapping)
+                else None
+            ),
+        }
+    )
+    separated = {
+        f"================ CALL {index} ================": call
+        for index, call in enumerate(calls)
+    }
+    _write_json(path, separated)
 
 
 def _to_rgb(value: Any) -> np.ndarray:
@@ -581,6 +671,8 @@ def _build_planner_messages(
             "unsupported VLM point coordinate space: "
             f"{point_coordinate_space!r}"
         )
+    if prompt_name == "followup_planning":
+        system_prompt += FOLLOWUP_VERIFICATION_ADAPTER
     return (
         [
             {"role": "system", "content": system_prompt},
@@ -679,9 +771,13 @@ def _infer_and_commit(
     planning_phase: str,
     validate_and_commit: Any,
     attempt_callback: Any | None = None,
+    episode_deadline: float | None = None,
+    retry_until_deadline: bool = False,
 ) -> tuple[dict[str, Any], str, float, float]:
     last_error: Exception | None = None
-    for attempt in range(1, attempts + 1):
+    attempt = 0
+    while retry_until_deadline or attempt < attempts:
+        attempt += 1
         request_messages = [dict(message) for message in messages]
         if last_error is not None:
             request_messages[-1]["content"] += (
@@ -689,13 +785,31 @@ def _infer_and_commit(
                 f"{type(last_error).__name__}: {last_error}. Return a corrected "
                 "complete JSON object only."
             )
-        output, raw, latency, request_latency = client.infer_json(
-            messages=request_messages,
-            images=images,
-            planning_phase=planning_phase,
+        request_timeout = (
+            _remaining_episode_seconds(episode_deadline)
+            if episode_deadline is not None
+            else None
         )
         try:
-            validate_and_commit(output)
+            output, raw, latency, request_latency = client.infer_json(
+                messages=request_messages,
+                images=images,
+                planning_phase=planning_phase,
+                timeout_seconds=request_timeout,
+            )
+        except Exception as error:
+            if (
+                episode_deadline is not None
+                and time.monotonic() >= episode_deadline
+            ):
+                raise EpisodeTimeLimitReached(
+                    "episode wall-clock limit reached during VLM request"
+                ) from error
+            raise
+        if episode_deadline is not None:
+            _remaining_episode_seconds(episode_deadline)
+        try:
+            validate_and_commit(output, attempt)
         except (KeyError, TypeError, ValueError, RuntimeError) as error:
             if attempt_callback is not None:
                 attempt_callback(
@@ -711,7 +825,7 @@ def _infer_and_commit(
                     }
                 )
             last_error = error
-            if attempt == attempts:
+            if not retry_until_deadline and attempt == attempts:
                 raise
         else:
             if attempt_callback is not None:
@@ -801,6 +915,8 @@ def _describe_keyframe(
     policy: Mapping[str, Any],
     observation: Mapping[str, Any],
     attempts: int,
+    episode_deadline: float | None = None,
+    attempt_callback: Any | None = None,
 ) -> str:
     instruction = policy.get("description_instruction")
     messages = [
@@ -824,7 +940,7 @@ def _describe_keyframe(
     images = _collect_images(observation)
     description: str | None = None
 
-    def validate(output: dict[str, Any]) -> None:
+    def validate(output: dict[str, Any], _attempt: int) -> None:
         nonlocal description
         value = next(
             (
@@ -845,6 +961,8 @@ def _describe_keyframe(
         attempts=attempts,
         planning_phase="auxiliary",
         validate_and_commit=validate,
+        episode_deadline=episode_deadline,
+        attempt_callback=attempt_callback,
     )
     if description is None:
         raise AssertionError("keyframe description was not produced")
@@ -871,7 +989,7 @@ def _generate_task_config(
     )
     config: dict[str, Any] | None = None
 
-    def validate(value: dict[str, Any]) -> None:
+    def validate(value: dict[str, Any], _attempt: int) -> None:
         nonlocal config
         config = validate_task_config(value, catalog, task_name=task)
 
@@ -1044,6 +1162,8 @@ def run_episode(
     client: AgenticVLMClient,
     run_dir: Path,
 ) -> dict[str, Any]:
+    episode_started = time.monotonic()
+    episode_deadline = episode_started + args.max_episode_seconds
     repeat_dir = run_dir / task / f"repeat_{repeat_id}"
     episode_dir = repeat_dir / "images" / f"ep_{episode_id}"
     memory_dir = repeat_dir / "task_memory" / f"ep_{episode_id}"
@@ -1052,9 +1172,6 @@ def run_episode(
     video_episode_dir = repeat_dir / "videos" / f"ep_{episode_id}"
     example_dir = repeat_dir / "example"
     vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
-    readable_vlm_log_path = (
-        repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}_readable.txt"
-    )
     for stale_dir in (
         episode_dir,
         memory_dir,
@@ -1066,20 +1183,18 @@ def run_episode(
             shutil.rmtree(stale_dir)
     if vlm_log_path.exists():
         vlm_log_path.unlink()
-    if readable_vlm_log_path.exists():
-        readable_vlm_log_path.unlink()
+    legacy_readable_log = vlm_log_path.with_name(
+        f"{task}_ep_{episode_id}_readable.txt"
+    )
+    if legacy_readable_log.exists():
+        legacy_readable_log.unlink()
     episode_dir.mkdir(parents=True)
-    vlm_trace: dict[str, Any] = {
-        "task": task,
-        "episode_id": episode_id,
-        "repeat_id": repeat_id,
-        "point_coordinate_space": args.vlm_point_coordinate_space,
-        "calls": [],
-    }
+    vlm_developer_calls: list[dict[str, Any]] = []
     record: dict[str, Any] = {
         "task": task,
         "episode_id": episode_id,
         "repeat_id": repeat_id,
+        "max_episode_seconds": args.max_episode_seconds,
         "status": "error",
         "termination_reason": None,
         "task_goal": None,
@@ -1087,7 +1202,6 @@ def run_episode(
         "artifacts": {
             "episode_log": str((video_episode_dir / "episode.json").resolve()),
             "vlm_log": str(vlm_log_path.resolve()),
-            "vlm_readable_log": str(readable_vlm_log_path.resolve()),
             "image_dir": str(episode_dir.resolve()),
             "task_memory_dir": str(memory_dir.resolve()),
             "grounding_dir": str(grounding_dir.resolve()),
@@ -1100,6 +1214,7 @@ def run_episode(
     recorder: RolloutRecorder | None = None
     example_recorder: RolloutRecorder | None = None
     try:
+        _remaining_episode_seconds(episode_deadline)
         builder = BenchmarkEnvBuilder(
             env_id=task,
             dataset="test",
@@ -1126,6 +1241,7 @@ def run_episode(
             max_retained_steps=retained,
         )
         obs, info = runtime.reset()
+        _remaining_episode_seconds(episode_deadline)
         task_goal = _task_goal(info)
         record["task_goal"] = task_goal
         recorder = RolloutRecorder(
@@ -1171,6 +1287,10 @@ def run_episode(
         pipeline = GroundingPipeline(
             f2g_client=F2GClient(
                 base_url=args.f2g_url,
+                timeout_s=min(
+                    120.0,
+                    _remaining_episode_seconds(episode_deadline),
+                ),
                 input_size=(
                     args.grounding_camera_resolution,
                     args.grounding_camera_resolution,
@@ -1215,7 +1335,7 @@ def run_episode(
                 f"but the runtime produced {image_shape}"
             )
 
-        def commit_first(output: dict[str, Any]) -> None:
+        def commit_first(output: dict[str, Any], _attempt: int) -> None:
             _canonicalize_planner_subgoals(memory, output, first_plan=True)
             _validate_next_grounding(
                 memory,
@@ -1226,32 +1346,20 @@ def run_episode(
             )
             memory.commit_first_plan(task_goal=task_goal, planner_output=output)
 
-        first_attempts: list[dict[str, Any]] = []
-        first_call_log: dict[str, Any] = {
-            "call_index": 0,
-            "call_type": "first_planning",
-            "planner_inputs": first_inputs,
-            "messages": messages,
-            "images": images,
-            "attempts": first_attempts,
-            "output": None,
-            "raw_response": None,
-            "decision": None,
-        }
-        vlm_trace["calls"].append(first_call_log)
-        _write_json(vlm_log_path, vlm_trace)
         _status(
             f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
             "in-task planning"
         )
+        first_call_frame = int(
+            getattr(runtime.env.unwrapped, "elapsed_steps", 0)
+        )
 
         def record_first_attempt(attempt: dict[str, Any]) -> None:
-            first_attempts.append(attempt)
-            _write_json(vlm_log_path, vlm_trace)
-            _emit_vlm_call_output(
-                readable_vlm_log_path,
-                call_index=0,
-                call_type="first_planning",
+            _append_vlm_developer_call(
+                vlm_log_path,
+                vlm_developer_calls,
+                simulator_frame=first_call_frame,
+                planner_inputs=first_inputs,
                 attempt=attempt,
             )
 
@@ -1263,6 +1371,7 @@ def run_episode(
             planning_phase="in_task_planning",
             validate_and_commit=commit_first,
             attempt_callback=record_first_attempt,
+            episode_deadline=episode_deadline,
         )
         if memory.uses_keyframes:
             selected_id = first_output.get("keyframe_save")
@@ -1274,16 +1383,31 @@ def run_episode(
                 ),
                 None,
             )
-            description = (
-                _describe_keyframe(
+            if selected is not None:
+                keyframe_log_inputs = {
+                    "current_observation": selected,
+                    "task_state": [],
+                }
+
+                def record_keyframe_attempt(attempt: dict[str, Any]) -> None:
+                    _append_vlm_developer_call(
+                        vlm_log_path,
+                        vlm_developer_calls,
+                        simulator_frame=first_call_frame,
+                        planner_inputs=keyframe_log_inputs,
+                        attempt=attempt,
+                    )
+
+                description = _describe_keyframe(
                     client=client,
                     policy=memory.keyframe_policies[policy_index],
                     observation=selected,
                     attempts=args.planner_attempts,
+                    episode_deadline=episode_deadline,
+                    attempt_callback=record_keyframe_attempt,
                 )
-                if selected is not None
-                else None
-            )
+            else:
+                description = None
             memory.save_keyframe_selection(
                 keyframe_save=selected_id,
                 observation_paths=_observation_path_map(initial_observations),
@@ -1292,16 +1416,6 @@ def run_episode(
             )
         _write_information_source_artifacts(memory, source_dir)
         first_resolution = _decision_summary(memory, first_output)
-        first_call_log.update(
-            {
-                "output": first_output,
-                "raw_response": raw,
-                "decision": first_resolution,
-                "vlm_latency_ms": latency,
-                "request_to_json_ms": request_latency,
-            }
-        )
-        _write_json(vlm_log_path, vlm_trace)
         record["decisions"].append(
             {
                 "call": 0,
@@ -1322,6 +1436,7 @@ def run_episode(
         terminal_action_evaluation: dict[str, Any] | None = None
         decision_limit_reached = False
         for decision_index in range(1, args.max_decisions + 1):
+            _remaining_episode_seconds(episode_deadline)
             execution = memory.current_execution()
             if execution is None:
                 break
@@ -1373,16 +1488,31 @@ def run_episode(
             active_call_index = decision_index - 1
             grounding_call_dir = grounding_dir / f"call_{active_call_index}"
             _save_grounding_input(grounding_call_dir, frame)
-            grounded = pipeline.build_action_request(
-                action_name=execution["action_name"],
-                grounding=effective_grounding,
-                frame=frame,
-                arguments=resolve_action_arguments(
-                    execution["action_name"],
-                    subgoal=execution["subgoal"],
-                    arguments=execution["arguments"],
+            pipeline.f2g_client = replace(
+                pipeline.f2g_client,
+                timeout_s=min(
+                    120.0,
+                    _remaining_episode_seconds(episode_deadline),
                 ),
             )
+            try:
+                grounded = pipeline.build_action_request(
+                    action_name=execution["action_name"],
+                    grounding=effective_grounding,
+                    frame=frame,
+                    arguments=resolve_action_arguments(
+                        execution["action_name"],
+                        subgoal=execution["subgoal"],
+                        arguments=execution["arguments"],
+                    ),
+                )
+            except Exception as error:
+                if time.monotonic() >= episode_deadline:
+                    raise EpisodeTimeLimitReached(
+                        "episode wall-clock limit reached during grounding"
+                    ) from error
+                raise
+            _remaining_episode_seconds(episode_deadline)
             grounding_artifacts = _save_grounding_artifact(
                 grounding_call_dir,
                 execution=execution,
@@ -1405,6 +1535,7 @@ def run_episode(
 
             def collect_step(step: Any) -> None:
                 nonlocal native_step
+                _remaining_episode_seconds(episode_deadline)
                 native_step += 1
                 _record_video_observations(
                     recorder,
@@ -1419,6 +1550,7 @@ def run_episode(
                 grounded.request,
                 step_callback=collect_step,
             )
+            _remaining_episode_seconds(episode_deadline)
             native_execution = executor.last_execution
             if native_execution is None:
                 raise RuntimeError("ActionExecutor did not retain native execution")
@@ -1457,10 +1589,6 @@ def run_episode(
                 record["decisions"][-1]["terminal_execution"] = (
                     terminal_execution
                 )
-                vlm_trace["calls"][-1]["terminal_execution"] = (
-                    terminal_execution
-                )
-                _write_json(vlm_log_path, vlm_trace)
                 record["status"] = terminal_action_status
                 record["termination_reason"] = (
                     f"environment_{terminal_action_status}"
@@ -1503,8 +1631,19 @@ def run_episode(
                 point_coordinate_space=args.vlm_point_coordinate_space,
             )
 
-            def commit_followup(output: dict[str, Any]) -> None:
+            def commit_followup(output: dict[str, Any], _attempt: int) -> None:
                 _canonicalize_planner_subgoals(memory, output, first_plan=False)
+                if (
+                    execution["action_name"] in NON_REPEATABLE_RELEASE_ACTIONS
+                    and output.get("status") == "incomplete"
+                ):
+                    raise ValueError(
+                        f"{execution['action_name']} is a non-repeatable "
+                        "release action: return completed and plan the next "
+                        "subgoal when the object was released, or return "
+                        "failed with a recovery subgoal; verification "
+                        "correction must not request another robot movement"
+                    )
                 _validate_next_grounding(
                     memory,
                     contracts,
@@ -1514,36 +1653,31 @@ def run_episode(
                 )
                 memory.commit_followup(output)
 
-            followup_attempts: list[dict[str, Any]] = []
-            followup_call_log: dict[str, Any] = {
-                "call_index": decision_index,
-                "call_type": "followup_planning",
-                "planner_inputs": follow_inputs,
-                "messages": messages,
-                "images": images,
-                "attempts": followup_attempts,
-                "output": None,
-                "raw_response": None,
-                "decision": None,
-                "executed_before_call": execution,
-                "action_result": _jsonable(action_result),
-            }
-            vlm_trace["calls"].append(followup_call_log)
-            _write_json(vlm_log_path, vlm_trace)
             _status(
                 f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
                 f"verification/planning {decision_index}"
             )
+            followup_call_frame = int(
+                getattr(runtime.env.unwrapped, "elapsed_steps", 0)
+            )
 
             def record_followup_attempt(attempt: dict[str, Any]) -> None:
-                followup_attempts.append(attempt)
-                _write_json(vlm_log_path, vlm_trace)
-                _emit_vlm_call_output(
-                    readable_vlm_log_path,
-                    call_index=decision_index,
-                    call_type="followup_planning",
+                _append_vlm_developer_call(
+                    vlm_log_path,
+                    vlm_developer_calls,
+                    simulator_frame=followup_call_frame,
+                    planner_inputs=follow_inputs,
                     attempt=attempt,
                 )
+                if (
+                    execution["action_name"] in NON_REPEATABLE_RELEASE_ACTIONS
+                    and attempt.get("validation_error") is not None
+                ):
+                    _status(
+                        f"[agentic] {task}: repeat {repeat_id}, episode "
+                        f"{episode_id} verification correction "
+                        "(no additional robot movement)"
+                    )
 
             output, raw, latency, request_latency = _infer_and_commit(
                 client=client,
@@ -1553,6 +1687,10 @@ def run_episode(
                 planning_phase="in_task_planning",
                 validate_and_commit=commit_followup,
                 attempt_callback=record_followup_attempt,
+                episode_deadline=episode_deadline,
+                retry_until_deadline=(
+                    execution["action_name"] in NON_REPEATABLE_RELEASE_ACTIONS
+                ),
             )
             if memory.uses_keyframes:
                 candidates = [start_observation, *recent_observations]
@@ -1568,16 +1706,6 @@ def run_episode(
                 )
             _write_information_source_artifacts(memory, source_dir)
             resolution = _decision_summary(memory, output)
-            followup_call_log.update(
-                {
-                    "output": output,
-                    "raw_response": raw,
-                    "decision": resolution,
-                    "vlm_latency_ms": latency,
-                    "request_to_json_ms": request_latency,
-                }
-            )
-            _write_json(vlm_log_path, vlm_trace)
             record["decisions"].append(
                 {
                     "call": decision_index,
@@ -1604,6 +1732,7 @@ def run_episode(
             record["evaluation"] = terminal_action_evaluation
             record["termination_reason"] = f"environment_{terminal_action_status}"
         else:
+            _remaining_episode_seconds(episode_deadline)
             evaluation = runtime.env.unwrapped.evaluate(solve_complete_eval=True)
             record["evaluation"] = _jsonable(evaluation)
             if _flag(evaluation.get("success", False)):
@@ -1613,22 +1742,29 @@ def run_episode(
                 record["status"] = "fail"
                 record["termination_reason"] = "environment_fail"
             elif decision_limit_reached:
-                record["status"] = "fail"
+                record["status"] = "timeout"
                 record["termination_reason"] = "planner_decision_limit"
             elif memory.current_execution() is None:
                 record["status"] = "fail"
                 record["termination_reason"] = "vlm_stop_without_env_terminal"
             else:
-                record["status"] = "fail"
+                record["status"] = "error"
                 record["termination_reason"] = (
                     "planner_exit_without_env_terminal"
                 )
+                record["error"] = (
+                    "RuntimeError: evaluator exited without a terminal state"
+                )
+    except EpisodeTimeLimitReached:
+        record["status"] = "timeout"
+        record["termination_reason"] = "episode_time_limit"
     except Exception as error:
         record["status"] = "error"
         record["termination_reason"] = "execution_exception"
         record["error"] = f"{type(error).__name__}: {error}"
         record["traceback"] = traceback.format_exc()
     finally:
+        record["elapsed_seconds"] = time.monotonic() - episode_started
         try:
             if recorder is not None:
                 record["video_frame_count"] = recorder.frame_count
@@ -1675,10 +1811,6 @@ def run_episode(
             f"{invalid_status!r}"
         )
     _write_json(video_episode_dir / "episode.json", record)
-    if vlm_trace["calls"]:
-        vlm_trace["status"] = record["status"]
-        vlm_trace["termination_reason"] = record["termination_reason"]
-        _write_json(vlm_log_path, vlm_trace)
     return record
 
 
@@ -1691,6 +1823,7 @@ def main() -> None:
         ("num_repeats", args.num_repeats),
         ("max_steps", args.max_steps),
         ("max_decisions", args.max_decisions),
+        ("max_episode_seconds", args.max_episode_seconds),
         ("history_size", args.history_size),
         ("history_stride", args.history_stride),
         ("max_initial_observations", args.max_initial_observations),
@@ -1734,6 +1867,7 @@ def main() -> None:
         "num_repeats": args.num_repeats,
         "max_steps": args.max_steps,
         "max_decisions": args.max_decisions,
+        "max_episode_seconds": args.max_episode_seconds,
         "history_size": args.history_size,
         "history_stride": args.history_stride,
         "depth_scale": args.depth_scale,
@@ -1749,19 +1883,20 @@ def main() -> None:
     run_config_path = run_dir / "run_config.json"
     if run_config_path.exists() and not args.overwrite:
         existing_config = json.loads(run_config_path.read_text(encoding="utf-8"))
-        coordinate_space_was_missing = (
-            "vlm_point_coordinate_space" not in existing_config
-        )
-        if coordinate_space_was_missing:
-            existing_config["vlm_point_coordinate_space"] = (
-                args.vlm_point_coordinate_space
-            )
+        config_was_migrated = False
+        if "max_subgoal_attempts" in existing_config:
+            existing_config.pop("max_subgoal_attempts")
+            config_was_migrated = True
+        for key in ("vlm_point_coordinate_space", "max_episode_seconds"):
+            if key not in existing_config:
+                existing_config[key] = requested_config[key]
+                config_was_migrated = True
         if existing_config != requested_config:
             raise RuntimeError(
                 "resume configuration differs from run_config.json; choose a "
                 "new RUN_NAME or set OVERWRITE=true"
             )
-        if coordinate_space_was_missing:
+        if config_was_migrated:
             _write_json(run_config_path, existing_config)
     else:
         _write_json(run_config_path, requested_config)
@@ -1867,6 +2002,7 @@ def main() -> None:
         "tasks": tasks,
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
+        "max_episode_seconds": args.max_episode_seconds,
         "episodes": len(records),
         "successes": successes,
         "success_rate": successes / len(records) if records else 0,

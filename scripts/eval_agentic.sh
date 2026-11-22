@@ -30,6 +30,9 @@ NUM_REPEATS=1
 
 MAX_STEPS=3000
 MAX_DECISIONS=50
+# Hard wall-clock limit for each episode, including planning, grounding,
+# execution, and verification correction calls.
+MAX_EPISODE_SECONDS=600
 HISTORY_SIZE=3
 HISTORY_STRIDE=16
 MAX_INITIAL_OBSERVATIONS=16
@@ -43,7 +46,7 @@ GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
 # Used exactly as written; no model-name suffix is added automatically.
-RUN_NAME="${RUN_NAME:-test_v1.6}"
+RUN_NAME="${RUN_NAME:-test_v1.7}"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
@@ -159,7 +162,7 @@ RUN_MEDIA_ROOT=$(python3 -c \
     'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' \
     "$SAVE_DIR/$RUN_NAME")
 mkdir -p "$RUN_MEDIA_ROOT"
-if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_STEPS < 1 || MAX_DECISIONS < 1 || HISTORY_SIZE < 1 || HISTORY_STRIDE < 1 || MAX_INITIAL_OBSERVATIONS < 1 || PLANNER_ATTEMPTS < 1 || GROUNDING_CAMERA_RESOLUTION < 1)); then
+if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_STEPS < 1 || MAX_DECISIONS < 1 || MAX_EPISODE_SECONDS < 1 || HISTORY_SIZE < 1 || HISTORY_STRIDE < 1 || MAX_INITIAL_OBSERVATIONS < 1 || PLANNER_ATTEMPTS < 1 || GROUNDING_CAMERA_RESOLUTION < 1)); then
     echo "ERROR: all episode, step, history, attempt, and resolution values must be positive." >&2
     exit 1
 fi
@@ -244,6 +247,7 @@ args=(
     --num-repeats "$NUM_REPEATS"
     --max-steps "$MAX_STEPS"
     --max-decisions "$MAX_DECISIONS"
+    --max-episode-seconds "$MAX_EPISODE_SECONDS"
     --history-size "$HISTORY_SIZE"
     --history-stride "$HISTORY_STRIDE"
     --max-initial-observations "$MAX_INITIAL_OBSERVATIONS"
@@ -285,6 +289,7 @@ trap cleanup EXIT INT TERM
 echo "Agentic tasks: $TASKS"
 echo "Episodes: ${EPISODE_IDS:-0..$((NUM_EPISODES - 1))}"
 echo "Repeats: $NUM_REPEATS"
+echo "Per-episode wall-clock limit: ${MAX_EPISODE_SECONDS}s"
 echo "Result directory: $SAVE_DIR/$RUN_NAME"
 echo "vLLM local-media root: $RUN_MEDIA_ROOT"
 echo "Environments: VLM=$VLM_MAMBA_ENV, F2G=$F2G_MAMBA_ENV, eval=$EVAL_MAMBA_ENV"
