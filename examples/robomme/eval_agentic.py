@@ -38,7 +38,9 @@ from harness.actions import resolve_action_arguments
 from harness.grounding import F2GClient
 from harness.grounding import GroundingContractRegistry
 from harness.grounding import GroundingPipeline
+from harness.grounding import VLM_POINT_COORDINATE_SPACES
 from harness.grounding import camera_frame_from_maniskill
+from harness.grounding import convert_vlm_grounding_to_pixels
 from harness.grounding import depth_statistics
 from harness.grounding import remap_grounding_points
 from harness.grounding.visualization import draw_grounding_overlay
@@ -56,6 +58,16 @@ from utils import RolloutRecorder
 
 GROUNDING_CAMERA_NAME = "grounding_camera"
 VLM_GROUNDING_IMAGE_SHAPE = (256, 256)
+NORMALIZED_1000_GROUNDING_ADAPTER = """
+
+VLM coordinate transport override for this served model:
+- Return every grounding point_xy in normalized 0-1000 coordinates for the exact
+  current overall image, with [0,0] at top-left and [1000,1000] at bottom-right.
+- This instruction supersedes only the earlier 256x256 pixel-coordinate sentences.
+  All target-role, visible-center, current-image, color, and JSON rules still apply.
+- The trusted harness converts these normalized points to the original 256x256
+  image before validation and execution. Do not perform that conversion yourself.
+"""
 ROBOMME_EPISODE_STATUSES = frozenset({"success", "fail", "timeout", "error"})
 
 
@@ -107,6 +119,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vlm-model", required=True)
     parser.add_argument("--vlm-model-path", required=True)
     parser.add_argument("--vlm-max-tokens", type=int, default=8192)
+    parser.add_argument(
+        "--vlm-point-coordinate-space",
+        choices=sorted(VLM_POINT_COORDINATE_SPACES),
+        default="pixel",
+        help="coordinate convention emitted by the selected VLM",
+    )
     parser.add_argument("--f2g-url", default="http://127.0.0.1:8765")
     parser.add_argument(
         "--pre-eval-gpu-snapshot",
@@ -235,6 +253,25 @@ def _write_json(path: Path, value: Any) -> None:
         encoding="utf-8",
     )
     os.replace(temporary, path)
+
+
+def _write_jsonl(path: Path, values: list[Mapping[str, Any]]) -> None:
+    """Atomically replace a JSONL file so interrupted runs remain resumable."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as stream:
+            for value in values:
+                stream.write(
+                    json.dumps(_jsonable(value), ensure_ascii=False) + "\n"
+                )
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _emit_vlm_call_output(
@@ -515,6 +552,7 @@ def _build_planner_messages(
     *,
     prompt_name: str,
     inputs: Mapping[str, Any],
+    point_coordinate_space: str,
 ) -> tuple[list[dict[str, str]], list[str]]:
     prompt = task_config["vlm_prompts"][prompt_name]
     template = prompt["user_prompt_template"]
@@ -535,9 +573,17 @@ def _build_planner_messages(
             f"planner prompt has {placeholder_count} image placeholders but "
             f"{len(image_paths)} paths"
         )
+    system_prompt = prompt["system_prompt"]
+    if point_coordinate_space == "normalized_1000":
+        system_prompt += NORMALIZED_1000_GROUNDING_ADAPTER
+    elif point_coordinate_space != "pixel":
+        raise ValueError(
+            "unsupported VLM point coordinate space: "
+            f"{point_coordinate_space!r}"
+        )
     return (
         [
-            {"role": "system", "content": prompt["system_prompt"]},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         image_paths,
@@ -569,29 +615,39 @@ def _observation_path_map(values: list[dict[str, Any]]) -> dict[str, str]:
 def _validate_next_grounding(
     memory: TaskMemory,
     contracts: GroundingContractRegistry,
-    output: Mapping[str, Any],
+    output: dict[str, Any],
     image_shape: tuple[int, int],
+    point_coordinate_space: str,
 ) -> None:
     key = output.get("next_subgoal_key")
     if key == "STOP":
-        normalized = output.get("grounding")
-        if normalized != {
+        output["grounding"] = {
             "status": "not_required",
             "image_ref": None,
             "targets": {},
-        }:
-            raise ValueError("STOP requires grounding.status=not_required")
+        }
         return
     resolved = memory.resolver.resolve(
         subgoal_key=key,
         subgoal=output.get("next_subgoal"),
         arguments=output.get("arguments", {}),
     )
-    grounding = contracts.validate(
+    adapted_grounding = contracts.adapt_vlm_output(
         resolved.action_name,
         output.get("grounding"),
+        semantic_arguments=resolved.arguments,
+    )
+    pixel_grounding = convert_vlm_grounding_to_pixels(
+        adapted_grounding,
+        image_shape=image_shape,
+        coordinate_space=point_coordinate_space,
+    )
+    grounding = contracts.validate(
+        resolved.action_name,
+        pixel_grounding,
         image_shape=image_shape,
     )
+    output["grounding"] = grounding
     if grounding["status"] == "ambiguous":
         raise ValueError("grounding is ambiguous; select a visible target")
     if grounding["status"] == "ok" and grounding["image_ref"] != "current_front":
@@ -604,22 +660,39 @@ def _canonicalize_planner_subgoals(
 ) -> None:
     """Replace VLM display text with trusted task-config template text."""
 
+    status = output.get("status")
+    if isinstance(status, str):
+        output["status"] = status.strip().lower()
+    if output.get("keyframe_save") == "":
+        output["keyframe_save"] = None
+
     if "subgoal_sequence" in output:
         sequence = output["subgoal_sequence"]
         if not isinstance(sequence, list):
             raise ValueError("subgoal_sequence must be a list")
-        output["subgoal_sequence"] = [
-            memory.resolver.canonicalize_planner_payload(item).planner_payload()
-            for item in sequence
-        ]
+        canonical_sequence = []
+        for item in sequence:
+            if isinstance(item, Mapping) and item.get("arguments") is None:
+                item = {**item, "arguments": {}}
+            canonical_sequence.append(
+                memory.resolver.canonicalize_planner_payload(item).planner_payload()
+            )
+        output["subgoal_sequence"] = canonical_sequence
 
-    if output.get("next_subgoal_key") == "STOP":
+    next_key = output.get("next_subgoal_key")
+    if isinstance(next_key, str) and next_key.strip().casefold() == "stop":
+        output["next_subgoal_key"] = "STOP"
+        output["next_subgoal"] = "STOP"
+        output["arguments"] = {}
         return
+    arguments = output.get("arguments")
+    if arguments is None:
+        arguments = {}
     resolved = memory.resolver.canonicalize_planner_payload(
         {
             "subgoal_key": output.get("next_subgoal_key"),
             "subgoal": output.get("next_subgoal"),
-            "arguments": output.get("arguments"),
+            "arguments": arguments,
         }
     )
     output["next_subgoal_key"] = resolved.subgoal_key
@@ -1025,6 +1098,7 @@ def run_episode(
         "task": task,
         "episode_id": episode_id,
         "repeat_id": repeat_id,
+        "point_coordinate_space": args.vlm_point_coordinate_space,
         "calls": [],
     }
     record: dict[str, Any] = {
@@ -1157,17 +1231,24 @@ def run_episode(
             task_config,
             prompt_name="first_planning",
             inputs=first_inputs,
+            point_coordinate_space=args.vlm_point_coordinate_space,
         )
         image_shape = initial_pairs[-1][0].shape[:2]
         if image_shape != VLM_GROUNDING_IMAGE_SHAPE:
             raise RuntimeError(
-                "VLM grounding prompt declares a 256x256 current overall image, "
+                "VLM grounding input must be a 256x256 current overall image, "
                 f"but the runtime produced {image_shape}"
             )
 
         def commit_first(output: dict[str, Any]) -> None:
             _canonicalize_planner_subgoals(memory, output)
-            _validate_next_grounding(memory, contracts, output, image_shape)
+            _validate_next_grounding(
+                memory,
+                contracts,
+                output,
+                image_shape,
+                args.vlm_point_coordinate_space,
+            )
             memory.commit_first_plan(task_goal=task_goal, planner_output=output)
 
         first_attempts: list[dict[str, Any]] = []
@@ -1429,7 +1510,7 @@ def run_episode(
             current_image_shape = final_pair[0].shape[:2]
             if current_image_shape != VLM_GROUNDING_IMAGE_SHAPE:
                 raise RuntimeError(
-                    "VLM grounding prompt declares a 256x256 current overall "
+                    "VLM grounding input must be a 256x256 current overall "
                     f"image, but the runtime produced {current_image_shape}"
                 )
             policy_index = _active_keyframe_policy(memory)
@@ -1444,6 +1525,7 @@ def run_episode(
                 task_config,
                 prompt_name="followup_planning",
                 inputs=follow_inputs,
+                point_coordinate_space=args.vlm_point_coordinate_space,
             )
 
             def commit_followup(output: dict[str, Any]) -> None:
@@ -1453,6 +1535,7 @@ def run_episode(
                     contracts,
                     output,
                     current_image_shape,
+                    args.vlm_point_coordinate_space,
                 )
                 memory.commit_followup(output)
 
@@ -1629,10 +1712,13 @@ def main() -> None:
     tasks = _csv(args.tasks)
     episode_ids = _episode_ids(args.episode_ids) or list(range(args.num_episodes))
     for name, value in (
+        ("num_episodes", args.num_episodes),
         ("num_repeats", args.num_repeats),
+        ("max_steps", args.max_steps),
         ("max_decisions", args.max_decisions),
         ("history_size", args.history_size),
         ("history_stride", args.history_stride),
+        ("max_initial_observations", args.max_initial_observations),
         ("planner_attempts", args.planner_attempts),
         ("grounding_camera_resolution", args.grounding_camera_resolution),
         ("vlm_max_tokens", args.vlm_max_tokens),
@@ -1641,6 +1727,12 @@ def main() -> None:
             raise ValueError(f"{name} must be positive")
     if not tasks:
         raise ValueError("--tasks must contain at least one task")
+    if len(tasks) != len(set(tasks)):
+        raise ValueError("--tasks must not contain duplicate task names")
+    if args.depth_scale <= 0:
+        raise ValueError("depth_scale must be positive")
+    if not 1 <= args.vlm_port <= 65535:
+        raise ValueError("vlm_port must be between 1 and 65535")
 
     run_dir = (args.save_dir / args.run_name).expanduser().resolve()
     if run_dir.exists() and args.overwrite:
@@ -1676,16 +1768,26 @@ def main() -> None:
         "vlm_model_name": client.server_metadata.get("model_name"),
         "vlm_model_path": client.server_metadata.get("model_path"),
         "vlm_max_tokens": client.server_metadata.get("max_tokens"),
+        "vlm_point_coordinate_space": args.vlm_point_coordinate_space,
         "f2g_checkpoint": f2g_health.get("checkpoint"),
     }
     run_config_path = run_dir / "run_config.json"
     if run_config_path.exists() and not args.overwrite:
         existing_config = json.loads(run_config_path.read_text(encoding="utf-8"))
+        coordinate_space_was_missing = (
+            "vlm_point_coordinate_space" not in existing_config
+        )
+        if coordinate_space_was_missing:
+            existing_config["vlm_point_coordinate_space"] = (
+                args.vlm_point_coordinate_space
+            )
         if existing_config != requested_config:
             raise RuntimeError(
                 "resume configuration differs from run_config.json; choose a "
                 "new RUN_NAME or set OVERWRITE=true"
             )
+        if coordinate_space_was_missing:
+            _write_json(run_config_path, existing_config)
     else:
         _write_json(run_config_path, requested_config)
 
@@ -1769,13 +1871,7 @@ def main() -> None:
                     item["episode_id"],
                 )
             )
-            records_path.write_text(
-                "".join(
-                    json.dumps(_jsonable(item), ensure_ascii=False) + "\n"
-                    for item in records
-                ),
-                encoding="utf-8",
-            )
+            _write_jsonl(records_path, records)
             progress.update(1)
             progress.set_postfix(status=record["status"])
         progress.close()
@@ -1805,13 +1901,21 @@ def main() -> None:
         "f2g": f2g_health,
         "depth_scale": args.depth_scale,
         "grounding_camera_resolution": args.grounding_camera_resolution,
+        "vlm_point_coordinate_space": args.vlm_point_coordinate_space,
         "init_prompt_version": DIRECT_INIT_PROMPT_VERSION,
     }
     _write_json(run_dir / "summary.json", summary)
     client.close()
+    error_count = sum(record["status"] == "error" for record in records)
     _status(
-        f"[agentic] evaluation complete: {successes}/{len(records)} successful"
+        f"[agentic] evaluation complete: {successes}/{len(records)} successful, "
+        f"{error_count} errors"
     )
+    if error_count:
+        raise RuntimeError(
+            f"evaluation completed with {error_count} error episode(s); "
+            "see episodes.jsonl and the per-episode logs"
+        )
 
 
 if __name__ == "__main__":

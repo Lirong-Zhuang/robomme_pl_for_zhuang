@@ -539,6 +539,33 @@ def test_keyframe_description_is_required_by_policy(tmp_path: Path) -> None:
         )
 
 
+def test_sequence_keyframe_allows_reused_window_id_at_a_new_path(
+    tmp_path: Path,
+) -> None:
+    memory = _sequence_keyframe_memory(tmp_path)
+    memory.commit_first_plan(
+        task_goal="Track the containers.",
+        planner_output={**_first_plan_output(), "keyframe_save": None},
+    )
+
+    memory.save_keyframe_selection(
+        keyframe_save="current_front",
+        observation_paths={"current_front": "/episode/call_1/current.png"},
+        description="The containers begin moving.",
+    )
+    state = memory.save_keyframe_selection(
+        keyframe_save="current_front",
+        observation_paths={"current_front": "/episode/call_2/current.png"},
+        description="The containers settle in new positions.",
+    )
+
+    saved = state["persistent_facts"]["keyframes"]["container_tracking"]
+    assert [item["image_path"] for item in saved] == [
+        "/episode/call_1/current.png",
+        "/episode/call_2/current.png",
+    ]
+
+
 def test_incomplete_retains_current_subgoal_and_increments_attempt(
     tmp_path: Path,
 ) -> None:

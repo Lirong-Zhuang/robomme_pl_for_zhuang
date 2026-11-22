@@ -879,12 +879,15 @@ class TaskMemory:
                     f"saved keyframe sequence must be a list: {field_path}"
                 )
             for saved_record in records:
-                if saved_record.get("observation_id") == observation_id:
+                if (
+                    saved_record.get("observation_id") == observation_id
+                    and saved_record.get("image_path") == image_path
+                ):
                     if saved_record == record:
                         return _json_copy(state)
                     raise RuntimeError(
-                        "keyframe observation ID is already saved with different "
-                        f"content: {observation_id!r}"
+                        "keyframe observation is already saved with different "
+                        f"content: {observation_id!r} at {image_path!r}"
                     )
             if len(records) >= frame_count:
                 raise RuntimeError(

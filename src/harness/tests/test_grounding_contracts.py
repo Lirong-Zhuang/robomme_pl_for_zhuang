@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from harness.grounding import GroundingContractRegistry
+from harness.grounding import convert_vlm_grounding_to_pixels
 
 
 CATALOG_PATH = (
@@ -19,13 +20,18 @@ def _registry() -> GroundingContractRegistry:
     return GroundingContractRegistry.from_catalog(CATALOG_PATH)
 
 
-def _point(role: str, *, color_hint: str | None = None) -> dict:
+def _point(
+    role: str,
+    *,
+    point_xy: list[float] | None = None,
+    color_hint: str | None = None,
+) -> dict:
     return {
         "status": "ok",
         "image_ref": "current_front",
         "targets": {
             role: {
-                "point_xy": [120, 90],
+                "point_xy": point_xy or [120, 90],
                 "color_hint": color_hint,
             }
         },
@@ -47,6 +53,144 @@ def test_colored_pickup_accepts_only_2d_point_and_color() -> None:
         "point_xy": [120.0, 90.0],
         "color_hint": "red",
     }
+
+
+def test_normalized_1000_coordinates_are_converted_before_validation() -> None:
+    grounding = {
+        **_point("object", color_hint="red"),
+        "targets": {
+            "object": {
+                "point_xy": [500, 250],
+                "color_hint": "red",
+            }
+        },
+    }
+
+    converted = convert_vlm_grounding_to_pixels(
+        grounding,
+        image_shape=(256, 256),
+        coordinate_space="normalized_1000",
+    )
+
+    assert converted["targets"]["object"]["point_xy"] == pytest.approx(
+        [128.0, 64.0]
+    )
+    assert _registry().validate(
+        "solve_pickup",
+        converted,
+        image_shape=(256, 256),
+    )["targets"]["object"]["point_xy"] == pytest.approx([128.0, 64.0])
+
+
+def test_normalized_conversion_is_not_guessed_from_point_magnitude() -> None:
+    grounding = {
+        **_point("object", color_hint="red"),
+        "targets": {
+            "object": {
+                "point_xy": [100, 100],
+                "color_hint": "red",
+            }
+        },
+    }
+
+    normalized = convert_vlm_grounding_to_pixels(
+        grounding,
+        image_shape=(256, 256),
+        coordinate_space="normalized_1000",
+    )
+    pixels = convert_vlm_grounding_to_pixels(
+        grounding,
+        image_shape=(256, 256),
+        coordinate_space="pixel",
+    )
+
+    assert normalized["targets"]["object"]["point_xy"] == pytest.approx(
+        [25.6, 25.6]
+    )
+    assert pixels["targets"]["object"]["point_xy"] == [100.0, 100.0]
+
+
+def test_normalized_coordinates_above_1000_are_rejected() -> None:
+    grounding = {
+        **_point("object", color_hint="red"),
+        "targets": {
+            "object": {
+                "point_xy": [1001, 500],
+                "color_hint": "red",
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="inclusive 0-1000"):
+        convert_vlm_grounding_to_pixels(
+            grounding,
+            image_shape=(256, 256),
+            coordinate_space="normalized_1000",
+        )
+
+
+def test_normalized_1000_boundary_is_clamped_inside_image() -> None:
+    grounding = {
+        **_point("object", color_hint="red"),
+        "targets": {
+            "object": {
+                "point_xy": [1000, 1000],
+                "color_hint": "red",
+            }
+        },
+    }
+
+    converted = convert_vlm_grounding_to_pixels(
+        grounding,
+        image_shape=(256, 256),
+        coordinate_space="normalized_1000",
+    )
+
+    assert converted["targets"]["object"]["point_xy"] == [255.0, 255.0]
+
+
+def test_adapter_uses_trusted_single_role_and_ignores_forbidden_color() -> None:
+    adapted = _registry().adapt_vlm_output(
+        "solve_put_into_bin",
+        _point("bin", point_xy=[500, 500], color_hint="gray"),
+    )
+
+    assert adapted == _point(
+        "container",
+        point_xy=[500.0, 500.0],
+        color_hint=None,
+    )
+
+
+def test_adapter_discards_points_for_action_with_no_vlm_perception() -> None:
+    adapted = _registry().adapt_vlm_output(
+        "solve_putdown",
+        _point("table", point_xy=[500, 500], color_hint="brown"),
+    )
+
+    assert adapted == {
+        "status": "not_required",
+        "image_ref": None,
+        "targets": {},
+    }
+
+
+def test_adapter_fills_and_enforces_subgoal_color() -> None:
+    without_color = _point("object", color_hint=None)
+    without_color["targets"]["object"].pop("color_hint")
+    adapted = _registry().adapt_vlm_output(
+        "solve_pickup",
+        without_color,
+        semantic_arguments={"ordinal": "first", "color": "red"},
+    )
+    assert adapted["targets"]["object"]["color_hint"] == "red"
+
+    with pytest.raises(ValueError, match="conflicts with subgoal color"):
+        _registry().adapt_vlm_output(
+            "solve_pickup",
+            _point("object", color_hint="blue"),
+            semantic_arguments={"ordinal": "first", "color": "red"},
+        )
 
 
 def test_vlm_geometry_fields_are_rejected() -> None:

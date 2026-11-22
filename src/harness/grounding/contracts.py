@@ -25,6 +25,7 @@ _VLM_POINT_BACKENDS = {
     "side_grasp_grounding",
     "location_grounding",
 }
+VLM_POINT_COORDINATE_SPACES = {"pixel", "normalized_1000"}
 
 
 def _required_string(name: str, value: Any) -> str:
@@ -109,6 +110,41 @@ def normalize_vlm_grounding(value: Any) -> dict[str, Any]:
         "image_ref": image_ref,
         "targets": normalized_targets,
     }
+
+
+def convert_vlm_grounding_to_pixels(
+    value: Any,
+    *,
+    image_shape: tuple[int, int],
+    coordinate_space: str,
+) -> dict[str, Any]:
+    """Convert one declared VLM coordinate space into trusted image pixels."""
+
+    if coordinate_space not in VLM_POINT_COORDINATE_SPACES:
+        raise ValueError(
+            "coordinate_space must be one of "
+            f"{sorted(VLM_POINT_COORDINATE_SPACES)}, got {coordinate_space!r}"
+        )
+    height, width = image_shape
+    if height <= 0 or width <= 0:
+        raise ValueError("image_shape dimensions must be positive")
+
+    normalized = normalize_vlm_grounding(value)
+    if normalized["status"] != "ok" or coordinate_space == "pixel":
+        return normalized
+
+    for role, target in normalized["targets"].items():
+        x, y = target["point_xy"]
+        if x > 1000 or y > 1000:
+            raise ValueError(
+                f"grounding role {role!r} normalized point_xy must be within "
+                "the inclusive 0-1000 range"
+            )
+        target["point_xy"] = [
+            min(float(width - 1), x * width / 1000),
+            min(float(height - 1), y * height / 1000),
+        ]
+    return normalized
 
 
 class GroundingContractRegistry:
@@ -285,6 +321,83 @@ class GroundingContractRegistry:
                 if not (0 <= x < width and 0 <= y < height):
                     raise ValueError(
                         f"grounding role {role!r} point_xy is outside image bounds"
+                    )
+        return normalized
+
+    def adapt_vlm_output(
+        self,
+        action_name: str,
+        grounding: Any,
+        *,
+        semantic_arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Canonicalize harmless model-format drift from a trusted contract.
+
+        Perception mode, a sole target's role name, and non-VLM color policies
+        are already determined by the trusted action. Required colors,
+        coordinates, image references, and multi-role identity remain
+        model-owned and are still validated strictly.
+        """
+
+        contract = self.contract(action_name)
+        if contract.get("mode") != "vlm_points":
+            return {
+                "status": "not_required",
+                "image_ref": None,
+                "targets": {},
+            }
+
+        prepared = copy.deepcopy(grounding)
+        if isinstance(prepared, Mapping) and prepared.get("status") == "ok":
+            raw_targets = prepared.get("targets")
+            if isinstance(raw_targets, Mapping):
+                for raw_target in raw_targets.values():
+                    if isinstance(raw_target, dict) and set(raw_target) == {
+                        "point_xy"
+                    }:
+                        # An omitted color_hint is equivalent to JSON null;
+                        # policy validation below still rejects null when a
+                        # genuinely model-selected color is required.
+                        raw_target["color_hint"] = None
+
+        normalized = normalize_vlm_grounding(prepared)
+        if normalized["status"] != "ok":
+            return normalized
+
+        target_specs = contract["targets"]
+        targets = normalized["targets"]
+        if len(target_specs) == 1 and len(targets) == 1:
+            expected_role = target_specs[0]["role"]
+            actual_role = next(iter(targets))
+            if actual_role != expected_role:
+                targets = {expected_role: targets[actual_role]}
+                normalized["targets"] = targets
+
+        specs_by_role = {item["role"]: item for item in target_specs}
+        semantic_color = None
+        if isinstance(semantic_arguments, Mapping):
+            candidate = semantic_arguments.get("color")
+            if isinstance(candidate, str) and candidate.strip():
+                semantic_color = candidate.strip().lower()
+        for role, target in targets.items():
+            spec = specs_by_role.get(role)
+            if spec is not None and spec.get("color_hint") in {
+                "not_used",
+                "fixed",
+            }:
+                target["color_hint"] = None
+            elif (
+                spec is not None
+                and spec.get("color_hint") == "required"
+                and semantic_color is not None
+            ):
+                grounded_color = target.get("color_hint")
+                if grounded_color is None:
+                    target["color_hint"] = semantic_color
+                elif grounded_color.strip().lower() != semantic_color:
+                    raise ValueError(
+                        f"grounding role {role!r} color_hint conflicts with "
+                        f"subgoal color {semantic_color!r}"
                     )
         return normalized
 

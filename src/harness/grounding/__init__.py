@@ -3,6 +3,8 @@
 from typing import Any
 
 from .contracts import GroundingContractRegistry
+from .contracts import VLM_POINT_COORDINATE_SPACES
+from .contracts import convert_vlm_grounding_to_pixels
 from .contracts import normalize_vlm_grounding
 
 
@@ -14,9 +16,11 @@ __all__ = [
     "GroundingOutput",
     "GroundingPipeline",
     "OpenCVSegmenter",
+    "VLM_POINT_COORDINATE_SPACES",
     "camera_frame_from_maniskill",
     "camera_frame_from_robomme",
     "depth_statistics",
+    "convert_vlm_grounding_to_pixels",
     "normalize_vlm_grounding",
     "remap_grounding_points",
 ]

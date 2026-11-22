@@ -70,11 +70,13 @@ case "$VLM_MODEL" in
     30b)
         MODEL_PATH="/data/public/qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
         VLM_SERVED_MODEL_NAME="qwen3vl-30b"
+        VLM_POINT_COORDINATE_SPACE="normalized_1000"
         VLM_EXTRA_ARGS=()
         ;;
     27b)
         MODEL_PATH="/data/public/qwen/Qwen3.8-27B-FP8"
         VLM_SERVED_MODEL_NAME="qwen38-27b"
+        VLM_POINT_COORDINATE_SPACE="normalized_1000"
         VLM_EXTRA_ARGS=(
             --reasoning-parser qwen3
             --default-chat-template-kwargs '{"enable_thinking":false,"preserve_thinking":false}'
@@ -157,8 +159,8 @@ RUN_MEDIA_ROOT=$(python3 -c \
     'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' \
     "$SAVE_DIR/$RUN_NAME")
 mkdir -p "$RUN_MEDIA_ROOT"
-if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_DECISIONS < 1 || GROUNDING_CAMERA_RESOLUTION < 1)); then
-    echo "ERROR: episode/repeat/decision counts and grounding resolution must be positive." >&2
+if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_STEPS < 1 || MAX_DECISIONS < 1 || HISTORY_SIZE < 1 || HISTORY_STRIDE < 1 || MAX_INITIAL_OBSERVATIONS < 1 || PLANNER_ATTEMPTS < 1 || GROUNDING_CAMERA_RESOLUTION < 1)); then
+    echo "ERROR: all episode, step, history, attempt, and resolution values must be positive." >&2
     exit 1
 fi
 for required_command in lsof curl; do
@@ -231,6 +233,7 @@ args=(
     --vlm-model "$VLM_SERVED_MODEL_NAME"
     --vlm-model-path "$MODEL_PATH"
     --vlm-max-tokens "$VLM_MAX_TOKENS"
+    --vlm-point-coordinate-space "$VLM_POINT_COORDINATE_SPACE"
     --f2g-url "http://$F2G_HOST:$F2G_PORT"
     --pre-eval-gpu-snapshot "$GPU_BASELINE_FILE"
     --depth-scale "$DEPTH_SCALE"
@@ -286,6 +289,7 @@ echo "Result directory: $SAVE_DIR/$RUN_NAME"
 echo "vLLM local-media root: $RUN_MEDIA_ROOT"
 echo "Environments: VLM=$VLM_MAMBA_ENV, F2G=$F2G_MAMBA_ENV, eval=$EVAL_MAMBA_ENV"
 echo "Agentic VLM: $VLM_MODEL ($MODEL_PATH)"
+echo "VLM point coordinates: $VLM_POINT_COORDINATE_SPACE"
 
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
 CUDA_HOME="$F2G_ENV_PREFIX" \
