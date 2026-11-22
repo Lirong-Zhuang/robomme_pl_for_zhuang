@@ -1,15 +1,17 @@
 """Standalone init-planning VLM test.
 
-Required environment (the same VLM environment used by Oracle Plus):
-    micromamba activate robomme-qwen38
+Start either supported model in the shared vLLM environment first, for example:
+    micromamba activate vllm
+    vllm serve /data/public/qwen/Qwen3-VL-30B-A3B-Instruct-FP8 \
+        --served-model-name qwen3vl-30b --port 8000
 
-Run from the repository root after activating that environment:
+Then run this client from the repository root in the evaluation environment:
+    micromamba activate robomme
     python src/harness/tests/test_init_planning_vlm.py
 
-The environment must provide CUDA, PyTorch, Transformers, and a recent ms-swift
-with Qwen3.8 support. Set QWEN_MODEL_PATH if the default checkpoint path below is
-not valid on the current machine. This test needs no simulator or VLA server. On
-success, the output JSON contains both ``task_config`` and ``run_metrics``.
+Set VLM_MODEL_NAME, VLM_MODEL_PATH, VLM_HOST, or VLM_PORT when the server uses
+different values. This test needs no simulator or VLA policy server. On success,
+the output JSON contains both ``task_config`` and ``run_metrics``.
 """
 
 from __future__ import annotations
@@ -29,8 +31,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from harness.prompts import build_task_init_messages  # noqa: E402
-from oracle_plus.runtime_metrics import GpuMemoryMonitor  # noqa: E402
-from oracle_plus.vlm import VLMSubgoalPlanner27B  # noqa: E402
+from harness.vlm_client import AgenticVLMClient  # noqa: E402
 
 
 # -----------------------------------------------------------------------------
@@ -86,15 +87,16 @@ TASK_CONFIG_EXAMPLE_PATHS = tuple(
     )
 )
 
-MODEL_PATH = Path(
+VLM_MODEL_PATH = Path(
     os.environ.get(
-        "QWEN_MODEL_PATH",
-        "/data/zhuanglr/models/Qwen3.8-27B-FP8-fixed",
+        "VLM_MODEL_PATH",
+        "/data/public/qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
     )
 )
-ATTN_IMPL = "flash_attention_2"
+VLM_MODEL_NAME = os.environ.get("VLM_MODEL_NAME", "qwen3vl-30b")
+VLM_HOST = os.environ.get("VLM_HOST", "127.0.0.1")
+VLM_PORT = int(os.environ.get("VLM_PORT", "8000"))
 MAX_NEW_TOKENS = 8192
-TEMPERATURE = 0.0
 
 
 _DIRECT_TEST_ADAPTER = """
@@ -553,7 +555,6 @@ def _validate_task_config(
 
 def main() -> None:
     program_started_at = time.perf_counter()
-    gpu_monitor = GpuMemoryMonitor(os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
     output_path = (OUTPUT_DIRECTORY / OUTPUT_FILE_NAME).resolve()
     action_catalog = _load_json_object(ACTION_CANDIDATES_PATH)
     config_examples_index = (
@@ -581,42 +582,37 @@ def main() -> None:
 
     print(f"Task: {TASK_NAME}")
     print(f"Prompt variant: {'with' if USE_TASK_CONFIG_EXAMPLE else 'without'} config example")
-    print(f"Model: {MODEL_PATH.expanduser().resolve()}")
+    print(f"Model: {VLM_MODEL_NAME} ({VLM_MODEL_PATH.expanduser().resolve()})")
     print(f"Output: {output_path}")
-    print("Loading VLM...")
+    print(f"Connecting to vLLM at http://{VLM_HOST}:{VLM_PORT}...")
+    client = AgenticVLMClient(
+        VLM_HOST,
+        VLM_PORT,
+        model_name=VLM_MODEL_NAME,
+        model_path=str(VLM_MODEL_PATH),
+        max_tokens=MAX_NEW_TOKENS,
+    )
     try:
-        model = VLMSubgoalPlanner27B(
-            model_path=str(MODEL_PATH),
-            attn_impl=ATTN_IMPL,
-            max_tokens=MAX_NEW_TOKENS,
-            temperature=TEMPERATURE,
-        )
-        gpu_monitor.mark_model_loaded()
-
         config, raw_response, vlm_latency_ms, request_to_json_ms = (
-            model.infer_json_object(messages=messages)
+            client.infer_json(
+                messages=messages,
+                images=[],
+                planning_phase="init_planning",
+            )
         )
-        gpu_monitor.sample()
         try:
             _validate_task_config(config, action_catalog)
         except (KeyError, TypeError, ValueError):
             print("VLM returned JSON, but task-config validation failed. Raw response:")
             print(raw_response)
             raise
-        gpu_memory = gpu_monitor.summary()
-
         artifact = {
             "task_config": config,
             "run_metrics": {
                 "program_elapsed_seconds": round(
                     time.perf_counter() - program_started_at, 3
                 ),
-                "program_peak_gpu_memory_gb": gpu_memory.get(
-                    "current_process_peak_during_entire_eval_gb"
-                ),
-                "other_programs_gpu_memory_before_start_gb": gpu_memory.get(
-                    "other_processes_before_eval_gb"
-                ),
+                "vlm": client.metrics(),
             },
         }
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -628,7 +624,7 @@ def main() -> None:
         print(f"Request-to-JSON latency: {request_to_json_ms:.1f} ms")
         print(f"Task config and run metrics written: {output_path}")
     finally:
-        gpu_monitor.close()
+        client.close()
 
 
 if __name__ == "__main__":

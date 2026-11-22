@@ -42,7 +42,7 @@ DEPTH_SCALE=0.001
 GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
-RUN_NAME="test_v1.5"
+RUN_NAME="test_v1.6"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
@@ -52,17 +52,40 @@ USE_TASK_CONFIG_EXAMPLES=true
 # Three-environment/model configuration
 # =============================================================================
 
-VLM_MAMBA_ENV="robomme-qwen38"
+# Choose exactly one Agentic VLM: "30b" or "27b".
+# Both models are served from the shared micromamba environment named "vllm".
+VLM_MODEL="30b"
+
+VLM_MAMBA_ENV="vllm"
 F2G_MAMBA_ENV="f2g"
 EVAL_MAMBA_ENV="robomme"
 
 MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-/data/zhuanglr/micromamba}"
 MAMBA_EXE="${MAMBA_EXE:-$MAMBA_ROOT_PREFIX/bin/micromamba}"
 
-MODEL_PATH="${QWEN_MODEL_PATH:-/data/zhuanglr/models/Qwen3.8-27B-FP8-fixed}"
-ATTN_IMPL="flash_attention_2"
+case "${VLM_MODEL,,}" in
+    30b)
+        MODEL_PATH="/data/public/qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
+        VLM_SERVED_MODEL_NAME="qwen3vl-30b"
+        VLM_EXTRA_ARGS=()
+        ;;
+    27b)
+        MODEL_PATH="/data/public/qwen/Qwen3.8-27B-FP8"
+        VLM_SERVED_MODEL_NAME="qwen38-27b"
+        VLM_EXTRA_ARGS=(
+            --reasoning-parser qwen3
+            --default-chat-template-kwargs '{"enable_thinking":false,"preserve_thinking":false}'
+        )
+        ;;
+    *)
+        echo "ERROR: VLM_MODEL must be '30b' or '27b', got: $VLM_MODEL" >&2
+        exit 1
+        ;;
+esac
+
 VLM_MAX_TOKENS=8192
-IMAGE_MAX_TOKEN_NUM=256
+VLM_MAX_MODEL_LEN=32768
+VLM_GPU_MEMORY_UTILIZATION=0.90
 
 F2G_ROOT="${F2G_ROOT:-$REPO_ROOT/../F2G-Pose}"
 F2G_CHECKPOINT="${F2G_CHECKPOINT:-$F2G_ROOT/weights/f2g-pose.pt}"
@@ -71,7 +94,7 @@ F2G_RADIO_CHECKPOINT="${F2G_RADIO_CHECKPOINT:-$F2G_ROOT/weights/radio-v2.5-l_hal
 
 CUDA_VISIBLE_DEVICES_AGENTIC="${CUDA_VISIBLE_DEVICES_AGENTIC:-0}"
 VLM_HOST="127.0.0.1"
-VLM_BIND_HOST="0.0.0.0"
+VLM_BIND_HOST="127.0.0.1"
 VLM_PORT=0
 F2G_HOST="127.0.0.1"
 F2G_PORT=8765
@@ -79,13 +102,24 @@ VLM_STARTUP_TIMEOUT=600
 F2G_STARTUP_TIMEOUT=300
 
 SERVER_LOG_DIR="$SAVE_DIR/server_logs"
-VLM_PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
 EVAL_PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/third_party/robomme_benchmark/src:$REPO_ROOT/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
 F2G_ENV_PREFIX="$MAMBA_ROOT_PREFIX/envs/$F2G_MAMBA_ENV"
+CACHE_ROOT="${CACHE_ROOT:-/data/zhuanglr/cache}"
 
 export MAMBA_ROOT_PREFIX
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore::FutureWarning}"
-export IMAGE_MAX_TOKEN_NUM
+export HF_HOME="${HF_HOME:-$CACHE_ROOT/huggingface}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$CACHE_ROOT/uv}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$CACHE_ROOT/pip}"
+export TORCH_HOME="${TORCH_HOME:-$CACHE_ROOT/torch}"
+export FLASHINFER_CACHE_DIR="${FLASHINFER_CACHE_DIR:-$CACHE_ROOT/flashinfer}"
+export FLASHINFER_AUTOTUNE_CACHE_DIR="${FLASHINFER_AUTOTUNE_CACHE_DIR:-$FLASHINFER_CACHE_DIR/autotune}"
+mkdir -p \
+    "$HF_HOME" \
+    "$UV_CACHE_DIR" \
+    "$PIP_CACHE_DIR" \
+    "$TORCH_HOME" \
+    "$FLASHINFER_AUTOTUNE_CACHE_DIR"
 
 # =============================================================================
 # Validation and argument assembly
@@ -115,10 +149,12 @@ if ((NUM_EPISODES < 1 || NUM_REPEATS < 1 || MAX_DECISIONS < 1 || GROUNDING_CAMER
     echo "ERROR: episode/repeat/decision counts and grounding resolution must be positive." >&2
     exit 1
 fi
-if ! command -v lsof &>/dev/null; then
-    echo "ERROR: required command 'lsof' was not found." >&2
-    exit 1
-fi
+for required_command in lsof curl; do
+    if ! command -v "$required_command" &>/dev/null; then
+        echo "ERROR: required command '$required_command' was not found." >&2
+        exit 1
+    fi
+done
 if ((VLM_PORT == 0)); then
     VLM_PORT=$(python3 -c \
         'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
@@ -130,11 +166,10 @@ for port in "$VLM_PORT" "$F2G_PORT"; do
     fi
 done
 
-PYTHONPATH="$VLM_PYTHONPATH" \
 "$MAMBA_EXE" run -n "$VLM_MAMBA_ENV" python -c \
-    'import msgpack, numpy, swift, torch, transformers, websockets' \
+    'import torch, transformers, vllm; from packaging.version import Version; assert Version(transformers.__version__) >= Version("5.8.0")' \
     || {
-        echo "ERROR: $VLM_MAMBA_ENV lacks an Agentic VLM dependency." >&2
+        echo "ERROR: $VLM_MAMBA_ENV lacks vLLM dependencies." >&2
         exit 1
     }
 
@@ -150,7 +185,7 @@ CUDA_HOME="$F2G_ENV_PREFIX" \
 PATH="$F2G_ENV_PREFIX/bin:$PATH" \
 PYTHONPATH="${PYTHONPATH:-}" \
 "$MAMBA_EXE" run -n "$F2G_MAMBA_ENV" python -c \
-    'from f2g_pose import PoseEstimator; import numpy; print("F2G import OK")' \
+    'from f2g_pose import PoseEstimator; import numpy' \
     || {
         echo "ERROR: $F2G_MAMBA_ENV cannot import F2G-Pose." >&2
         exit 1
@@ -172,7 +207,7 @@ esac
 mkdir -p "$SERVER_LOG_DIR"
 GPU_BASELINE_FILE="$SERVER_LOG_DIR/${RUN_NAME}_pre_eval_gpu.json"
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
-PYTHONPATH="$VLM_PYTHONPATH" \
+PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
 "$MAMBA_EXE" run -n "$VLM_MAMBA_ENV" \
     python "$REPO_ROOT/scripts/snapshot_gpu_memory.py" \
     --cuda-visible-devices "$CUDA_VISIBLE_DEVICES_AGENTIC" \
@@ -181,6 +216,9 @@ PYTHONPATH="$VLM_PYTHONPATH" \
 args=(
     --vlm-host "$VLM_HOST"
     --vlm-port "$VLM_PORT"
+    --vlm-model "$VLM_SERVED_MODEL_NAME"
+    --vlm-model-path "$MODEL_PATH"
+    --vlm-max-tokens "$VLM_MAX_TOKENS"
     --f2g-url "http://$F2G_HOST:$F2G_PORT"
     --pre-eval-gpu-snapshot "$GPU_BASELINE_FILE"
     --depth-scale "$DEPTH_SCALE"
@@ -207,7 +245,8 @@ args=(
 
 mkdir -p "$SERVER_LOG_DIR"
 F2G_LOG="$SERVER_LOG_DIR/${RUN_NAME}_f2g_port${F2G_PORT}.log"
-VLM_LOG="$SERVER_LOG_DIR/${RUN_NAME}_vlm_port${VLM_PORT}.log"
+VLM_LOG="$SERVER_LOG_DIR/${RUN_NAME}_${VLM_SERVED_MODEL_NAME}_port${VLM_PORT}.log"
+EVAL_LOG="$SERVER_LOG_DIR/${RUN_NAME}_eval.log"
 F2G_PID=""
 VLM_PID=""
 
@@ -233,6 +272,7 @@ echo "Episodes: ${EPISODE_IDS:-0..$((NUM_EPISODES - 1))}"
 echo "Repeats: $NUM_REPEATS"
 echo "Result directory: $SAVE_DIR/$RUN_NAME"
 echo "Environments: VLM=$VLM_MAMBA_ENV, F2G=$F2G_MAMBA_ENV, eval=$EVAL_MAMBA_ENV"
+echo "Agentic VLM: $VLM_MODEL ($MODEL_PATH)"
 
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
 CUDA_HOME="$F2G_ENV_PREFIX" \
@@ -264,25 +304,25 @@ until lsof -iTCP:"$F2G_PORT" -sTCP:LISTEN &>/dev/null; do
     sleep 1
 done
 
-export USE_HF=1
-export HF_HUB_OFFLINE=0
-export TRANSFORMERS_OFFLINE=0
-
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
-PYTHONPATH="$VLM_PYTHONPATH" \
 "$MAMBA_EXE" run -n "$VLM_MAMBA_ENV" \
-    python "$REPO_ROOT/scripts/serve_agentic_vlm.py" \
+    vllm serve "$MODEL_PATH" \
+    --served-model-name "$VLM_SERVED_MODEL_NAME" \
     --host "$VLM_BIND_HOST" \
     --port "$VLM_PORT" \
-    --model-path "$MODEL_PATH" \
-    --attn-impl "$ATTN_IMPL" \
-    --max-tokens "$VLM_MAX_TOKENS" \
+    --tensor-parallel-size 1 \
+    --max-model-len "$VLM_MAX_MODEL_LEN" \
+    --max-num-seqs 1 \
+    --gpu-memory-utilization "$VLM_GPU_MEMORY_UTILIZATION" \
+    --allowed-local-media-path "$REPO_ROOT" \
+    "${VLM_EXTRA_ARGS[@]}" \
     >"$VLM_LOG" 2>&1 &
 VLM_PID=$!
 
-echo "Starting Agentic Qwen service (PID $VLM_PID)..."
+echo "Starting $VLM_SERVED_MODEL_NAME with vLLM (PID $VLM_PID)..."
 start_time=$SECONDS
-until lsof -iTCP:"$VLM_PORT" -sTCP:LISTEN &>/dev/null; do
+until curl --fail --silent --max-time 2 \
+    "http://$VLM_HOST:$VLM_PORT/health" >/dev/null 2>&1; do
     if ! kill -0 "$VLM_PID" 2>/dev/null; then
         echo "ERROR: Agentic Qwen service exited before listening." >&2
         tail -n 100 "$VLM_LOG" >&2
@@ -297,8 +337,13 @@ until lsof -iTCP:"$VLM_PORT" -sTCP:LISTEN &>/dev/null; do
 done
 
 echo "Both services are ready. Starting RoboMME Agentic evaluation..."
-CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
-PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
-PYTHONPATH="$EVAL_PYTHONPATH" \
-"$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
-    python "$REPO_ROOT/examples/robomme/eval_agentic.py" "${args[@]}"
+if ! CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
+    PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
+    PYTHONPATH="$EVAL_PYTHONPATH" \
+    AGENTIC_STATUS_FD=3 \
+    "$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
+        python "$REPO_ROOT/examples/robomme/eval_agentic.py" "${args[@]}" \
+        3>&1 >"$EVAL_LOG" 2>&1; then
+    echo "ERROR: Agentic evaluation failed. Details: $EVAL_LOG" >&2
+    exit 1
+fi

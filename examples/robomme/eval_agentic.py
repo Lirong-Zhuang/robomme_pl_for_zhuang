@@ -59,6 +59,27 @@ VLM_GROUNDING_IMAGE_SHAPE = (256, 256)
 ROBOMME_EPISODE_STATUSES = frozenset({"success", "fail", "timeout", "error"})
 
 
+def _status_stream() -> Any:
+    """Return the launcher-provided terminal stream or normal stdout."""
+
+    descriptor = os.environ.get("AGENTIC_STATUS_FD")
+    if descriptor is None:
+        return sys.stdout
+    try:
+        return os.fdopen(int(descriptor), "w", buffering=1, closefd=False)
+    except (OSError, ValueError):
+        return sys.stdout
+
+
+STATUS_STREAM = _status_stream()
+
+
+def _status(message: str) -> None:
+    """Write one concise status line without disrupting an active progress bar."""
+
+    tqdm.write(message, file=STATUS_STREAM)
+
+
 def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
@@ -83,6 +104,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vlm-host", default="127.0.0.1")
     parser.add_argument("--vlm-port", type=int, required=True)
+    parser.add_argument("--vlm-model", required=True)
+    parser.add_argument("--vlm-model-path", required=True)
+    parser.add_argument("--vlm-max-tokens", type=int, default=8192)
     parser.add_argument("--f2g-url", default="http://127.0.0.1:8765")
     parser.add_argument(
         "--pre-eval-gpu-snapshot",
@@ -220,7 +244,7 @@ def _emit_vlm_call_output(
     call_type: str,
     attempt: Mapping[str, Any],
 ) -> None:
-    """Print and persist one visually separated VLM response."""
+    """Persist one visually separated VLM response outside the terminal."""
 
     attempt_index = int(attempt["attempt"])
     raw_response = str(attempt.get("raw_response", "")).rstrip()
@@ -232,7 +256,6 @@ def _emit_vlm_call_output(
         block_lines.extend(["-" * 96, f"REJECTED: {validation_error}"])
     block_lines.extend([separator, ""])
     block = "\n".join(block_lines)
-    print(block, flush=True)
     readable_log_path.parent.mkdir(parents=True, exist_ok=True)
     with readable_log_path.open("a", encoding="utf-8") as stream:
         stream.write(block)
@@ -1110,6 +1133,10 @@ def run_episode(
         }
         vlm_trace["calls"].append(first_call_log)
         _write_json(vlm_log_path, vlm_trace)
+        _status(
+            f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
+            "in-task planning"
+        )
 
         def record_first_attempt(attempt: dict[str, Any]) -> None:
             first_attempts.append(attempt)
@@ -1191,6 +1218,10 @@ def run_episode(
             execution = memory.current_execution()
             if execution is None:
                 break
+            _status(
+                f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
+                f"executing decision {decision_index}: {execution['subgoal']}"
+            )
             point_yx = _grounding_point_yx(execution["grounding"])
             _record_video_observations(
                 recorder,
@@ -1389,6 +1420,10 @@ def run_episode(
             }
             vlm_trace["calls"].append(followup_call_log)
             _write_json(vlm_log_path, vlm_trace)
+            _status(
+                f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
+                f"verification/planning {decision_index}"
+            )
 
             def record_followup_attempt(attempt: dict[str, Any]) -> None:
                 followup_attempts.append(attempt)
@@ -1548,6 +1583,7 @@ def main() -> None:
         ("history_stride", args.history_stride),
         ("planner_attempts", args.planner_attempts),
         ("grounding_camera_resolution", args.grounding_camera_resolution),
+        ("vlm_max_tokens", args.vlm_max_tokens),
     ):
         if value < 1:
             raise ValueError(f"{name} must be positive")
@@ -1562,8 +1598,15 @@ def main() -> None:
         args.pre_eval_gpu_snapshot.read_text(encoding="utf-8")
     )
     _write_json(run_dir / "pre_eval_gpu.json", pre_eval_gpu)
-    client = AgenticVLMClient(args.vlm_host, args.vlm_port)
-    if client.server_metadata.get("protocol") != "agentic_vlm_json_v1":
+    _status("[agentic] evaluation started")
+    client = AgenticVLMClient(
+        args.vlm_host,
+        args.vlm_port,
+        model_name=args.vlm_model,
+        model_path=args.vlm_model_path,
+        max_tokens=args.vlm_max_tokens,
+    )
+    if client.server_metadata.get("protocol") != "agentic_vllm_openai_v1":
         raise RuntimeError(f"wrong VLM protocol: {client.server_metadata}")
     f2g_health = F2GClient(base_url=args.f2g_url).health()
     requested_config = {
@@ -1578,7 +1621,9 @@ def main() -> None:
         "grounding_camera_resolution": args.grounding_camera_resolution,
         "init_prompt_version": INIT_PROMPT_VERSION,
         "use_task_config_examples": args.use_task_config_examples,
+        "vlm_model_name": client.server_metadata.get("model_name"),
         "vlm_model_path": client.server_metadata.get("model_path"),
+        "vlm_max_tokens": client.server_metadata.get("max_tokens"),
         "f2g_checkpoint": f2g_health.get("checkpoint"),
     }
     run_config_path = run_dir / "run_config.json"
@@ -1596,6 +1641,7 @@ def main() -> None:
     for task in tasks:
         path = run_dir / "task_configs" / f"{task}.json"
         if path.exists() and not args.overwrite:
+            _status(f"[agentic] {task}: reusing init planning configuration")
             config = json.loads(path.read_text(encoding="utf-8"))
             catalog = json.loads(ACTION_CATALOG_PATH.read_text(encoding="utf-8"))
             task_configs[task] = validate_task_config(
@@ -1604,7 +1650,7 @@ def main() -> None:
                 task_name=task,
             )
         else:
-            print(f"[agentic] init planning: {task}")
+            _status(f"[agentic] {task}: init planning")
             task_configs[task] = _generate_task_config(
                 task=task,
                 output_path=path,
@@ -1628,43 +1674,56 @@ def main() -> None:
                 completed.add(
                     (record["repeat_id"], record["task"], record["episode_id"])
                 )
-    requested = [
-        (repeat_id, task, episode_id)
-        for repeat_id in range(1, args.num_repeats + 1)
-        for task in tasks
-        for episode_id in episode_ids
-    ]
-    progress = tqdm(total=len(requested), initial=len(completed), desc="agentic")
-    for repeat_id, task, episode_id in requested:
-        key = (repeat_id, task, episode_id)
-        if key in completed:
-            continue
-        record = run_episode(
-            task=task,
-            episode_id=episode_id,
-            repeat_id=repeat_id,
-            args=args,
-            task_config=task_configs[task],
-            client=client,
-            run_dir=run_dir,
-        )
-        records = [
-            item
-            for item in records
-            if (item["repeat_id"], item["task"], item["episode_id"]) != key
+    for task in tasks:
+        requested = [
+            (repeat_id, task, episode_id)
+            for repeat_id in range(1, args.num_repeats + 1)
+            for episode_id in episode_ids
         ]
-        records.append(record)
-        records.sort(key=lambda item: (item["repeat_id"], item["task"], item["episode_id"]))
-        records_path.write_text(
-            "".join(
-                json.dumps(_jsonable(item), ensure_ascii=False) + "\n"
-                for item in records
-            ),
-            encoding="utf-8",
+        task_completed = sum(key in completed for key in requested)
+        progress = tqdm(
+            total=len(requested),
+            initial=task_completed,
+            desc=f"{task} evaluation",
+            file=STATUS_STREAM,
+            dynamic_ncols=True,
         )
-        progress.update(1)
-        progress.set_postfix(status=record["status"])
-    progress.close()
+        for repeat_id, task_name, episode_id in requested:
+            key = (repeat_id, task_name, episode_id)
+            if key in completed:
+                continue
+            record = run_episode(
+                task=task_name,
+                episode_id=episode_id,
+                repeat_id=repeat_id,
+                args=args,
+                task_config=task_configs[task_name],
+                client=client,
+                run_dir=run_dir,
+            )
+            records = [
+                item
+                for item in records
+                if (item["repeat_id"], item["task"], item["episode_id"]) != key
+            ]
+            records.append(record)
+            records.sort(
+                key=lambda item: (
+                    item["repeat_id"],
+                    item["task"],
+                    item["episode_id"],
+                )
+            )
+            records_path.write_text(
+                "".join(
+                    json.dumps(_jsonable(item), ensure_ascii=False) + "\n"
+                    for item in records
+                ),
+                encoding="utf-8",
+            )
+            progress.update(1)
+            progress.set_postfix(status=record["status"])
+        progress.close()
 
     metrics = client.metrics()
     successes = sum(record["status"] == "success" for record in records)
@@ -1682,7 +1741,7 @@ def main() -> None:
             for status in sorted({record["status"] for record in records})
         },
         "environments": {
-            "vlm": "robomme-qwen38",
+            "vlm": "vllm",
             "f2g": "f2g",
             "simulation": "robomme",
         },
@@ -1695,6 +1754,9 @@ def main() -> None:
     }
     _write_json(run_dir / "summary.json", summary)
     client.close()
+    _status(
+        f"[agentic] evaluation complete: {successes}/{len(records)} successful"
+    )
 
 
 if __name__ == "__main__":
