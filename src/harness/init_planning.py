@@ -59,6 +59,7 @@ FOLLOWUP_PLACEHOLDERS = {
     "{verification_parameters}",
     "{subgoal_start_observations}",
     "{recent_observations}",
+    "{current_observation}",
     "{current_subgoal_sequence}",
 }
 REQUIRED_VLM_GROUNDING_SYSTEM_PHRASES = (
@@ -294,7 +295,6 @@ def validate_task_config(
     if uses_keyframes:
         first_expected |= {"{keyframe_policy}", "{saved_keyframe}"}
         followup_expected |= {
-            "{current_observation}",
             "{keyframe_policy}",
             "{saved_keyframe}",
         }

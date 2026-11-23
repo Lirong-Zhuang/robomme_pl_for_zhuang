@@ -451,6 +451,12 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   roles, notes, keyframe event, or prompt wording into the current task. If the
   current task is not the example's represented task, this prohibition is
   especially strict: create every task-specific field from the current task inputs.
+- In both runtime system prompts, require every subgoal_key to be copied exactly
+  from the listed key set; arguments must never be appended to a key. For any
+  subgoal with arguments, include one compact phase-appropriate JSON example:
+  subgoal_key, natural-language subgoal, and arguments in first_planning, or the
+  corresponding next_subgoal fields in followup_planning. Never use function-call
+  shorthand such as ``key(value)`` for either the key or subgoal text.
 - The first_planning user template must contain exactly these runtime placeholders:
   {{task_goal}} and {{current_observations}} when keyframes is empty. When keyframes
   is non-empty it must additionally contain {{keyframe_policy}} and
@@ -472,11 +478,17 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   placeholders: {{task_goal}}, {{task_state}}, {{current_subgoal_key}},
   {{current_subgoal}}, {{acceptance_criteria}},
   {{verification_parameters}}, {{subgoal_start_observations}},
-  {{recent_observations}}, and {{current_subgoal_sequence}}. When keyframes is
-  non-empty it must additionally contain {{current_observation}} and
-  {{keyframe_policy}} and {{saved_keyframe}} so the newest frame is explicitly
-  distinguishable from the sliding window, the exact save condition comes directly
-  from task config, and saved evidence is a direct planning input. When
+  {{recent_observations}}, {{current_observation}}, and
+  {{current_subgoal_sequence}}. Label subgoal-start as the pre-action baseline,
+  recent_observations as chronological sliding-window process evidence excluding
+  the final frame, and current_observation as the final post-action outcome. Require
+  verification to use process and outcome together: current does not replace the
+  sliding window, and final occlusion or disappearance does not erase a transition
+  positively shown by the sliding window. Require description to state the visible
+  final outcome and include process evidence when needed to explain it. When
+  keyframes is non-empty it must additionally contain {{keyframe_policy}} and
+  {{saved_keyframe}}; the exact save condition comes directly from task config and
+  saved evidence is a direct planning input. When
   planning.information_sources contains video_subgoal_list, it must additionally
   contain {{video_subgoal_list}} with the locked video-derived ordered list.
   Robot state is neither

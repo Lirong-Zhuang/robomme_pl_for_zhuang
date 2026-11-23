@@ -75,8 +75,13 @@ Follow-up verification transport rules:
 - The action named by current_subgoal has completed one full atomic execution
   before this verification call. Return status as exactly completed, incomplete,
   or failed; never use ambiguous, uncertain, unknown, success, or done.
-- Judge completion from the change between subgoal-start and recent observations.
-  For a release or placement action, an object that followed the gripper over the
+- Treat subgoal-start as the pre-action baseline, sliding-window observations as
+  chronological process evidence, and current_observation as the final outcome.
+  Judge completion from process and outcome together; neither replaces the other.
+- description must state the visible final outcome and may use sliding-window
+  evidence to explain how it occurred. Final occlusion or disappearance does not
+  erase a transition that the sliding window positively shows.
+- For a release or placement action, an object that followed the gripper over the
   intended destination and is no longer held after the gripper opened is positive
   completion evidence even when the placed object is now occluded by a bin or
   container. Do not return incomplete solely because a correctly placed object is
@@ -102,9 +107,23 @@ def _remaining_episode_seconds(deadline: float) -> float:
     return remaining
 
 
+def _open_status_path(path: str) -> Any | None:
+    """Open a line-buffered status path, returning None when unavailable."""
+
+    try:
+        return open(path, "w", buffering=1, encoding="utf-8")
+    except OSError:
+        return None
+
+
 def _status_stream() -> Any:
     """Return the launcher-provided terminal stream or normal stdout."""
 
+    status_path = os.environ.get("AGENTIC_STATUS_PATH")
+    if status_path is not None:
+        stream = _open_status_path(status_path)
+        if stream is not None:
+            return stream
     descriptor = os.environ.get("AGENTIC_STATUS_FD")
     if descriptor is None:
         return sys.stdout
@@ -1169,7 +1188,9 @@ def run_episode(
     memory_dir = repeat_dir / "task_memory" / f"ep_{episode_id}"
     grounding_dir = repeat_dir / "grounding" / f"ep_{episode_id}"
     source_dir = repeat_dir / "information_sources" / f"ep_{episode_id}"
-    video_episode_dir = repeat_dir / "videos" / f"ep_{episode_id}"
+    videos_dir = repeat_dir / "videos"
+    episode_log_path = repeat_dir / "episode_log" / f"ep_{episode_id}.json"
+    legacy_video_episode_dir = videos_dir / f"ep_{episode_id}"
     example_dir = repeat_dir / "example"
     vlm_log_path = repeat_dir / "vlm_logs" / f"{task}_ep_{episode_id}.json"
     for stale_dir in (
@@ -1177,10 +1198,14 @@ def run_episode(
         memory_dir,
         grounding_dir,
         source_dir,
-        video_episode_dir,
+        legacy_video_episode_dir,
     ):
         if stale_dir.exists():
             shutil.rmtree(stale_dir)
+    for stale_video in videos_dir.glob(f"{task}_ep_{episode_id}_*.mp4"):
+        stale_video.unlink()
+    if episode_log_path.exists():
+        episode_log_path.unlink()
     if vlm_log_path.exists():
         vlm_log_path.unlink()
     legacy_readable_log = vlm_log_path.with_name(
@@ -1200,7 +1225,7 @@ def run_episode(
         "task_goal": None,
         "decisions": [],
         "artifacts": {
-            "episode_log": str((video_episode_dir / "episode.json").resolve()),
+            "episode_log": str(episode_log_path.resolve()),
             "vlm_log": str(vlm_log_path.resolve()),
             "image_dir": str(episode_dir.resolve()),
             "task_memory_dir": str(memory_dir.resolve()),
@@ -1245,7 +1270,7 @@ def run_episode(
         task_goal = _task_goal(info)
         record["task_goal"] = task_goal
         recorder = RolloutRecorder(
-            video_episode_dir,
+            videos_dir,
             task_goal,
             fps=30,
             streaming=True,
@@ -1603,13 +1628,15 @@ def run_episode(
                 pair=current_pair,
                 include_wrist=include_wrist,
             )
-            recent_observations = _save_observation_window(
+            observation_window = _save_observation_window(
                 call_dir,
                 pairs=list(recent_pairs),
                 prefix="recent",
                 include_wrist=include_wrist,
                 current_last=True,
             )
+            sliding_observations = observation_window[:-1]
+            current_observation = observation_window[-1]
             current_image_shape = final_pair[0].shape[:2]
             if current_image_shape != VLM_GROUNDING_IMAGE_SHAPE:
                 raise RuntimeError(
@@ -1620,8 +1647,8 @@ def run_episode(
             follow_inputs = memory.build_followup_inputs(
                 verification_parameters=task_config["verification"],
                 subgoal_start_observations=[start_observation],
-                recent_observations=recent_observations,
-                current_observation=recent_observations[-1],
+                recent_observations=sliding_observations,
+                current_observation=current_observation,
                 keyframe_policy_index=policy_index,
             )
             messages, images = _build_planner_messages(
@@ -1693,7 +1720,11 @@ def run_episode(
                 ),
             )
             if memory.uses_keyframes:
-                candidates = [start_observation, *recent_observations]
+                candidates = [
+                    start_observation,
+                    *sliding_observations,
+                    current_observation,
+                ]
                 memory.save_keyframe_selection(
                     keyframe_save=output.get("keyframe_save"),
                     observation_paths=_observation_path_map(candidates),
@@ -1779,7 +1810,7 @@ def run_episode(
                     f"{task}_ep_{episode_id}_{record['status']}_"
                     f"{_filename_text(record['task_goal'] or 'unknown')}.mp4"
                 )
-                video_path = video_episode_dir / video_filename
+                video_path = videos_dir / video_filename
                 try:
                     recorder.save_video(video_filename)
                     record["artifacts"]["video"] = str(video_path.resolve())
@@ -1810,7 +1841,7 @@ def run_episode(
             "Agentic evaluator produced a status outside the RoboMME contract: "
             f"{invalid_status!r}"
         )
-    _write_json(video_episode_dir / "episode.json", record)
+    _write_json(episode_log_path, record)
     return record
 
 
@@ -1901,33 +1932,6 @@ def main() -> None:
     else:
         _write_json(run_config_path, requested_config)
 
-    task_configs: dict[str, dict[str, Any]] = {}
-    for task in tasks:
-        path = run_dir / "task_configs" / f"{task}.json"
-        if path.exists() and not args.overwrite:
-            _status(f"[agentic] {task}: reusing init planning configuration")
-            config = json.loads(path.read_text(encoding="utf-8"))
-            catalog = json.loads(ACTION_CATALOG_PATH.read_text(encoding="utf-8"))
-            task_configs[task] = validate_task_config(
-                config,
-                catalog,
-                task_name=task,
-            )
-        else:
-            _status(f"[agentic] {task}: init planning")
-            task_configs[task] = _generate_task_config(
-                task=task,
-                output_path=path,
-                client=client,
-                use_examples=args.use_task_config_examples,
-                attempts=args.planner_attempts,
-                verification_k=args.history_size,
-                verification_interval=args.history_stride,
-                attempt_log_path=(
-                    run_dir / "vlm_logs" / f"{task}_init_planning.json"
-                ),
-            )
-
     records_path = run_dir / "episodes.jsonl"
     completed: set[tuple[int, str, int]] = set()
     records: list[dict[str, Any]] = []
@@ -1951,48 +1955,84 @@ def main() -> None:
         progress = tqdm(
             total=len(requested),
             initial=task_completed,
-            desc=f"{task} evaluation",
+            desc=task,
             file=STATUS_STREAM,
             dynamic_ncols=True,
+            bar_format=(
+                "{desc}: {n_fmt}/{total_fmt} |{bar}| {percentage:3.0f}%"
+            ),
         )
-        for repeat_id, task_name, episode_id in requested:
-            key = (repeat_id, task_name, episode_id)
-            if key in completed:
-                continue
-            record = run_episode(
-                task=task_name,
-                episode_id=episode_id,
-                repeat_id=repeat_id,
-                args=args,
-                task_config=task_configs[task_name],
-                client=client,
-                run_dir=run_dir,
-            )
-            records = [
-                item
-                for item in records
-                if (item["repeat_id"], item["task"], item["episode_id"]) != key
-            ]
-            records.append(record)
-            records.sort(
-                key=lambda item: (
-                    item["repeat_id"],
-                    item["task"],
-                    item["episode_id"],
+        try:
+            path = run_dir / "task_configs" / f"{task}.json"
+            if path.exists() and not args.overwrite:
+                _status(f"[agentic] {task}: reusing init planning configuration")
+                config = json.loads(path.read_text(encoding="utf-8"))
+                catalog = json.loads(
+                    ACTION_CATALOG_PATH.read_text(encoding="utf-8")
                 )
-            )
-            _write_jsonl(records_path, records)
-            progress.set_postfix(status=record["status"])
-            progress.update(1)
-            if record["status"] == "error":
-                error_text = " ".join(
-                    str(record.get("error", "unknown episode error")).split()
+                task_config = validate_task_config(
+                    config,
+                    catalog,
+                    task_name=task,
                 )
-                _status(
-                    f"[agentic] {task_name}: repeat {repeat_id}, episode "
-                    f"{episode_id} error: {error_text[:400]}"
+            else:
+                _status(f"[agentic] {task}: init planning")
+                task_config = _generate_task_config(
+                    task=task,
+                    output_path=path,
+                    client=client,
+                    use_examples=args.use_task_config_examples,
+                    attempts=args.planner_attempts,
+                    verification_k=args.history_size,
+                    verification_interval=args.history_stride,
+                    attempt_log_path=(
+                        run_dir / "vlm_logs" / f"{task}_init_planning.json"
+                    ),
                 )
-        progress.close()
+            for repeat_id, task_name, episode_id in requested:
+                key = (repeat_id, task_name, episode_id)
+                if key in completed:
+                    continue
+
+                record = run_episode(
+                    task=task_name,
+                    episode_id=episode_id,
+                    repeat_id=repeat_id,
+                    args=args,
+                    task_config=task_config,
+                    client=client,
+                    run_dir=run_dir,
+                )
+                records = [
+                    item
+                    for item in records
+                    if (
+                        item["repeat_id"],
+                        item["task"],
+                        item["episode_id"],
+                    )
+                    != key
+                ]
+                records.append(record)
+                records.sort(
+                    key=lambda item: (
+                        item["repeat_id"],
+                        item["task"],
+                        item["episode_id"],
+                    )
+                )
+                _write_jsonl(records_path, records)
+                progress.update(1)
+                if record["status"] == "error":
+                    error_text = " ".join(
+                        str(record.get("error", "unknown episode error")).split()
+                    )
+                    _status(
+                        f"[agentic] {task_name}: repeat {repeat_id}, episode "
+                        f"{episode_id} error: {error_text[:400]}"
+                    )
+        finally:
+            progress.close()
 
     metrics = client.metrics()
     successes = sum(record["status"] == "success" for record in records)

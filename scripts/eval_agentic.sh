@@ -268,6 +268,9 @@ VLM_LOG="$SERVER_LOG_DIR/${RUN_NAME}_${VLM_SERVED_MODEL_NAME}_port${VLM_PORT}.lo
 EVAL_LOG="$SERVER_LOG_DIR/${RUN_NAME}_eval.log"
 F2G_PID=""
 VLM_PID=""
+STATUS_READER_PID=""
+STATUS_DIR=""
+STATUS_FIFO=""
 
 stop_process() {
     local pid=$1
@@ -282,6 +285,13 @@ cleanup() {
     trap - EXIT INT TERM
     stop_process "$VLM_PID"
     stop_process "$F2G_PID"
+    stop_process "$STATUS_READER_PID"
+    if [[ -n "$STATUS_FIFO" ]]; then
+        rm -f -- "$STATUS_FIFO"
+    fi
+    if [[ -n "$STATUS_DIR" ]]; then
+        rmdir -- "$STATUS_DIR" 2>/dev/null || true
+    fi
     exit "$exit_code"
 }
 trap cleanup EXIT INT TERM
@@ -364,14 +374,21 @@ python3 -c \
     'import json, sys; expected=sys.argv[1]; payload=json.loads(sys.argv[2]); ids={item.get("id") for item in payload.get("data", []) if isinstance(item, dict)}; assert expected in ids, f"expected served model {expected!r}, available={sorted(ids)}"' \
     "$VLM_SERVED_MODEL_NAME" "$served_models_json"
 
+STATUS_DIR=$(mktemp -d)
+STATUS_FIFO="$STATUS_DIR/agentic-status.fifo"
+mkfifo "$STATUS_FIFO"
+cat "$STATUS_FIFO" &
+STATUS_READER_PID=$!
+
 echo "Both services are ready. Starting RoboMME Agentic evaluation..."
 if ! CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
     PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
+    PYTHONUNBUFFERED=1 \
     PYTHONPATH="$EVAL_PYTHONPATH" \
-    AGENTIC_STATUS_FD=3 \
+    AGENTIC_STATUS_PATH="$STATUS_FIFO" \
     "$MAMBA_EXE" run -n "$EVAL_MAMBA_ENV" \
         python "$REPO_ROOT/examples/robomme/eval_agentic.py" "${args[@]}" \
-        3>&1 >"$EVAL_LOG" 2>&1; then
+        >"$EVAL_LOG" 2>&1; then
     echo "ERROR: Agentic evaluation failed. Details: $EVAL_LOG" >&2
     exit 1
 fi

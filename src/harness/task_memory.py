@@ -846,6 +846,15 @@ class TaskMemory:
         execution = self.current_execution()
         if execution is None:
             raise RuntimeError("cannot build follow-up inputs after STOP")
+        if current_observation is None:
+            if self.uses_keyframes:
+                raise ValueError(
+                    "keyframe tasks require a separately identified current_observation"
+                )
+            if not isinstance(recent_observations, (list, tuple)) or not recent_observations:
+                raise ValueError("follow-up inputs require current_observation")
+            recent_observations = list(recent_observations)
+            current_observation = recent_observations.pop()
         inputs = {
             "task_goal": state["task_goal"],
             "task_state": self._completed_subgoal_history(state),
@@ -855,14 +864,10 @@ class TaskMemory:
             "verification_parameters": _json_copy(verification_parameters),
             "subgoal_start_observations": _json_copy(subgoal_start_observations),
             "recent_observations": _json_copy(recent_observations),
+            "current_observation": _json_copy(current_observation),
             "current_subgoal_sequence": _json_copy(state["plan"]["sequence"]),
         }
         if self.uses_keyframes:
-            if current_observation is None:
-                raise ValueError(
-                    "keyframe tasks require a separately identified current_observation"
-                )
-            inputs["current_observation"] = _json_copy(current_observation)
             inputs["keyframe_policy"] = self._keyframe_policy_input(
                 keyframe_policy_index
             )

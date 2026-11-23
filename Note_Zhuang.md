@@ -241,9 +241,13 @@ retried. `run_config.json` prevents results from different model, prompt, or
 evaluation settings from being mixed. Set `OVERWRITE=true` only to delete the
 existing run directory and start that run name again from scratch.
 
-During evaluation the terminal shows one global episode progress bar. Detailed
-planner output is redirected to `<run-name>/eval.log`. Each task/repeat stores
-the exact overall/wrist request images under `images/ep_<id>/`, annotated
+During evaluation the terminal shows one live episode progress bar per task.
+The bar reports only the task name, completed/total episodes, and percentage;
+separate status lines report init planning, in-task planning, execution, and
+verification transitions.
+Detailed evaluator output is redirected to
+`runs/evaluation/agentic_v1/server_logs/<run-name>_eval.log`. Each task/repeat
+stores the exact overall/wrist request images under `images/ep_<id>/`, annotated
 rollout videos under `videos/`, and one complete raw/parsed VLM trace per episode
 under `vlm_logs/`. Tasks that receive a pre-recorded demonstration additionally
 store that demonstration-only video under the sibling `example/` directory; the
