@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v23_center_points"
+INIT_PROMPT_VERSION = "minimal_task_config_v24_argument_examples"
 DIRECT_INIT_PROMPT_VERSION = f"{INIT_PROMPT_VERSION}_direct_json_v1"
 
 
@@ -452,11 +452,13 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   current task is not the example's represented task, this prohibition is
   especially strict: create every task-specific field from the current task inputs.
 - In both runtime system prompts, require every subgoal_key to be copied exactly
-  from the listed key set; arguments must never be appended to a key. For any
-  subgoal with arguments, include one compact phase-appropriate JSON example:
-  subgoal_key, natural-language subgoal, and arguments in first_planning, or the
-  corresponding next_subgoal fields in followup_planning. Never use function-call
-  shorthand such as ``key(value)`` for either the key or subgoal text.
+  from the listed key set; arguments must never be appended to a key. For every
+  subgoal, include one compact phase-appropriate JSON example: subgoal_key,
+  natural-language subgoal, and arguments in first_planning, or the corresponding
+  next_subgoal fields in followup_planning. A subgoal with no template or acceptance
+  placeholders must show ``"arguments":{{}}`` explicitly; a subgoal with arguments
+  must show exactly its required argument names and no others. Never use
+  function-call shorthand such as ``key(value)`` for either the key or subgoal text.
 - The first_planning user template must contain exactly these runtime placeholders:
   {{task_goal}} and {{current_observations}} when keyframes is empty. When keyframes
   is non-empty it must additionally contain {{keyframe_policy}} and
