@@ -16,6 +16,7 @@ from swift.llm import PtEngine, InferRequest, RequestConfig
 class Qwen3VLModel:
     
     def __init__(self, 
+        model_path: str,
         adapter_path: str,
         subgoal_type: str = "simple_subgoal", 
     ):
@@ -33,9 +34,13 @@ class Qwen3VLModel:
         else:
             raise ValueError(f"Invalid subgoal type: {subgoal_type}")
         
-        print(f"Loading Qwen3-VL-4B-Instruct model Adapter from {adapter_path}")
+        if not os.path.isdir(model_path):
+            raise FileNotFoundError(f"Qwen backbone directory not found: {model_path}")
+
+        print(f"Loading Qwen3-VL-4B-Instruct model from {model_path}")
+        print(f"Loading Qwen adapter from {adapter_path}")
         self.engine = PtEngine(
-            model_id_or_path='Qwen/Qwen3-VL-4B-Instruct',
+            model_id_or_path=model_path,
             adapters=[adapter_path],
             # attn_impl='flash_attention_2' #'sdpa'
             attn_impl='sdpa'

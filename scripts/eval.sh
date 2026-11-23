@@ -81,7 +81,8 @@ USE_HISTORY="auto"
 
 # VLM configuration.
 GEMINI_MODEL_NAME="gemini-2.5-pro"
-QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
+QWEN_BACKBONE_PATH="${QWEN_BACKBONE_PATH:-/data/public/qwen/Qwen3-VL-4B-Instruct}"
+QWENVL_SIMPLE_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20261120-195252/checkpoint-1300"
 QWENVL_GROUNDED_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
 MEMER_ADAPTER_PATH="runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"
 
@@ -223,6 +224,13 @@ if [[ "$USE_HISTORY" == "auto" ]]; then
     fi
 fi
 
+if [[ "$PREDICTOR" == "qwenvl" || "$PREDICTOR" == "memer" ]]; then
+    if [[ ! -d "$QWEN_BACKBONE_PATH" ]]; then
+        echo "ERROR: Qwen backbone directory not found: $QWEN_BACKBONE_PATH" >&2
+        exit 1
+    fi
+fi
+
 if ((${#SEEDS[@]} == 0)); then
     echo "ERROR: SEEDS must contain at least one seed." >&2
     exit 1
@@ -259,6 +267,9 @@ echo "Model type:      $REQUESTED_MODEL_TYPE"
 echo "Policy:          $POLICY_NAME"
 echo "Predictor:       $PREDICTOR"
 echo "Subgoal type:    $SUBGOAL_TYPE"
+if [[ "$PREDICTOR" == "qwenvl" || "$PREDICTOR" == "memer" ]]; then
+    echo "Qwen backbone:   $QWEN_BACKBONE_PATH"
+fi
 echo "Checkpoint:      $POLICY_DIR"
 echo "Evaluation run:  ${EVAL_RUN_NAME:-default}"
 echo "Seeds:           $EVAL_SEEDS_CSV"
@@ -302,6 +313,7 @@ run_evaluation() {
         --args.episode-ids "$EPISODE_IDS"
         --args.subgoal-keep-period "$SUBGOAL_KEEP_PERIOD"
         --args.gemini-model-name "$GEMINI_MODEL_NAME"
+        --args.qwenvl-backbone-path "$QWEN_BACKBONE_PATH"
         --args.qwenvl-simpleSG-adapter-path "$QWENVL_SIMPLE_ADAPTER_PATH"
         --args.qwenvl-groundSG-adapter-path "$QWENVL_GROUNDED_ADAPTER_PATH"
         --args.memer-adapter-path "$MEMER_ADAPTER_PATH"
@@ -384,6 +396,8 @@ run_evaluation() {
     printf '\n\n'
 
     CUDA_VISIBLE_DEVICES="$GPU_ID_CLIENT" \
+    HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" \
+    TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}" \
     MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX" \
     "$MAMBA_EXE" run -n "$MAMBA_ENV" \
     python examples/robomme/eval.py "${eval_args[@]}"

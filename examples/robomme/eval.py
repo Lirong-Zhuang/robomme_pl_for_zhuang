@@ -8,6 +8,14 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Optional, Any, TextIO, Tuple
 
+# Force Qwen/Transformers to use local files during evaluation. These must be
+# set before importing subgoal_predictor, which imports Swift.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ["IMAGE_MAX_TOKEN_NUM"] = "256"
+os.environ["VIDEO_MAX_TOKEN_NUM"] = "64"
+os.environ["FPS_MAX_FRAMES"] = "10"
+
 import numpy as np
 
 from openpi_client import websocket_client_policy as _websocket_client_policy
@@ -22,13 +30,6 @@ from utils import (
 from utils import RolloutRecorder
 from env_runner import EnvRunner
 from subgoal_predictor import build_subgoal_predictor, SubgoalPredictorBase
-
-# qwen3-vl environment variables
-os.environ['IMAGE_MAX_TOKEN_NUM'] = '256'
-os.environ['VIDEO_MAX_TOKEN_NUM'] = '64'
-os.environ['FPS_MAX_FRAMES'] = '10'
-
-
 
 @dataclasses.dataclass
 class Args:
@@ -65,6 +66,7 @@ class Args:
     # "simple_subgoal" or "grounded_subgoal" from scripts/eval.sh.
     subgoal_type: Optional[str] = None
     gemini_model_name: str = "gemini-2.5-pro"
+    qwenvl_backbone_path: str = "/data/public/qwen/Qwen3-VL-4B-Instruct"
     qwenvl_simpleSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl_baseline_v1.3_simple_subgoal/v0-20260812-185855/checkpoint-1300"
     qwenvl_groundSG_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/qwenvl/grounded_subgoal/checkpoint-1200"
     memer_adapter_path: str = "runs/ckpts/vlm_subgoal_predictor/memer/grounded_subgoal/checkpoint-1300"

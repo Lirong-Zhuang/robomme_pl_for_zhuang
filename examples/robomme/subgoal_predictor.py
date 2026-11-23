@@ -158,6 +158,7 @@ class QwenVLSubgoalPredictor(SubgoalPredictorBase):
     
     def setup_api(self) -> None:
         self.api = Qwen3VLModel(
+            model_path=self.args.qwenvl_backbone_path,
             adapter_path=self.args.qwenvl_simpleSG_adapter_path if self.args.subgoal_type == "simple_subgoal" else self.args.qwenvl_groundSG_adapter_path,
             subgoal_type=self.args.subgoal_type,
         )
@@ -209,7 +210,10 @@ class QwenVLSubgoalPredictor(SubgoalPredictorBase):
 
 class MemERSubgoalPredictor(SubgoalPredictorBase):
     def setup_api(self) -> None:
-        self.api = Qwen3VLModelMemER(adapter_path=self.args.memer_adapter_path)
+        self.api = Qwen3VLModelMemER(
+            model_path=self.args.qwenvl_backbone_path,
+            adapter_path=self.args.memer_adapter_path,
+        )
         print("[robomme] MemER agent setup finished")
     
     def start_episode(self, epstate: EpisodeState, env_runner: EnvRunner) -> None:
