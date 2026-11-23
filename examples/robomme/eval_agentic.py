@@ -1371,10 +1371,6 @@ def run_episode(
             )
             memory.commit_first_plan(task_goal=task_goal, planner_output=output)
 
-        _status(
-            f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
-            "in-task planning"
-        )
         first_call_frame = int(
             getattr(runtime.env.unwrapped, "elapsed_steps", 0)
         )
@@ -1465,10 +1461,6 @@ def run_episode(
             execution = memory.current_execution()
             if execution is None:
                 break
-            _status(
-                f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
-                f"executing decision {decision_index}: {execution['subgoal']}"
-            )
             point_yx = _grounding_point_yx(execution["grounding"])
             _record_video_observations(
                 recorder,
@@ -1680,10 +1672,6 @@ def run_episode(
                 )
                 memory.commit_followup(output)
 
-            _status(
-                f"[agentic] {task}: repeat {repeat_id}, episode {episode_id} "
-                f"verification/planning {decision_index}"
-            )
             followup_call_frame = int(
                 getattr(runtime.env.unwrapped, "elapsed_steps", 0)
             )
@@ -1696,15 +1684,6 @@ def run_episode(
                     planner_inputs=follow_inputs,
                     attempt=attempt,
                 )
-                if (
-                    execution["action_name"] in NON_REPEATABLE_RELEASE_ACTIONS
-                    and attempt.get("validation_error") is not None
-                ):
-                    _status(
-                        f"[agentic] {task}: repeat {repeat_id}, episode "
-                        f"{episode_id} verification correction "
-                        "(no additional robot movement)"
-                    )
 
             output, raw, latency, request_latency = _infer_and_commit(
                 client=client,

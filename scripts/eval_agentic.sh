@@ -23,10 +23,10 @@ TASKS="BinFill"
 # Exact comma-separated episode IDs override NUM_EPISODES. Leave empty to run
 # episode IDs 0..NUM_EPISODES-1.
 EPISODE_IDS=""
-NUM_EPISODES=1
+NUM_EPISODES=10
 
 # Repeat the same benchmark episode IDs with the same metadata seed/difficulty.
-NUM_REPEATS=1
+NUM_REPEATS=2
 
 MAX_STEPS=3000
 MAX_DECISIONS=50
@@ -46,7 +46,7 @@ GROUNDING_CAMERA_RESOLUTION="${GROUNDING_CAMERA_RESOLUTION:-768}"
 
 SAVE_DIR="runs/evaluation/agentic_v1"
 # Used exactly as written; no model-name suffix is added automatically.
-RUN_NAME="${RUN_NAME:-test_v1.7}"
+RUN_NAME="${RUN_NAME:-test_v1.9}"
 # true deletes this run directory; false resumes non-error episode records and
 # reuses an already generated task config.
 OVERWRITE=false
