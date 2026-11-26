@@ -93,7 +93,9 @@ esac
 
 VLM_MAX_TOKENS=8192
 VLM_MAX_MODEL_LEN=32768
-VLM_GPU_MEMORY_UTILIZATION=0.90
+# Target vLLM GPU memory in GiB (1 GiB = 1024 MiB). The launcher converts
+# this value to vLLM's --gpu-memory-utilization after querying the selected GPU.
+VLM_GPU_MEMORY_GB="${VLM_GPU_MEMORY_GB:-32}"
 
 F2G_ROOT="${F2G_ROOT:-$REPO_ROOT/../F2G-Pose}"
 F2G_CHECKPOINT="${F2G_CHECKPOINT:-$F2G_ROOT/weights/f2g-pose.pt}"
@@ -101,6 +103,43 @@ F2G_RADIO_REPOSITORY="${F2G_RADIO_REPOSITORY:-$F2G_ROOT/third_party_local/RADIO}
 F2G_RADIO_CHECKPOINT="${F2G_RADIO_CHECKPOINT:-$F2G_ROOT/weights/radio-v2.5-l_half.pth.tar}"
 
 CUDA_VISIBLE_DEVICES_AGENTIC="${CUDA_VISIBLE_DEVICES_AGENTIC:-0}"
+if [[ "$CUDA_VISIBLE_DEVICES_AGENTIC" == *,* ]]; then
+    echo "ERROR: CUDA_VISIBLE_DEVICES_AGENTIC must select exactly one GPU." >&2
+    exit 1
+fi
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "ERROR: nvidia-smi is required to calculate vLLM GPU memory utilization." >&2
+    exit 1
+fi
+if ! awk -v requested="$VLM_GPU_MEMORY_GB" \
+    'BEGIN { exit !(requested ~ /^[0-9]+([.][0-9]+)?$/ && requested > 0) }'; then
+    echo "ERROR: VLM_GPU_MEMORY_GB must be a positive number, got: $VLM_GPU_MEMORY_GB" >&2
+    exit 1
+fi
+if ! VLM_GPU_TOTAL_MEMORY_MIB=$(nvidia-smi \
+    --id="$CUDA_VISIBLE_DEVICES_AGENTIC" \
+    --query-gpu=memory.total \
+    --format=csv,noheader,nounits | awk 'NR == 1 { gsub(/[[:space:]]/, ""); print }'); then
+    echo "ERROR: nvidia-smi failed while querying GPU $CUDA_VISIBLE_DEVICES_AGENTIC." >&2
+    exit 1
+fi
+if [[ ! "$VLM_GPU_TOTAL_MEMORY_MIB" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Could not determine total memory for GPU $CUDA_VISIBLE_DEVICES_AGENTIC." >&2
+    exit 1
+fi
+if ! awk -v requested="$VLM_GPU_MEMORY_GB" -v total_mib="$VLM_GPU_TOTAL_MEMORY_MIB" \
+    'BEGIN { exit !(requested * 1024 < total_mib) }'; then
+    VLM_GPU_TOTAL_MEMORY_GIB=$(awk -v total_mib="$VLM_GPU_TOTAL_MEMORY_MIB" \
+        'BEGIN { printf "%.2f", total_mib / 1024 }')
+    echo "ERROR: VLM_GPU_MEMORY_GB ($VLM_GPU_MEMORY_GB GiB) must be less than GPU $CUDA_VISIBLE_DEVICES_AGENTIC total memory ($VLM_GPU_TOTAL_MEMORY_GIB GiB)." >&2
+    exit 1
+fi
+VLM_GPU_MEMORY_UTILIZATION=$(awk \
+    -v requested="$VLM_GPU_MEMORY_GB" \
+    -v total_mib="$VLM_GPU_TOTAL_MEMORY_MIB" \
+    'BEGIN { printf "%.6f", requested * 1024 / total_mib }')
+VLM_GPU_TOTAL_MEMORY_GIB=$(awk -v total_mib="$VLM_GPU_TOTAL_MEMORY_MIB" \
+    'BEGIN { printf "%.2f", total_mib / 1024 }')
 VLM_HOST="127.0.0.1"
 VLM_BIND_HOST="127.0.0.1"
 VLM_PORT=0
@@ -305,6 +344,7 @@ echo "vLLM local-media root: $RUN_MEDIA_ROOT"
 echo "Environments: VLM=$VLM_MAMBA_ENV, F2G=$F2G_MAMBA_ENV, eval=$EVAL_MAMBA_ENV"
 echo "Agentic VLM: $VLM_MODEL ($MODEL_PATH)"
 echo "VLM point coordinates: $VLM_POINT_COORDINATE_SPACE"
+echo "VLM GPU memory target: $VLM_GPU_MEMORY_GB GiB / $VLM_GPU_TOTAL_MEMORY_GIB GiB (utilization=$VLM_GPU_MEMORY_UTILIZATION)"
 
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_AGENTIC" \
 CUDA_HOME="$F2G_ENV_PREFIX" \
