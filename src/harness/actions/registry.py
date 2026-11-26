@@ -153,12 +153,10 @@ def build_action_registry() -> dict[str, CatalogAction]:
         CatalogAction(
             "solve_put_into_bin",
             solve_put_into_bin,
-            targets=(TargetBinding("container", "target_pose"),),
         ),
         CatalogAction(
             "solve_button",
             solve_button,
-            targets=(TargetBinding("button", "button_pose"),),
         ),
         CatalogAction(
             "grasp_and_lift_peg",
@@ -195,7 +193,6 @@ def build_action_registry() -> dict[str, CatalogAction]:
         CatalogAction(
             "solve_button_ready",
             solve_button_ready,
-            targets=(TargetBinding("button", "button_pose"),),
         ),
         CatalogAction("solve_hold_abs_timestep", solve_hold_abs_timestep),
         CatalogAction(

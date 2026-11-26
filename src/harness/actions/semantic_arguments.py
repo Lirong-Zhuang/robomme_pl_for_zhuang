@@ -72,6 +72,12 @@ def resolve_action_arguments(
     if action_name == "insert_peg":
         side = lateral_side_from_subgoal(subgoal)
         resolved["direction"] = -1 if side == "left" else 1
+    elif action_name == "solve_button":
+        ordinals = [word for word in ("first", "second") if word in _words(subgoal)]
+        if len(ordinals) > 1:
+            raise ValueError("button subgoal contains conflicting ordinal tokens")
+        if ordinals:
+            resolved["ordinal"] = ordinals[0]
     elif action_name == "solve_pattern_direction":
         resolved["direction"] = pattern_direction_from_subgoal(subgoal)
     elif action_name == "solve_swingonto_with_direction":

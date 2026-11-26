@@ -18,6 +18,7 @@ from mani_skill.examples.motionplanning.base_motionplanner.utils import (
 )
 from robomme.robomme_env.utils.subgoal_planner_func import _record_waypoint
 
+from .env_targets import bin_position
 from .types import Pose3D
 from .types import Size3D
 
@@ -108,15 +109,15 @@ def solve_pickup(env: Any, planner: Any, obj_pose: Pose3D, obj_size: Size3D) -> 
     return res
 
 
-def solve_put_into_bin(env: Any, planner: Any, *, target_pose: Pose3D) -> Any:
-    """Port Oracle ``solve_putonto_whenhold_binspecial``."""
+def solve_put_into_bin(env: Any, planner: Any) -> Any:
+    """Port Oracle ``solve_putonto_whenhold_binspecial`` using env GT."""
 
-    FINGER_LENGTH = 0.025
     env = env.unwrapped
 
     grasp_pose_q=env.agent.tcp.pose.q.tolist()[0]
 
-    goal_pose_P=list(target_pose.position_xyz)
+    target_position = bin_position(env)
+    goal_pose_P = target_position.copy()
     goal_pose_P[2]=0.2
     goal_pose = sapien.Pose(goal_pose_P, grasp_pose_q)
     _record_waypoint(
@@ -137,7 +138,7 @@ def solve_put_into_bin(env: Any, planner: Any, *, target_pose: Pose3D) -> Any:
     )
     planner.open_gripper()
 
-    goal_pose_P=list(target_pose.position_xyz)
+    goal_pose_P = target_position.copy()
     goal_pose_P[0]=goal_pose_P[0]-0.1
     goal_pose_P[2]=0.2
     goal_pose = sapien.Pose(goal_pose_P, grasp_pose_q)

@@ -412,6 +412,10 @@ Runtime VLM grounding boundary:
   null when the contract says not_used or fixed. For a fixed policy, the trusted
   action catalog supplies fixed_color to the perception runtime; the VLM predicts
   only the 2D point and must not repeat or override that color.
+- Both generated runtime system prompts must include this exact ordinal-boundary
+  sentence:
+  ``Keep ordinal words such as first and second in next_subgoal; never include an
+  ordinal field anywhere inside grounding.``
 - If a required target cannot be identified reliably in the current overall view,
   return status=ambiguous with that image_ref and targets={{}}; never invent a point.
   If perception.mode is none or scene_target_set, or when returning STOP, return

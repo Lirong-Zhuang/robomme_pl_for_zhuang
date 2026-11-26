@@ -29,6 +29,23 @@ def test_lateral_side_rejects_missing_or_conflicting_words() -> None:
         )
 
 
+def test_button_ordinal_is_extracted_without_visual_grounding() -> None:
+    assert resolve_action_arguments(
+        "solve_button",
+        subgoal="press the second unpressed button",
+    ) == {"ordinal": "second"}
+    assert resolve_action_arguments(
+        "solve_button",
+        subgoal="press the button",
+    ) == {}
+
+    with pytest.raises(ValueError, match="conflicting ordinal"):
+        resolve_action_arguments(
+            "solve_button",
+            subgoal="press the first and second buttons",
+        )
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

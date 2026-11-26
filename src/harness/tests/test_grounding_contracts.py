@@ -149,72 +149,21 @@ def test_normalized_1000_boundary_is_clamped_inside_image() -> None:
     assert converted["targets"]["object"]["point_xy"] == [255.0, 255.0]
 
 
-def test_adapter_uses_trusted_single_role_and_ignores_forbidden_color() -> None:
+@pytest.mark.parametrize(
+    "action_name",
+    ["solve_put_into_bin", "solve_button", "solve_button_ready"],
+)
+def test_adapter_discards_points_for_env_target_actions(action_name: str) -> None:
     adapted = _registry().adapt_vlm_output(
-        "solve_put_into_bin",
-        _point("bin", point_xy=[500, 500], color_hint="gray"),
+        action_name,
+        _point("stale_target", point_xy=[500, 500], color_hint="gray"),
     )
 
-    assert adapted == _point(
-        "container",
-        point_xy=[500.0, 500.0],
-        color_hint=None,
-    )
-
-
-def test_adapter_discards_stale_target_when_required_role_is_present() -> None:
-    adapted = _registry().adapt_vlm_output(
-        "solve_put_into_bin",
-        {
-            "status": "ok",
-            "image_ref": "current_front",
-            "targets": {
-                "object": {
-                    "point_xy": [340, 280],
-                    "color_hint": "red",
-                },
-                "container": {
-                    "point_xy": [510, 420],
-                    "color_hint": None,
-                },
-            },
-        },
-    )
-
-    assert adapted == _point(
-        "container",
-        point_xy=[510.0, 420.0],
-        color_hint=None,
-    )
-
-
-def test_adapter_does_not_relabel_a_sole_stale_role() -> None:
-    adapted = _registry().adapt_vlm_output(
-        "solve_put_into_bin",
-        _point("object", point_xy=[340, 280], color_hint="red"),
-    )
-
-    with pytest.raises(ValueError, match="roles mismatch"):
-        _registry().validate("solve_put_into_bin", adapted)
-
-
-def test_adapter_accepts_safe_grounding_shape_aliases() -> None:
-    adapted = _registry().adapt_vlm_output(
-        "solve_put_into_bin",
-        {
-            "status": "visible",
-            "image_ref": "current_overall",
-            "targets": {
-                "bin": {"x": 500, "y": 400, "color": "gray"},
-            },
-        },
-    )
-
-    assert adapted == _point(
-        "container",
-        point_xy=[500.0, 400.0],
-        color_hint=None,
-    )
+    assert adapted == {
+        "status": "not_required",
+        "image_ref": None,
+        "targets": {},
+    }
 
 
 def test_adapter_discards_points_for_action_with_no_vlm_perception() -> None:
@@ -256,6 +205,14 @@ def test_vlm_geometry_fields_are_rejected() -> None:
         _registry().validate("solve_pickup", grounding)
 
 
+def test_vlm_ordinal_inside_grounding_target_is_rejected() -> None:
+    grounding = _point("object", color_hint="red")
+    grounding["targets"]["object"]["ordinal"] = "first"
+
+    with pytest.raises(ValueError, match="point_xy and color_hint"):
+        _registry().validate("solve_pickup", grounding)
+
+
 def test_contract_rejects_wrong_roles_and_out_of_bounds_points() -> None:
     with pytest.raises(ValueError, match="roles mismatch"):
         _registry().validate("solve_push_to_target", _point("object", color_hint="red"))
@@ -279,12 +236,6 @@ def test_contract_rejects_wrong_roles_and_out_of_bounds_points() -> None:
 def test_contract_enforces_color_policy() -> None:
     with pytest.raises(ValueError, match="requires a color_hint"):
         _registry().validate("solve_pickup", _point("object"))
-
-    with pytest.raises(ValueError, match="must not use color_hint"):
-        _registry().validate(
-            "solve_put_into_bin",
-            _point("container", color_hint="white"),
-        )
 
 
 def test_peg_endpoint_color_is_limited_to_black_or_white() -> None:

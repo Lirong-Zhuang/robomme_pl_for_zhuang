@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from harness.actions.executor import ActionExecutor
+from harness.actions.env_targets import bin_position
+from harness.actions.env_targets import button_position
 from harness.actions.execution_state import insert_peg_obj_flag_from_grasped_endpoint
 from harness.actions.execution_state import move_cube_obj_flag_from_grasped_endpoint
 from harness.actions.execution_state import remember_move_cube_center_peg_grasp
@@ -102,13 +104,52 @@ def test_binding_rejects_camera_frame_target() -> None:
         action.bind(request)
 
 
+def test_bin_position_reads_board_with_hole_from_environment() -> None:
+    pose = type("Pose", (), {"p": [[0.1, 0.2, 0.3]]})()
+    actor = type("Actor", (), {"pose": pose})()
+    base = type("BinFill", (), {"board_with_hole": actor})()
+    env = type("Wrapper", (), {"unwrapped": base})()
+
+    assert bin_position(env) == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_button_position_matches_oracle_plus_task_specific_preference() -> None:
+    regular_pose = type("Pose", (), {"p": [[0.1, 0.2, 0.3]]})()
+    left_pose = type("Pose", (), {"p": [[0.4, 0.5, 0.6]]})()
+    regular = type("Actor", (), {"pose": regular_pose})()
+    left = type("Actor", (), {"pose": left_pose})()
+    base = type(
+        "ButtonUnmaskSwap",
+        (),
+        {"button": regular, "button_left": left},
+    )()
+    env = type("Wrapper", (), {"unwrapped": base})()
+
+    assert button_position(env) == pytest.approx([0.4, 0.5, 0.6])
+
+
+def test_button_position_selects_two_button_env_by_semantic_ordinal() -> None:
+    left_pose = type("Pose", (), {"p": [[0.1, 0.2, 0.3]]})()
+    right_pose = type("Pose", (), {"p": [[0.4, 0.5, 0.6]]})()
+    left = type("Actor", (), {"pose": left_pose})()
+    right = type("Actor", (), {"pose": right_pose})()
+    base = type(
+        "ButtonUnmaskSwap",
+        (),
+        {"button_left": left, "button_right": right},
+    )()
+
+    assert button_position(base, ordinal="first") == pytest.approx([0.1, 0.2, 0.3])
+    assert button_position(base, ordinal="second") == pytest.approx([0.4, 0.5, 0.6])
+
+
 def test_every_catalog_action_binds_its_explicit_parameters() -> None:
     estimate = _estimate()
     black_peg = _estimate(label="black")
     requests = {
         "solve_pickup": ActionRequest("solve_pickup", targets={"object": estimate}),
-        "solve_put_into_bin": ActionRequest("solve_put_into_bin", targets={"container": estimate}),
-        "solve_button": ActionRequest("solve_button", targets={"button": estimate}),
+        "solve_put_into_bin": ActionRequest("solve_put_into_bin"),
+        "solve_button": ActionRequest("solve_button"),
         "grasp_and_lift_peg": ActionRequest(
             "grasp_and_lift_peg", targets={"peg": estimate}
         ),
@@ -123,7 +164,7 @@ def test_every_catalog_action_binds_its_explicit_parameters() -> None:
         ),
         "solve_putonto_target": ActionRequest("solve_putonto_target", targets={"target": estimate}),
         "solve_putdown": ActionRequest("solve_putdown"),
-        "solve_button_ready": ActionRequest("solve_button_ready", targets={"button": estimate}),
+        "solve_button_ready": ActionRequest("solve_button_ready"),
         "solve_hold_abs_timestep": ActionRequest(
             "solve_hold_abs_timestep",
             arguments={"absolute_timestep": 100},

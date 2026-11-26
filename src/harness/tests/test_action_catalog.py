@@ -186,15 +186,15 @@ def test_perception_contracts_limit_vlm_to_2d_point_hints() -> None:
 def test_action_perception_roles_match_action_bindings() -> None:
     expected_roles = {
         "solve_pickup": {"object"},
-        "solve_put_into_bin": {"container"},
-        "solve_button": {"button"},
+        "solve_put_into_bin": set(),
+        "solve_button": set(),
         "grasp_and_lift_peg": {"peg"},
         "grasp_and_lift_peg_side": {"peg"},
         "solve_push_to_target_with_peg": {"object", "target"},
         "solve_push_to_target": {"object", "target"},
         "solve_putonto_target": {"target"},
         "solve_putdown": set(),
-        "solve_button_ready": {"button"},
+        "solve_button_ready": set(),
         "solve_hold_abs_timestep": set(),
         "solve_pickup_bin": {"object"},
         "solve_swingonto_whenhold": {"target"},

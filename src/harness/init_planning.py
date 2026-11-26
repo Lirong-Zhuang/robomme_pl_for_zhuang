@@ -89,6 +89,10 @@ REQUIRED_VLM_GROUNDING_SYSTEM_PHRASES = (
         "grounding.image_ref."
     ),
     (
+        "keep ordinal words such as first and second in next_subgoal; never "
+        "include an ordinal field anywhere inside grounding."
+    ),
+    (
         "every required point_xy must mark the visible centroid or geometric "
         "center of its declared target region: use the whole-object center for "
         "complete objects, the selected-part center for a requested object part, "
@@ -338,4 +342,19 @@ def validate_task_config(
         ):
             if description not in roles_text:
                 raise ValueError(f"MoveCube object_roles omit {description!r}")
+    if task_name and task_name.casefold() == "buttonunmaskswap":
+        expected_button_subgoals = {
+            "press_first_button": "press the first button",
+            "press_second_button": "press the second button",
+        }
+        actual_button_subgoals = {
+            item["subgoal_key"]: item["template"]
+            for item in subgoals
+            if item["action_name"] == "solve_button"
+        }
+        if actual_button_subgoals != expected_button_subgoals:
+            raise ValueError(
+                "ButtonUnmaskSwap must define fixed press_first_button and "
+                "press_second_button subgoals without ordinal arguments"
+            )
     return json.loads(json.dumps(config, ensure_ascii=False))

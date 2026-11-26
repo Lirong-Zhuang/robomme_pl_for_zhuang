@@ -38,13 +38,13 @@ ORACLE_ACTION_REFERENCES: dict[str, OracleReference] = {
         "solve_put_into_bin",
         _PLANNER_FUNCTIONS,
         "solve_putonto_whenhold_binspecial",
-        "Replace board_with_hole pose reads with the grounded container estimate.",
+        "Read board_with_hole pose directly from the environment, as Oracle Plus does.",
     ),
     "solve_button": OracleReference(
         "solve_button",
         _PLANNER_FUNCTIONS,
         "solve_button",
-        "Replace button actor pose reads with the grounded button estimate.",
+        "Read the semantic button actor pose directly from the environment.",
     ),
     "grasp_and_lift_peg": OracleReference(
         "grasp_and_lift_peg",
@@ -89,7 +89,7 @@ ORACLE_ACTION_REFERENCES: dict[str, OracleReference] = {
         "solve_button_ready",
         _PLANNER_FUNCTIONS,
         "solve_button_ready",
-        "Replace button actor pose reads with the grounded button estimate.",
+        "Read the semantic button actor pose directly from the environment.",
     ),
     "solve_hold_abs_timestep": OracleReference(
         "solve_hold_abs_timestep",

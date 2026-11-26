@@ -1,15 +1,48 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from harness.init_planning import build_init_planning_messages
+from harness.init_planning import validate_task_config
 from harness.prompts import build_task_init_messages
 from harness.prompts.init_prompt import DIRECT_INIT_PROMPT_VERSION
 
 
 class DirectInitPlanningPromptTests(unittest.TestCase):
+    def test_buttonunmaskswap_example_uses_fixed_button_subgoals(self) -> None:
+        resources = (
+            Path(__file__).resolve().parents[1] / "resources"
+        )
+        catalog = json.loads(
+            (resources / "action_candidates" / "action_catalog.json").read_text()
+        )
+        config = json.loads(
+            (
+                resources
+                / "task_config_examples"
+                / "task_goal_plus_keyframes.json"
+            ).read_text()
+        )
+
+        validated = validate_task_config(
+            config,
+            catalog,
+            task_name="ButtonUnmaskSwap",
+        )
+        button_subgoals = [
+            item
+            for item in validated["subgoals"]
+            if item["action_name"] == "solve_button"
+        ]
+        self.assertEqual(
+            [item["subgoal_key"] for item in button_subgoals],
+            ["press_first_button", "press_second_button"],
+        )
+        self.assertTrue(all("{" not in item["template"] for item in button_subgoals))
+
     def test_direct_prompt_has_no_tool_transport_instructions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             messages, _ = build_init_planning_messages(

@@ -316,6 +316,12 @@ BUTTON_UNMASK_SWAP_DESCRIPTION = TaskDescription(
             "container correspondence and track the same containers across the swaps."
         ),
         (
+            "Button subgoals: represent the two presses as separate fixed subgoal "
+            "keys press_first_button and press_second_button, with fixed texts "
+            "'press the first button' and 'press the second button'. Both use empty "
+            "arguments objects; never create an ordinal template argument for them."
+        ),
+        (
             "Unmasking: pick up the containers hiding the specified cube colors, in "
             "the requested order when multiple pickups are required."
         ),

@@ -23,34 +23,16 @@
       "name": "solve_put_into_bin",
       "description": "Move the currently held object above a bin opening, release it into the bin.",
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "container",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "location_grounding",
-            "point_semantics": "center of the bin opening where the held object should be released",
-            "geometry_outputs": ["position"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
       "name": "solve_button",
       "description": "Move to a specified button, close the gripper and press it, then withdraw.",
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "button",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "location_grounding",
-            "point_semantics": "center of the visible button cap to press",
-            "geometry_outputs": ["position"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
@@ -175,17 +157,8 @@
       "name": "solve_button_ready",
       "description": "Move above a specified button and hold a press-ready pose without actuating the button.",
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "button",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "location_grounding",
-            "point_semantics": "center of the visible button cap",
-            "geometry_outputs": ["position"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {

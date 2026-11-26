@@ -346,6 +346,19 @@ def _validate_task_config(
                     "MoveCube object_roles omit object description: "
                     f"{object_description!r}"
                 )
+    if TASK_NAME.casefold() == "buttonunmaskswap":
+        button_subgoals = {
+            item["subgoal_key"]: item.get("template")
+            for item in subgoals
+            if item.get("action_name") == "solve_button"
+        }
+        if button_subgoals != {
+            "press_first_button": "press the first button",
+            "press_second_button": "press the second button",
+        }:
+            raise ValueError(
+                "ButtonUnmaskSwap requires two fixed, argument-free button subgoals"
+            )
 
     prompts = config["vlm_prompts"]
     if set(prompts) != {"first_planning", "followup_planning"}:
