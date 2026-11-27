@@ -183,24 +183,24 @@ def test_perception_contracts_limit_vlm_to_2d_point_hints() -> None:
             )
 
 
-def test_action_perception_roles_match_action_bindings() -> None:
+def test_only_grasps_use_vlm_points() -> None:
     expected_roles = {
         "solve_pickup": {"object"},
         "solve_put_into_bin": set(),
         "solve_button": set(),
         "grasp_and_lift_peg": {"peg"},
         "grasp_and_lift_peg_side": {"peg"},
-        "solve_push_to_target_with_peg": {"object", "target"},
-        "solve_push_to_target": {"object", "target"},
-        "solve_putonto_target": {"target"},
+        "solve_push_to_target_with_peg": set(),
+        "solve_push_to_target": set(),
+        "solve_putonto_target": set(),
         "solve_putdown": set(),
         "solve_button_ready": set(),
         "solve_hold_abs_timestep": set(),
         "solve_pickup_bin": {"object"},
-        "solve_swingonto_whenhold": {"target"},
-        "insert_peg": {"peg", "box"},
-        "solve_pattern_direction": {"targets"},
-        "solve_swingonto_with_direction": {"targets"},
+        "solve_swingonto_whenhold": set(),
+        "insert_peg": set(),
+        "solve_pattern_direction": set(),
+        "solve_swingonto_with_direction": set(),
     }
 
     actions = _load_actions()
@@ -208,18 +208,14 @@ def test_action_perception_roles_match_action_bindings() -> None:
     for action in actions:
         roles = {target["role"] for target in action["perception"]["targets"]}
         assert roles == expected_roles[action["name"]]
+        assert action["perception"]["mode"] == ("vlm_points" if roles else "none")
 
 
 def test_peg_endpoints_require_black_or_white() -> None:
     actions = {action["name"]: action for action in _load_actions()}
 
-    for action_name in ("grasp_and_lift_peg_side", "insert_peg"):
-        peg = next(
-            target
-            for target in actions[action_name]["perception"]["targets"]
-            if target["role"] == "peg"
-        )
-        assert peg["allowed_colors"] == ["black", "white"]
+    peg, = actions["grasp_and_lift_peg_side"]["perception"]["targets"]
+    assert peg["allowed_colors"] == ["black", "white"]
 
 
 def test_catalog_covers_every_non_example_task_oracle_action() -> None:

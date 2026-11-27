@@ -37,18 +37,11 @@ Every example uses the same two-prompt runtime interface:
   current-image `grounding` object. An incomplete subgoal remains active; only a
   completed subgoal advances.
 
-The `VLM grounding` output contract uses a `grounding` object that may contain
-only one 2D `point_xy` per required semantic role plus its declared `color_hint`.
-Every point marks the visible centroid or geometric center of its declared target
-region: the whole-object center for a complete object, the selected-part center
-for an object part, or the opening/cap center for openings and buttons. Perception
-backend and geometry implementation details are intentionally absent from runtime
-VLM prompts and remain owned by the trusted harness.
-
-Both runtime system prompts fix VLM `point_xy` to the original 256x256 current
-overall image: `[x, y]`, top-left origin, x rightward, y downward. Normalized
-0-1000, resized-model, wrist-view, and earlier-observation coordinates are
-forbidden. Runtime prompts expose no other camera coordinate system.
+Only the selected grasp requires VLM `grounding`. The harness renders its role,
+color policy, and coordinate convention from the action catalog and runner settings.
+Points mark grasp centers on `current_front`. Other actions use `not_required`;
+the executor reads any needed non-grasp geometry from the simulator. The model
+still selects the action, target identity, and semantic arguments such as side.
 
 Each top-level subgoal has a unique stable `subgoal_key`. The VLM never outputs an
 action name. The harness resolves `subgoal_key` to the task config's trusted action

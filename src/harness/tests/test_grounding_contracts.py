@@ -6,6 +6,7 @@ import pytest
 
 from harness.grounding import GroundingContractRegistry
 from harness.grounding import convert_vlm_grounding_to_pixels
+from harness.grounding.contracts import pack_grasp_repair_grounding
 
 
 CATALOG_PATH = (
@@ -40,6 +41,39 @@ def _point(
 
 def _not_required() -> dict:
     return {"status": "not_required", "image_ref": None, "targets": {}}
+
+
+@pytest.mark.parametrize(
+    ("action", "role", "color"),
+    [("solve_pickup", "object", "red"), ("grasp_and_lift_peg_side", "peg", "black"),
+     ("grasp_and_lift_peg", "peg", None), ("solve_pickup_bin", "object", None)],
+)
+def test_flat_grasp_repair_uses_catalog_role_and_preserves_coordinate_validation(action, role, color) -> None:
+    registry = _registry()
+    reply = {"point_xy": [500, 250], "color_hint": color}
+    grounding = pack_grasp_repair_grounding(registry.contract(action), reply)
+    assert grounding == {"status": "ok", "image_ref": "current_front", "targets": {role: reply}}
+    pixels = convert_vlm_grounding_to_pixels(grounding, image_shape=(256, 256), coordinate_space="normalized_1000")
+    result = registry.validate(action, pixels, image_shape=(256, 256))
+    assert result["targets"][role]["point_xy"] == [128.0, 64.0]
+
+
+def test_flat_grasp_repair_does_not_turn_ambiguity_into_a_point() -> None:
+    contract = _registry().contract("solve_pickup")
+    assert pack_grasp_repair_grounding(contract, {"point_xy": None, "color_hint": None}) == {
+        "status": "ambiguous", "image_ref": "current_front", "targets": {},
+    }
+    with pytest.raises(ValueError, match="unclear grasp"):
+        pack_grasp_repair_grounding(contract, {"point_xy": None, "color_hint": "red"})
+
+
+def test_flat_grasp_repair_rejects_extra_keys_and_out_of_bounds_points() -> None:
+    contract = _registry().contract("solve_pickup")
+    with pytest.raises(ValueError, match="exactly point_xy and color_hint"):
+        pack_grasp_repair_grounding(contract, {"targets": {"point_xy": [500, 250], "color_hint": "red"}})
+    grounding = pack_grasp_repair_grounding(contract, {"point_xy": [1001, 250], "color_hint": "red"})
+    with pytest.raises(ValueError, match="inclusive 0-1000"):
+        convert_vlm_grounding_to_pixels(grounding, image_shape=(256, 256), coordinate_space="normalized_1000")
 
 
 def test_colored_pickup_accepts_only_2d_point_and_color() -> None:
@@ -215,7 +249,7 @@ def test_vlm_ordinal_inside_grounding_target_is_rejected() -> None:
 
 def test_contract_rejects_wrong_roles_and_out_of_bounds_points() -> None:
     with pytest.raises(ValueError, match="roles mismatch"):
-        _registry().validate("solve_push_to_target", _point("object", color_hint="red"))
+        _registry().validate("solve_pickup", _point("target", color_hint="red"))
 
     with pytest.raises(ValueError, match="outside image bounds"):
         _registry().validate(
@@ -266,31 +300,15 @@ def test_whole_peg_grasp_uses_no_endpoint_color() -> None:
         )
 
 
-def test_peg_push_target_uses_trusted_fixed_color_not_vlm_color() -> None:
-    grounding = {
-        "status": "ok",
-        "image_ref": "current_front",
-        "targets": {
-            "object": {"point_xy": [80, 90], "color_hint": "red"},
-            "target": {"point_xy": [160, 120], "color_hint": None},
-        },
-    }
-
-    assert _registry().validate(
-        "solve_push_to_target_with_peg",
-        grounding,
-        image_shape=(256, 256),
-    ) == grounding
-
-    grounding["targets"]["target"]["color_hint"] = "purple"
-    with pytest.raises(ValueError, match="trusted fixed_color"):
-        _registry().validate("solve_push_to_target_with_peg", grounding)
-
-
 @pytest.mark.parametrize(
     "action_name",
     [
         "solve_putdown",
+        "solve_putonto_target",
+        "solve_push_to_target_with_peg",
+        "solve_push_to_target",
+        "solve_swingonto_whenhold",
+        "insert_peg",
         "solve_hold_abs_timestep",
         "solve_pattern_direction",
         "solve_swingonto_with_direction",

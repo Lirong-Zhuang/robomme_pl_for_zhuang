@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from typing import Mapping
 
+from .env_targets import bind_environment_geometry
 from .registry import CatalogAction
 from .types import ActionRequest
 from .types import ActionResult
@@ -35,6 +36,7 @@ class ActionExecutor:
 
         # Bind before entering the collector so malformed perception data cannot
         # partially move the robot.
+        request = bind_environment_geometry(self.runtime.env, request)
         kwargs = action.bind(request)
 
         def solve() -> Any:

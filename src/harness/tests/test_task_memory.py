@@ -294,6 +294,27 @@ def test_incomplete_output_canonicalization_retains_current_subgoal(
     assert "subgoal_sequence" not in output
 
 
+def test_followup_rejects_grounding_ok_as_verification_status(tmp_path: Path) -> None:
+    memory = _memory(tmp_path)
+    memory.commit_first_plan(task_goal="Put one red cube into the bin.", planner_output=_first_plan_output())
+    output = {
+        "status": "ok",
+        "description": "The gripper visibly holds the red cube above the table.",
+        "next_subgoal_key": "put_into_bin",
+        "next_subgoal": "put it into the bin",
+        "arguments": {},
+        "grounding": _no_grounding(),
+    }
+
+    with pytest.raises(ValueError, match="top-level status must be completed, incomplete, or failed"):
+        memory.canonicalize_planner_output(output, first_plan=False)
+    assert memory.current_execution()["subgoal_key"] == "pickup_cube"
+
+    output["status"] = "completed"
+    memory.commit_followup(memory.canonicalize_planner_output(output, first_plan=False))
+    assert memory.current_execution()["subgoal_key"] == "put_into_bin"
+
+
 def test_stop_output_canonicalization_fixes_text_arguments_and_grounding_key(
     tmp_path: Path,
 ) -> None:

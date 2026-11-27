@@ -70,6 +70,15 @@ def _normalized_text(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def _verified_followup_status(value: Any) -> str:
+    if not isinstance(value, str) or value not in _FOLLOWUP_STATUSES:
+        raise ValueError(
+            f"invalid follow-up status: {value!r}; top-level status must be completed, incomplete, or failed. "
+            "Use ok only in grounding.status."
+        )
+    return value
+
+
 def _required_string(name: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
@@ -547,6 +556,8 @@ class TaskMemory:
                 normalized_status,
                 normalized_status,
             )
+        if not first_plan:
+            _verified_followup_status(output.get("status"))
 
         if first_plan:
             sequence = output.get("subgoal_sequence")
@@ -782,9 +793,7 @@ class TaskMemory:
         keyframe_save = self._keyframe_selection(planner_output)
         grounding = normalize_vlm_grounding(planner_output.get("grounding"))
 
-        status = _required_string("status", planner_output.get("status"))
-        if status not in _FOLLOWUP_STATUSES:
-            raise ValueError(f"invalid follow-up status: {status!r}")
+        status = _verified_followup_status(planner_output.get("status"))
         description = _required_string(
             "description",
             planner_output.get("description"),

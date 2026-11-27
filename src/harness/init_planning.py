@@ -62,43 +62,6 @@ FOLLOWUP_PLACEHOLDERS = {
     "{current_observation}",
     "{current_subgoal_sequence}",
 }
-REQUIRED_VLM_GROUNDING_SYSTEM_PHRASES = (
-    "vlm grounding",
-    (
-        "vlm grounding requirement is determined by the selected action's "
-        "trusted perception contract, not by the vlm."
-    ),
-    "apply pixel-grounding rules only when perception.mode=vlm_points.",
-    (
-        "for perception.mode=none, perception.mode=scene_target_set, or stop, "
-        "return exactly"
-    ),
-    "the current overall image resolution is height=256, width=256 pixels.",
-    (
-        "every point_xy must be [x, y] in original 256x256 "
-        "current-overall-image pixel coordinates, with x increasing rightward, "
-        "y increasing downward, and the origin at the top-left."
-    ),
-    (
-        "do not use normalized 0-1000 coordinates, resized-model coordinates, "
-        "wrist-image coordinates, or coordinates from subgoal-start, "
-        "demonstration, saved-keyframe, or earlier recent images."
-    ),
-    (
-        "the point must refer only to the exact current overall image named by "
-        "grounding.image_ref."
-    ),
-    (
-        "keep ordinal words such as first and second in next_subgoal; never "
-        "include an ordinal field anywhere inside grounding."
-    ),
-    (
-        "every required point_xy must mark the visible centroid or geometric "
-        "center of its declared target region: use the whole-object center for "
-        "complete objects, the selected-part center for a requested object part, "
-        "and the opening or cap center for openings and buttons."
-    ),
-)
 REQUIRED_FOLLOWUP_STATE_PHRASE = (
     "the task_state input contains only an ordered json list of previously "
     "completed subgoal texts; it never contains grounding coordinates or "
@@ -234,9 +197,6 @@ def validate_task_config(
         }:
             raise ValueError(f"{name} prompt has invalid fields")
         text = "\n".join(str(value) for value in prompt.values()).casefold()
-        for term in ("grounding", "point_xy", "color_hint"):
-            if term not in text:
-                raise ValueError(f"{name} prompt omits {term!r}")
         for forbidden_term in (
             "grounding_backend",
             "grasp_grounding",
@@ -252,13 +212,8 @@ def validate_task_config(
                 )
         system_prompt = prompt["system_prompt"]
         system_prompt_casefold = " ".join(system_prompt.casefold().split())
-        for phrase in REQUIRED_VLM_GROUNDING_SYSTEM_PHRASES:
-            normalized_phrase = " ".join(phrase.casefold().split())
-            if normalized_phrase not in system_prompt_casefold:
-                raise ValueError(
-                    f"{name} system prompt omits required VLM grounding "
-                    f"routing text: {phrase!r}"
-                )
+        if not re.search(r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?VLM grounding[ \t]*:?[ \t]*$", system_prompt):
+            raise ValueError(f"{name} system prompt must include a VLM grounding heading")
         if name == "followup_planning":
             normalized_phrase = " ".join(
                 REQUIRED_FOLLOWUP_STATE_PHRASE.casefold().split()

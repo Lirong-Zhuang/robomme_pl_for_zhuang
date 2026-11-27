@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from harness.grounding_prompt import render_followup_output
+from harness.grounding_prompt import render_grounding_prompt
 from harness.init_planning import build_init_planning_messages
 from harness.init_planning import validate_task_config
 from harness.prompts import build_task_init_messages
@@ -12,6 +14,57 @@ from harness.prompts.init_prompt import DIRECT_INIT_PROMPT_VERSION
 
 
 class DirectInitPlanningPromptTests(unittest.TestCase):
+    def test_binfill_followup_separates_verification_from_grounding(self) -> None:
+        resources = Path(__file__).resolve().parents[1] / "resources"
+        catalog = json.loads((resources / "action_candidates" / "action_catalog.json").read_text())
+        config = json.loads((resources / "task_config_examples" / "task_goal_only.json").read_text())
+        contracts = {action["name"]: action["perception"] for action in catalog["actions"]}
+        rendered = render_followup_output(config["subgoals"], contracts.__getitem__, uses_keyframes=False)
+
+        self.assertIn('top-level status to "completed", "incomplete", or "failed"', rendered)
+        self.assertIn('Use "ok", "ambiguous", and "not_required" only in grounding.status', rendered)
+        example = json.loads(rendered.splitlines()[-1])
+        self.assertEqual(example["next_subgoal_key"], "put_into_bin")
+        self.assertEqual(example["status"], "completed")
+        self.assertEqual(example["grounding"], {"status": "not_required", "image_ref": None, "targets": {}})
+
+    def test_followup_example_keeps_keyframe_field(self) -> None:
+        rendered = render_followup_output(
+            [{"subgoal_key": "press", "template": "press the first button", "action_name": "solve_button"}],
+            lambda _: {"mode": "none"},
+            uses_keyframes=True,
+        )
+        self.assertIsNone(json.loads(rendered.splitlines()[-1])["keyframe_save"])
+
+    def test_runtime_replaces_old_points_and_only_lists_grasp_keys(self) -> None:
+        resources = Path(__file__).resolve().parents[1] / "resources"
+        catalog = json.loads((resources / "action_candidates" / "action_catalog.json").read_text())
+        contracts = {action["name"]: action["perception"] for action in catalog["actions"]}
+        subgoals = [
+            {"subgoal_key": "hold_end", "action_name": "grasp_and_lift_peg_side"},
+            {"subgoal_key": "insert", "action_name": "insert_peg"},
+        ]
+        old = "Verify and advance.\n\nVLM grounding\nUse 256 pixels for insert.\n\nOutput\nReturn JSON only."
+        rendered = render_grounding_prompt(old, subgoals, contracts.__getitem__, "normalized_1000")
+        self.assertIn("hold_end: peg:", rendered)
+        self.assertIn("black/white", rendered)
+        self.assertIn("not_required", rendered)
+        self.assertIn("0–1000", rendered)
+        self.assertIn("Return JSON only.", rendered)
+        self.assertNotIn("256", rendered)
+        self.assertNotIn("insert", rendered)
+
+    def test_runtime_omits_coordinate_instructions_for_path_only_task(self) -> None:
+        rendered = render_grounding_prompt(
+            "VLM grounding\nOld grid rule.\n\nOutput\nReturn JSON only.",
+            [{"subgoal_key": "route", "action_name": "solve_swingonto_with_direction"}],
+            lambda _: {"mode": "none", "targets": []},
+            "pixel",
+        )
+        self.assertIn("For every key", rendered)
+        self.assertNotIn("point_xy", rendered)
+        self.assertNotIn("Old grid rule", rendered)
+
     def test_buttonunmaskswap_example_uses_fixed_button_subgoals(self) -> None:
         resources = (
             Path(__file__).resolve().parents[1] / "resources"

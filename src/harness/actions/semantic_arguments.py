@@ -80,6 +80,8 @@ def resolve_action_arguments(
             resolved["ordinal"] = ordinals[0]
     elif action_name == "solve_pattern_direction":
         resolved["direction"] = pattern_direction_from_subgoal(subgoal)
+    elif action_name == "solve_swingonto_whenhold":
+        resolved["side"] = lateral_side_from_subgoal(subgoal)
     elif action_name == "solve_swingonto_with_direction":
         resolved["side"] = lateral_side_from_subgoal(subgoal)
         resolved["direction"] = circling_direction_from_subgoal(subgoal)

@@ -21,7 +21,7 @@ from .task_description import get_task_description
 
 
 TASK_CONFIG_SCHEMA_VERSION = "task_config.v1"
-INIT_PROMPT_VERSION = "minimal_task_config_v24_argument_examples"
+INIT_PROMPT_VERSION = "minimal_task_config_v25_grasp_only"
 DIRECT_INIT_PROMPT_VERSION = f"{INIT_PROMPT_VERSION}_direct_json_v1"
 
 
@@ -354,79 +354,11 @@ Object-role preservation requirement:
   ambiguity; generic objects that need no special cue need not receive glossary
   entries.
 
-Runtime VLM grounding boundary:
-- Name this output contract and its section in both generated runtime system
-  prompts exactly ``VLM grounding``. The JSON field remains named grounding.
-- The selected action's trusted perception.mode determines whether VLM grounding
-  is required. The in-task VLM must never decide this from visual difficulty,
-  confidence, or its own judgment.
-- Both generated runtime system prompts must include these exact sentences:
-  ``VLM grounding requirement is determined by the selected action's trusted
-  perception contract, not by the VLM.``
-  ``Apply pixel-grounding rules only when perception.mode=vlm_points.``
-  ``For perception.mode=none, perception.mode=scene_target_set, or STOP, return
-  exactly {{"status":"not_required","image_ref":null,"targets":{{}}}}.``
-- Both generated runtime system prompts must also include these exact pixel-coordinate
-  sentences:
-  ``The current overall image resolution is height=256, width=256 pixels.``
-  ``Every point_xy must be [x, y] in original 256x256 current-overall-image pixel
-  coordinates, with x increasing rightward, y increasing downward, and the origin
-  at the top-left.``
-  ``Do not use normalized 0-1000 coordinates, resized-model coordinates,
-  wrist-image coordinates, or coordinates from subgoal-start, demonstration,
-  saved-keyframe, or earlier recent images.``
-  ``The point must refer only to the exact current overall image named by
-  grounding.image_ref.``
-- Treat each selected action's perception contract from the trusted action resource
-  as authoritative. Inline only the VLM-facing target roles, point requirements,
-  color policy, allowed colors, and point_semantics into both generated runtime
-  system prompts. Do not expose grounding_backend, segmentation profiles, geometry
-  outputs, F2G outputs, or other perception implementation details in either
-  runtime prompt; the trusted harness owns them.
-- Both generated runtime system prompts must include this exact center-point rule:
-  ``Every required point_xy must mark the visible centroid or geometric center of
-  its declared target region: use the whole-object center for complete objects, the
-  selected-part center for a requested object part, and the opening or cap center
-  for openings and buttons.``
-- Preserve every allowed_colors restriction. For a peg endpoint restricted to
-  black and white, require the in-task VLM to place point_xy inside the intended
-  half and return exactly black or white as color_hint. A whole-peg grasp instead
-  requires a point at the complete peg's visible center with color_hint=null; do
-  not transfer the endpoint contract between these two actions.
-- Treat semantic_arguments with source=subgoal_text_tokens as token contracts.
-  Generated subgoal text must visibly contain the intended semantic words. Runtime
-  extracts independent words such as left/right rather than enumerating or matching
-  the complete subgoal sentence, so do not hide those words behind synonyms.
-- Only when perception.mode=vlm_points, the in-task VLM supplies current-image 2D
-  point hints and, when requested, one color hint. It must never predict or return
-  depth, camera/world/base position, pose, orientation, Euler angles, quaternion,
-  transform matrix, metric size, point cloud, mask, contour, bounding box, backend,
-  or perception-tool choice. The harness computes all downstream geometry.
-- Every first-planning and follow-up response has a top-level grounding object with
-  exactly status, image_ref, and targets. status is ok, ambiguous, or not_required.
-  For ok, image_ref copies the exact supplied current overall-view image ID and
-  targets contains exactly the roles required by the selected action. Each target
-  contains exactly point_xy and color_hint. point_xy is [x, y] in pixels with the
-  origin at the image's top-left and must visibly lie inside the intended object.
-  color_hint is a concise visible color when the action contract requires it and is
-  null when the contract says not_used or fixed. For a fixed policy, the trusted
-  action catalog supplies fixed_color to the perception runtime; the VLM predicts
-  only the 2D point and must not repeat or override that color.
-- Both generated runtime system prompts must include this exact ordinal-boundary
-  sentence:
-  ``Keep ordinal words such as first and second in next_subgoal; never include an
-  ordinal field anywhere inside grounding.``
-- If a required target cannot be identified reliably in the current overall view,
-  return status=ambiguous with that image_ref and targets={{}}; never invent a point.
-  If perception.mode is none or scene_target_set, or when returning STOP, return
-  exactly status=not_required, image_ref=null, and targets={{}}. scene_target_set
-  delegates whole-scene candidate extraction to the perception backend and
-  therefore must not contain VLM-predicted per-target coordinates.
-- The semantic arguments object remains reserved for reusable subgoal-template and
-  action parameters. Never place image coordinates or 3D geometry in arguments or
-  in subgoal text. subgoal_sequence entries remain semantic and contain exactly
-  subgoal_key, subgoal, and arguments; only the selected next subgoal has the
-  separate top-level grounding object.
+Runtime VLM grounding:
+- In both runtime system prompts, put a short section headed exactly ``VLM grounding`` immediately before the ``Output`` heading. The harness renders its final rules from the action catalog.
+- Ground only the selected next_subgoal_key. For actions with perception.mode=vlm_points, pair a grasp key with its top-level grounding example: status, image_ref, and targets with point_xy and color_hint per required role. A required point marks the visible center of the object or selected part in the current overall image. Use ambiguous if unclear. Coordinates belong only in grounding.
+- For all other actions or STOP, show grounding as {{"status":"not_required","image_ref":null,"targets":{{}}}}. Keep the semantic target, order, side, and direction in the subgoal text and arguments as applicable. The executor supplies non-grasp geometry.
+- Use the catalog's role and color policy. Keep coordinate units and perception implementation out of the generated prompts. Copy semantic_arguments tokens such as left/right as specified by the catalog.
 
 The config must contain complete task-specific prompts for the first in-task
 planning call and for later combined verification-and-planning calls. Complete
@@ -459,7 +391,8 @@ Runtime-placeholder contract (an exact source-profile-dependent API):
   from the listed key set; arguments must never be appended to a key. For every
   subgoal, include one compact phase-appropriate JSON example: subgoal_key,
   natural-language subgoal, and arguments in first_planning, or the corresponding
-  next_subgoal fields in followup_planning. A subgoal with no template or acceptance
+  next_subgoal fields in followup_planning. Include top-level grounding in selected-action
+  examples; keep first_planning sequence-entry examples semantic. A subgoal with no template or acceptance
   placeholders must show ``"arguments":{{}}`` explicitly; a subgoal with arguments
   must show exactly its required argument names and no others. Never use
   function-call shorthand such as ``key(value)`` for either the key or subgoal text.

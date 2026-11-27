@@ -74,75 +74,26 @@
     },
     {
       "name": "solve_push_to_target_with_peg",
-      "description": "While holding a peg, use it to push or hook a cube until the cube reaches its target; the trusted runtime derives the approach direction from grounded cube/target world positions and uses the centered peg-grasp state saved by pickup.",
+      "description": "While holding a peg, push or hook the cube to its destination. The executor reads the cube and destination poses.",
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "object",
-            "point_required": true,
-            "color_hint": "required",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "visible center of the cube to move",
-            "segmentation_profile": "compact_colored",
-            "f2g_outputs": ["pose"]
-          },
-          {
-            "role": "target",
-            "point_required": true,
-            "color_hint": "fixed",
-            "fixed_color": "purple",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "center of the purple destination disk",
-            "segmentation_profile": "target",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
       "name": "solve_push_to_target",
       "description": "Use direct contact from an empty closed gripper to push a cube across the table to its target.",
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "object",
-            "point_required": true,
-            "color_hint": "required",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "visible center of the cube to push",
-            "segmentation_profile": "compact_colored",
-            "f2g_outputs": ["pose", "size"]
-          },
-          {
-            "role": "target",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "center of the destination target",
-            "segmentation_profile": "target",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
       "name": "solve_putonto_target",
       "description": "Move the currently held object above a specified target, place it onto the target, and release it.",
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "target",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "center of the placement target",
-            "segmentation_profile": "target",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
@@ -180,7 +131,8 @@
           {
             "role": "object",
             "point_required": true,
-            "color_hint": "not_used",
+            "color_hint": "fixed",
+            "fixed_color": "white",
             "grounding_backend": "grasp_grounding",
             "point_semantics": "visible center of the container body to grasp",
             "segmentation_profile": "container",
@@ -191,25 +143,22 @@
     },
     {
       "name": "solve_swingonto_whenhold",
-      "description": "While continuing to hold an object, move it above a specified target disk without releasing it.",
+      "description": "Move the held object above the robot-left or robot-right target disk without releasing it.",
+      "semantic_arguments": [
+        {
+          "name": "side",
+          "source": "subgoal_text_tokens",
+          "allowed_values": ["left", "right"]
+        }
+      ],
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "target",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "center of the destination target",
-            "segmentation_profile": "target",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
       "name": "insert_peg",
-      "description": "While holding the selected black or white peg half, ground the opposite free half, align it with the box, and insert from the side named in the subgoal. Peg endpoints are temporarily standardized as black head and white tail; the VLM must select one of those two colors.",
+      "description": "Insert the free end of the held peg into the box from the named side. The executor resolves both poses.",
       "semantic_arguments": [
         {
           "name": "direction",
@@ -219,28 +168,8 @@
         }
       ],
       "perception": {
-        "mode": "vlm_points",
-        "targets": [
-          {
-            "role": "peg",
-            "point_required": true,
-            "color_hint": "required",
-            "allowed_colors": ["black", "white"],
-            "grounding_backend": "side_grasp_grounding",
-            "point_semantics": "center of the free black or white peg half that will enter the box",
-            "segmentation_profile": "peg_colored",
-            "f2g_outputs": ["pose"]
-          },
-          {
-            "role": "box",
-            "point_required": true,
-            "color_hint": "not_used",
-            "grounding_backend": "grasp_grounding",
-            "point_semantics": "center of the insertion box opening",
-            "segmentation_profile": "box",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
@@ -254,18 +183,8 @@
         }
       ],
       "perception": {
-        "mode": "scene_target_set",
-        "targets": [
-          {
-            "role": "targets",
-            "point_required": false,
-            "color_hint": "not_used",
-            "grounding_backend": "scene_grounding",
-            "point_semantics": "not supplied by the VLM; discover the full target set",
-            "segmentation_profile": "grid_targets",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     },
     {
@@ -284,18 +203,8 @@
         }
       ],
       "perception": {
-        "mode": "scene_target_set",
-        "targets": [
-          {
-            "role": "targets",
-            "point_required": false,
-            "color_hint": "not_used",
-            "grounding_backend": "scene_grounding",
-            "point_semantics": "not supplied by the VLM; discover the full target set",
-            "segmentation_profile": "grid_targets",
-            "f2g_outputs": ["pose"]
-          }
-        ]
+        "mode": "none",
+        "targets": []
       }
     }
   ]

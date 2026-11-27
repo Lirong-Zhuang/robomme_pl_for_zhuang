@@ -52,6 +52,14 @@ git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
+After switching PL branches, update just the benchmark to the commit pinned by
+the current branch. For example, `dev_agentic` and the `rep*` branches can pin
+different benchmark commits.
+
+```bash
+git submodule update --init -- third_party/robomme_benchmark
+```
+
 Verify the result with:
 
 ```bash

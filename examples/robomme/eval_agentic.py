@@ -36,6 +36,7 @@ for root in (REPO_ROOT / "src", THIRD_PARTY_ROOT, ROBOMME_EXAMPLES_ROOT):
 from harness.actions import ActionExecutor
 from harness.actions import build_action_registry
 from harness.actions import resolve_action_arguments
+from harness.eval_metrics import summarize_episode_success
 from harness.grounding import F2GClient
 from harness.grounding import GroundingContractRegistry
 from harness.grounding import GroundingPipeline
@@ -44,7 +45,12 @@ from harness.grounding import camera_frame_from_maniskill
 from harness.grounding import convert_vlm_grounding_to_pixels
 from harness.grounding import depth_statistics
 from harness.grounding import remap_grounding_points
+from harness.grounding.contracts import pack_grasp_repair_grounding
 from harness.grounding.visualization import draw_grounding_overlay
+from harness.grounding_prompt import coordinate_instruction
+from harness.grounding_prompt import grasp_requirements
+from harness.grounding_prompt import render_followup_output
+from harness.grounding_prompt import render_grounding_prompt
 from harness.init_planning import ACTION_CATALOG_PATH
 from harness.init_planning import build_init_planning_messages
 from harness.init_planning import validate_task_config
@@ -59,37 +65,6 @@ from utils import RolloutRecorder
 
 GROUNDING_CAMERA_NAME = "grounding_camera"
 VLM_GROUNDING_IMAGE_SHAPE = (256, 256)
-NORMALIZED_1000_GROUNDING_ADAPTER = """
-
-VLM coordinate transport override for this served model:
-- Return every grounding point_xy in normalized 0-1000 coordinates for the exact
-  current overall image, with [0,0] at top-left and [1000,1000] at bottom-right.
-- This instruction supersedes only the earlier 256x256 pixel-coordinate sentences.
-  All target-role, visible-center, current-image, color, and JSON rules still apply.
-- The trusted harness converts these normalized points to the original 256x256
-  image before validation and execution. Do not perform that conversion yourself.
-"""
-FOLLOWUP_VERIFICATION_ADAPTER = """
-
-Follow-up verification transport rules:
-- The action named by current_subgoal has completed one full atomic execution
-  before this verification call. Return status as exactly completed, incomplete,
-  or failed; never use ambiguous, uncertain, unknown, success, or done.
-- Treat subgoal-start as the pre-action baseline, sliding-window observations as
-  chronological process evidence, and current_observation as the final outcome.
-  Judge completion from process and outcome together; neither replaces the other.
-- description must state the visible final outcome and may use sliding-window
-  evidence to explain how it occurred. Final occlusion or disappearance does not
-  erase a transition that the sliding window positively shows.
-- For a release or placement action, an object that followed the gripper over the
-  intended destination and is no longer held after the gripper opened is positive
-  completion evidence even when the placed object is now occluded by a bin or
-  container. Do not return incomplete solely because a correctly placed object is
-  no longer visible inside an opaque container.
-- Use incomplete only when another execution of the same atomic action is both
-  necessary and physically meaningful. Do not keep repeating a release action
-  after the gripper is already empty.
-"""
 ROBOMME_EPISODE_STATUSES = frozenset({"success", "fail", "timeout", "error"})
 NON_REPEATABLE_RELEASE_ACTIONS = frozenset(
     {"solve_put_into_bin", "solve_putonto_target", "solve_putdown"}
@@ -379,6 +354,7 @@ def _append_vlm_developer_call(
 
     calls.append(
         {
+            "phase": attempt.get("phase", "planning"),
             "frames": {
                 "current_simulator_frame": simulator_frame,
                 "observation_ids": _observation_ids(planner_inputs),
@@ -392,6 +368,11 @@ def _append_vlm_developer_call(
                 attempt.get("output", {})
                 if isinstance(attempt.get("output"), Mapping)
                 else {}
+            ),
+            "validation_error": attempt.get("validation_error"),
+            **(
+                {"raw_response": attempt["raw_response"]}
+                if attempt.get("validation_error") and "raw_response" in attempt else {}
             ),
             "description": (
                 attempt.get("output", {}).get("description")
@@ -662,6 +643,7 @@ def _build_planner_messages(
     prompt_name: str,
     inputs: Mapping[str, Any],
     point_coordinate_space: str,
+    contracts: GroundingContractRegistry,
 ) -> tuple[list[dict[str, str]], list[str]]:
     prompt = task_config["vlm_prompts"][prompt_name]
     template = prompt["user_prompt_template"]
@@ -682,16 +664,13 @@ def _build_planner_messages(
             f"planner prompt has {placeholder_count} image placeholders but "
             f"{len(image_paths)} paths"
         )
-    system_prompt = prompt["system_prompt"]
-    if point_coordinate_space == "normalized_1000":
-        system_prompt += NORMALIZED_1000_GROUNDING_ADAPTER
-    elif point_coordinate_space != "pixel":
-        raise ValueError(
-            "unsupported VLM point coordinate space: "
-            f"{point_coordinate_space!r}"
-        )
+    system_prompt = render_grounding_prompt(
+        prompt["system_prompt"], task_config["subgoals"], contracts.contract, point_coordinate_space
+    )
     if prompt_name == "followup_planning":
-        system_prompt += FOLLOWUP_VERIFICATION_ADAPTER
+        system_prompt += "\n\n" + render_followup_output(
+            task_config["subgoals"], contracts.contract, uses_keyframes=bool(task_config.get("keyframes")),
+        )
     return (
         [
             {"role": "system", "content": system_prompt},
@@ -729,6 +708,7 @@ def _validate_next_grounding(
     output: dict[str, Any],
     image_shape: tuple[int, int],
     point_coordinate_space: str,
+    repair: Any | None = None,
 ) -> None:
     key = output.get("next_subgoal_key")
     if key == "STOP":
@@ -743,26 +723,82 @@ def _validate_next_grounding(
         subgoal=output.get("next_subgoal"),
         arguments=output.get("arguments", {}),
     )
-    adapted_grounding = contracts.adapt_vlm_output(
-        resolved.action_name,
-        output.get("grounding"),
-        semantic_arguments=resolved.arguments,
-    )
-    pixel_grounding = convert_vlm_grounding_to_pixels(
-        adapted_grounding,
-        image_shape=image_shape,
-        coordinate_space=point_coordinate_space,
-    )
-    grounding = contracts.validate(
-        resolved.action_name,
-        pixel_grounding,
-        image_shape=image_shape,
-    )
-    output["grounding"] = grounding
-    if grounding["status"] == "ambiguous":
-        raise ValueError("grounding is ambiguous; select a visible target")
-    if grounding["status"] == "ok" and grounding["image_ref"] != "current_front":
-        raise ValueError("grounding.image_ref must be current_front")
+    def validate(value: Any) -> dict[str, Any]:
+        adapted = contracts.adapt_vlm_output(resolved.action_name, value, semantic_arguments=resolved.arguments)
+        pixels = convert_vlm_grounding_to_pixels(
+            adapted, image_shape=image_shape, coordinate_space=point_coordinate_space,
+        )
+        grounding = contracts.validate(resolved.action_name, pixels, image_shape=image_shape)
+        if grounding["status"] == "ambiguous":
+            raise ValueError("grounding is ambiguous; select a visible target")
+        if grounding["status"] == "ok" and grounding["image_ref"] != "current_front":
+            raise ValueError("grounding.image_ref must be current_front")
+        return grounding
+
+    try:
+        output["grounding"] = validate(output.get("grounding"))
+    except (TypeError, ValueError) as error:
+        contract = contracts.contract(resolved.action_name)
+        if repair is None or contract["mode"] != "vlm_points" or len(contract["targets"]) != 1:
+            raise
+        output["grounding"] = repair(output, contract, validate, error)
+
+
+def _grasp_repair(
+    client: AgenticVLMClient,
+    inputs: Mapping[str, Any],
+    coordinate_space: str,
+    episode_deadline: float,
+    record_attempt: Any,
+) -> Any:
+    used = False
+
+    def repair(output: dict[str, Any], contract: Mapping[str, Any], validate: Any, error: Exception) -> dict[str, Any]:
+        nonlocal used
+        if used:
+            raise error
+        used = True
+        context = {
+            key: inputs[key]
+            for key in (
+                "task_goal", "current_observations", "subgoal_start_observations", "recent_observations",
+                "current_observation", "saved_keyframe", "video_subgoal_list",
+            )
+            if key in inputs
+        }
+        messages = [
+            {"role": "system", "content": (
+                "Locate the specified grasp. Return flat JSON with exactly point_xy and color_hint. "
+                f"{coordinate_instruction(coordinate_space)} "
+                'If unclear, return {"point_xy":null,"color_hint":null}.'
+            )},
+            {"role": "user", "content": (
+                f"Grasp: {output['next_subgoal']}\n{grasp_requirements(contract)}\n{_render_value(context)}"
+            )},
+        ]
+        images = _collect_images(context)
+        reply, raw, latency, request_latency = client.infer_json(
+            messages=messages, images=images, planning_phase="in_task_planning",
+            timeout_seconds=_remaining_episode_seconds(episode_deadline),
+        )
+        grounding = None
+        validation_error = None
+        try:
+            grounding = pack_grasp_repair_grounding(contract, reply)
+            return validate(grounding)
+        except (TypeError, ValueError) as repair_error:
+            validation_error = str(repair_error)
+            raise
+        finally:
+            record_attempt({
+                "phase": "grasp_repair",
+                "messages": messages, "images": images, "raw_response": raw,
+                "output": {"next_subgoal": output["next_subgoal"], "grounding": grounding},
+                "vlm_latency_ms": latency, "request_to_json_ms": request_latency,
+                "validation_error": validation_error,
+            })
+
+    return repair
 
 
 def _canonicalize_planner_subgoals(
@@ -791,11 +827,10 @@ def _infer_and_commit(
     validate_and_commit: Any,
     attempt_callback: Any | None = None,
     episode_deadline: float | None = None,
-    retry_until_deadline: bool = False,
 ) -> tuple[dict[str, Any], str, float, float]:
     last_error: Exception | None = None
     attempt = 0
-    while retry_until_deadline or attempt < attempts:
+    while attempt < attempts:
         attempt += 1
         request_messages = [dict(message) for message in messages]
         if last_error is not None:
@@ -843,9 +878,9 @@ def _infer_and_commit(
                         "validation_error": f"{type(error).__name__}: {error}",
                     }
                 )
-            last_error = error
-            if not retry_until_deadline and attempt == attempts:
+            if attempt == attempts or (type(last_error) is type(error) and str(last_error) == str(error)):
                 raise
+            last_error = error
         else:
             if attempt_callback is not None:
                 attempt_callback(
@@ -1352,6 +1387,7 @@ def run_episode(
             prompt_name="first_planning",
             inputs=first_inputs,
             point_coordinate_space=args.vlm_point_coordinate_space,
+            contracts=contracts,
         )
         image_shape = initial_pairs[-1][0].shape[:2]
         if image_shape != VLM_GROUNDING_IMAGE_SHAPE:
@@ -1368,6 +1404,7 @@ def run_episode(
                 output,
                 image_shape,
                 args.vlm_point_coordinate_space,
+                repair=repair_first_grasp,
             )
             memory.commit_first_plan(task_goal=task_goal, planner_output=output)
 
@@ -1384,6 +1421,9 @@ def run_episode(
                 attempt=attempt,
             )
 
+        repair_first_grasp = _grasp_repair(
+            client, first_inputs, args.vlm_point_coordinate_space, episode_deadline, record_first_attempt,
+        )
         first_output, raw, latency, request_latency = _infer_and_commit(
             client=client,
             messages=messages,
@@ -1648,6 +1688,7 @@ def run_episode(
                 prompt_name="followup_planning",
                 inputs=follow_inputs,
                 point_coordinate_space=args.vlm_point_coordinate_space,
+                contracts=contracts,
             )
 
             def commit_followup(output: dict[str, Any], _attempt: int) -> None:
@@ -1669,6 +1710,7 @@ def run_episode(
                     output,
                     current_image_shape,
                     args.vlm_point_coordinate_space,
+                    repair=repair_followup_grasp,
                 )
                 memory.commit_followup(output)
 
@@ -1685,6 +1727,9 @@ def run_episode(
                     attempt=attempt,
                 )
 
+            repair_followup_grasp = _grasp_repair(
+                client, follow_inputs, args.vlm_point_coordinate_space, episode_deadline, record_followup_attempt,
+            )
             output, raw, latency, request_latency = _infer_and_commit(
                 client=client,
                 messages=messages,
@@ -1694,9 +1739,6 @@ def run_episode(
                 validate_and_commit=commit_followup,
                 attempt_callback=record_followup_attempt,
                 episode_deadline=episode_deadline,
-                retry_until_deadline=(
-                    execution["action_name"] in NON_REPEATABLE_RELEASE_ACTIONS
-                ),
             )
             if memory.uses_keyframes:
                 candidates = [
@@ -1955,7 +1997,6 @@ def main() -> None:
                     task_name=task,
                 )
             else:
-                _status(f"[agentic] {task}: init planning")
                 task_config = _generate_task_config(
                     task=task,
                     output_path=path,
@@ -1968,6 +2009,7 @@ def main() -> None:
                         run_dir / "vlm_logs" / f"{task}_init_planning.json"
                     ),
                 )
+                _status(f"[agentic] {task}: init planning finished")
             for repeat_id, task_name, episode_id in requested:
                 key = (repeat_id, task_name, episode_id)
                 if key in completed:
@@ -2014,7 +2056,7 @@ def main() -> None:
             progress.close()
 
     metrics = client.metrics()
-    successes = sum(record["status"] == "success" for record in records)
+    success_metrics = summarize_episode_success(records)
     summary = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "framework": "agentic_opencv_f2g_oracle_actions",
@@ -2022,13 +2064,7 @@ def main() -> None:
         "episode_ids": episode_ids,
         "num_repeats": args.num_repeats,
         "max_episode_seconds": args.max_episode_seconds,
-        "episodes": len(records),
-        "successes": successes,
-        "success_rate": successes / len(records) if records else 0,
-        "status_counts": {
-            status: sum(record["status"] == status for record in records)
-            for status in sorted({record["status"] for record in records})
-        },
+        **success_metrics,
         "environments": {
             "vlm": "vllm",
             "f2g": "f2g",
@@ -2044,9 +2080,9 @@ def main() -> None:
     }
     _write_json(run_dir / "summary.json", summary)
     client.close()
-    error_count = sum(record["status"] == "error" for record in records)
+    error_count = success_metrics["status_counts"].get("error", 0)
     _status(
-        f"[agentic] evaluation complete: {successes}/{len(records)} successful, "
+        f"[agentic] evaluation complete: {success_metrics['successes']}/{len(records)} successful, "
         f"{error_count} errors"
     )
     if error_count:

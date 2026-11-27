@@ -162,6 +162,11 @@ SWING_XTIMES_DESCRIPTION = TaskDescription(
             "target remains gray; when the cube moves above the other target, that "
             "target may turn red and the previous target may return to gray."
         ),
+        (
+            "After the final swing, set the cube down on the last target or the nearby tabletop. "
+            "Press the button only once the cube is resting and the empty gripper has lifted clear, "
+            "even if the task goal omits the release."
+        ),
     ),
 )
 

@@ -369,49 +369,8 @@ def _validate_task_config(
     for prompt_name in ("first_planning", "followup_planning"):
         system_prompt = prompts[prompt_name]["system_prompt"]
         system_prompt_casefold = " ".join(system_prompt.casefold().split())
-        for required_vlm_grounding_phrase in (
-            "vlm grounding",
-            (
-                "vlm grounding requirement is determined by the selected "
-                "action's trusted perception contract, not by the vlm."
-            ),
-            "apply pixel-grounding rules only when perception.mode=vlm_points.",
-            (
-                "for perception.mode=none, perception.mode=scene_target_set, "
-                "or stop, return exactly"
-            ),
-            "the current overall image resolution is height=256, width=256 pixels.",
-            (
-                "every point_xy must be [x, y] in original 256x256 "
-                "current-overall-image pixel coordinates, with x increasing "
-                "rightward, y increasing downward, and the origin at the top-left."
-            ),
-            (
-                "do not use normalized 0-1000 coordinates, resized-model "
-                "coordinates, wrist-image coordinates, or coordinates from "
-                "subgoal-start, demonstration, saved-keyframe, or earlier "
-                "recent images."
-            ),
-            (
-                "the point must refer only to the exact current overall image "
-                "named by grounding.image_ref."
-            ),
-            (
-                "every required point_xy must mark the visible centroid or "
-                "geometric center of its declared target region: use the "
-                "whole-object center for complete objects, the selected-part "
-                "center for a requested object part, and the opening or cap "
-                "center for openings and buttons."
-            ),
-        ):
-            normalized_phrase = " ".join(
-                required_vlm_grounding_phrase.casefold().split()
-            )
-            if normalized_phrase not in system_prompt_casefold:
-                raise ValueError(
-                    f"{prompt_name} system prompt omits required VLM grounding "
-                    f"routing text: {required_vlm_grounding_phrase!r}"
-                )
+        if not re.search(r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?VLM grounding[ \t]*:?[ \t]*$", system_prompt):
+            raise ValueError(f"{prompt_name} system prompt must include a VLM grounding heading")
         if prompt_name == "followup_planning":
             required_state_phrase = (
                 "the task_state input contains only an ordered json list of "
@@ -478,16 +437,6 @@ def _validate_task_config(
     for prompt_name in ("first_planning", "followup_planning"):
         prompt_text = "\n".join(prompts[prompt_name].values())
         prompt_text_casefold = prompt_text.casefold()
-        for required_grounding_term in (
-            "grounding",
-            "point_xy",
-            "color_hint",
-        ):
-            if required_grounding_term not in prompt_text_casefold:
-                raise ValueError(
-                    f"{prompt_name} prompt omits the 2D grounding contract term "
-                    f"{required_grounding_term!r}"
-                )
         for forbidden_perception_term in (
             "grounding_backend",
             "grasp_grounding",
@@ -500,16 +449,6 @@ def _validate_task_config(
                 raise ValueError(
                     f"{prompt_name} prompt exposes harness-owned perception "
                     f"detail {forbidden_perception_term!r}"
-                )
-        for forbidden_vlm_output in (
-            "never return depth",
-            "pose",
-            "metric size",
-        ):
-            if forbidden_vlm_output not in prompt_text_casefold:
-                raise ValueError(
-                    f"{prompt_name} prompt does not prohibit VLM geometry output: "
-                    f"{forbidden_vlm_output!r}"
                 )
         mentions_keyframe_save = "keyframe_save" in prompt_text
         if mentions_keyframe_save != uses_keyframes:

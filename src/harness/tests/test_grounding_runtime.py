@@ -15,6 +15,7 @@ from harness.grounding.observation import remap_grounding_points
 from harness.grounding.transforms import object_to_world
 from harness.grounding.transforms import rotation_matrix_to_quaternion_wxyz
 from harness.grounding.types import CameraFrame
+from harness.grounding.types import F2GPrediction
 from harness.grounding.types import SegmentationResult
 
 
@@ -210,7 +211,11 @@ def test_object_to_world_uses_world_to_camera_extrinsic() -> None:
 
 @pytest.mark.parametrize(
     "action_name",
-    ["solve_put_into_bin", "solve_button", "solve_button_ready"],
+    [
+        "solve_put_into_bin", "solve_button", "solve_button_ready", "solve_putonto_target",
+        "solve_push_to_target", "solve_push_to_target_with_peg", "solve_swingonto_whenhold",
+        "insert_peg", "solve_pattern_direction", "solve_swingonto_with_direction",
+    ],
 )
 def test_env_target_actions_require_no_grounding_backend(action_name: str) -> None:
     class ForbiddenSegmenter:
@@ -253,6 +258,31 @@ def _synthetic_frame(rgb: np.ndarray, depth_mm: np.ndarray) -> CameraFrame:
         world_to_camera=np.eye(4),
         depth_scale=0.001,
     )
+
+
+def test_unmask_pickup_uses_trusted_white_without_a_vlm_color() -> None:
+    class RecordingF2G:
+        def predict(self, frame: CameraFrame, mask: np.ndarray) -> F2GPrediction:
+            assert mask[30, 30]
+            assert not mask[30, 68]
+            assert not mask[10, 10]
+            return F2GPrediction(np.eye(4), np.full(3, 0.05))
+
+    rgb = np.full((256, 256, 3), [215, 133, 85], dtype=np.uint8)
+    rgb[20:40, 20:40] = [231, 231, 231]
+    rgb[20:40, 58:78] = [231, 231, 231]
+    frame = _synthetic_frame(rgb, np.full((256, 256), 700, dtype=np.int16))
+    result = GroundingPipeline(f2g_client=RecordingF2G()).build_action_request(
+        action_name="solve_pickup_bin",
+        grounding={
+            "status": "ok",
+            "image_ref": "current_front",
+            "targets": {"object": {"point_xy": [30, 30], "color_hint": None}},
+        },
+        frame=frame,
+    )
+    assert result.masks["object"].diagnostics["color"] == "white"
+    assert result.masks["object"].diagnostics["mask_rule"] == "low_saturation_high_value"
 
 
 def test_colored_profile_selects_nearest_matching_component() -> None:

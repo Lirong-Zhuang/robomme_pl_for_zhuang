@@ -54,6 +54,21 @@ def _required_string(name: str, value: Any) -> str:
     return value.strip()
 
 
+def pack_grasp_repair_grounding(contract: Mapping[str, Any], reply: Any) -> dict[str, Any]:
+    """Bind a flat grasp reply to its trusted role and current image."""
+    if contract.get("mode") != "vlm_points" or len(contract["targets"]) != 1:
+        raise ValueError("flat grasp repair requires exactly one VLM target role")
+    if not isinstance(reply, Mapping) or set(reply) != _GROUNDING_TARGET_FIELDS:
+        raise ValueError("grasp repair must contain exactly point_xy and color_hint")
+    if reply["point_xy"] is None:
+        if reply["color_hint"] is not None:
+            raise ValueError("an unclear grasp requires point_xy=null and color_hint=null")
+        return {"status": "ambiguous", "image_ref": "current_front", "targets": {}}
+
+    role = contract["targets"][0]["role"]
+    return {"status": "ok", "image_ref": "current_front", "targets": {role: dict(reply)}}
+
+
 def normalize_vlm_grounding(value: Any) -> dict[str, Any]:
     """Normalize the complete VLM-owned payload and reject any 3D fields."""
 
